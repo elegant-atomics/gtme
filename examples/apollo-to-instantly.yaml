@@ -1,0 +1,56 @@
+# The pipeline from SPEC §9, ready to run once the four credentials are set:
+#
+#   gtm secret set APOLLO_API_KEY
+#   gtm secret set HARVEST_API_KEY
+#   gtm secret set ANTHROPIC_API_KEY
+#   gtm secret set INSTANTLY_API_KEY
+#
+#   gtm plan examples/apollo-to-instantly.yaml   # free: no calls, no spend
+#   gtm run  examples/apollo-to-instantly.yaml   # spends money and adds real leads
+#
+# The Instantly campaign must already exist; the deliver step resolves its name
+# to an id once per run and fails if there is no match. Delivery is keyed on
+# email, so re-running never adds the same person twice.
+name: apollo-to-instantly
+version: 1
+
+source:
+  use: apollo/search
+  with:
+    query: "vp marketing, saas, 50-200 employees"
+    titles: ["vp marketing", "head of marketing"]
+    employee_ranges: ["50,200"]
+    limit: 500
+
+steps:
+  - id: icp-filter
+    use: ai/filter
+    uses: [full_name, title, company_domain]
+    with:
+      prompt: >
+        Keep only contacts likely to own outbound tooling decisions.
+      batch_size: 25
+
+  - id: linkedin
+    use: harvest/profile
+    when: icp-filter.passed
+    cache: 30d
+    with:
+      posts_limit: 3
+
+  - id: personalize
+    use: ai/compose
+    when: icp-filter.passed
+    uses: [recent_posts, role_history]
+    with:
+      prompt: >
+        Write first_line and ps_line using recent_posts and role_history.
+        first_line references something specific and recent; ps_line is one
+        short, low-pressure sentence. No flattery, no exclamation marks.
+      batch_size: 25
+
+deliver:
+  use: instantly/add-to-campaign
+  with:
+    campaign: "Q3 VP Marketing"
+  idempotency: email

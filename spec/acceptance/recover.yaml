@@ -1,0 +1,14 @@
+story: recover
+invariant: >
+  A killed run picks up where it left off, never redoing completed, paid-for
+  work.
+given: >
+  A run killed or crashed partway through (some records past a step, some not).
+when: >
+  The operator runs `gtm run pipeline.yaml --resume RUN_ID`.
+then: >
+  Every record whose `run_records.state` already reflects completion of a step
+  does not re-invoke that step's adapter or incur that step's cost again, and
+  the run reaches `status='done'` covering the records that had not yet
+  completed.
+spec_refs: ["§3", "§5", "§8", "§11 M3"]

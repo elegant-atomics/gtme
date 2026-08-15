@@ -1,0 +1,16 @@
+story: top-up
+invariant: >
+  Re-running a pipeline against overlapping data costs less and delivers
+  nothing twice.
+given: >
+  A completed run whose identities are still within their adapters' freshness
+  windows.
+when: >
+  The operator runs the same pipeline.yaml again (e.g. against an updated
+  source with some overlap).
+then: >
+  Every overlapping identity's enrich/verify steps are skipped via
+  `step_events.event='skipped_cache'` (§7), the receipt reports cost avoided
+  > 0, and no identity that was already in `deliveries` for this target
+  produces a second `deliveries` row (§8 idempotency).
+spec_refs: ["§7", "§8", "§11 M2", "§11 M4"]

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-open.schema.json",
+  "title": "OPEN (runner → adapter)",
+  "description": "First message of every adapter session (SPEC.md §5). Derived from internal/protocol.Message: every field but `type` carries `omitempty`, so an OPEN with an empty config omits the key entirely.",
+  "type": "object",
+  "required": ["type"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "OPEN"},
+    "step_id": {"type": "string", "description": "The pipeline step id this session serves."},
+    "run_id": {"type": "string", "description": "ULID of the run."},
+    "config": {"type": "object", "description": "The step's resolved `with:` block, validated against the manifest's config_schema before it is sent."}
+  }
+}

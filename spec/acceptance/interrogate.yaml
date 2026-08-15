@@ -1,0 +1,12 @@
+story: interrogate
+invariant: >
+  What the system knows about one record is always one command away.
+given: >
+  An identity with field values from more than one adapter.
+when: >
+  The operator runs `gtm show <identity-key> --provenance`.
+then: >
+  The output lists every current field value (per the `current_fields` view,
+  §3) together with its source adapter, confidence, and the run that wrote it,
+  and the command performs no ledger write.
+spec_refs: ["§3", "§8 gtm show", "ADR-003", "ADR-006"]

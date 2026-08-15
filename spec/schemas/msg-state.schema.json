@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-state.schema.json",
+  "title": "STATE (adapter → runner)",
+  "description": "A resumable source's cursor (SPEC.md §5), so a re-run can pick up where the last one stopped.",
+  "type": "object",
+  "required": ["type", "cursor"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "STATE"},
+    "cursor": {"type": "object", "description": "Opaque to the runner; meaningful only to the adapter that wrote it."}
+  }
+}

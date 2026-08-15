@@ -1,0 +1,20 @@
+{
+  "id": "csv/source",
+  "version": 1,
+  "role": "source",
+  "entity_type": "person",
+  "provides": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "config_schema": {
+    "type": "object",
+    "required": ["path"],
+    "additionalProperties": false,
+    "properties": {
+      "path": {"type": "string", "description": "CSV file to read; header row names the fields"},
+      "entity_type": {"type": "string", "enum": ["person", "company"]},
+      "limit": {"type": "integer", "minimum": 1}
+    }
+  }
+}

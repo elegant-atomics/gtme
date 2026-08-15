@@ -1,0 +1,29 @@
+{
+  "id": "ai/filter",
+  "version": 1,
+  "role": "filter",
+  "entity_type": "person",
+  "needs": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "config_schema": {
+    "type": "object",
+    "required": ["prompt"],
+    "additionalProperties": false,
+    "properties": {
+      "prompt": {"type": "string", "description": "What to keep, in the operator's words"},
+      "batch_size": {"type": "integer", "minimum": 1},
+      "engine": {"type": "string", "enum": ["api", "claude-code"]},
+      "model": {"type": "string"},
+      "max_tokens": {"type": "integer", "minimum": 256},
+      "fields": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Restrict what the model sees to these fields (default: everything known)"
+      }
+    }
+  },
+  "batch": true,
+  "credentials_optional": ["ANTHROPIC_API_KEY"]
+}

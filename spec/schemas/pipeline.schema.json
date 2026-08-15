@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/pipeline.schema.json",
+  "title": "pipeline.yaml",
+  "description": "The only pipeline authoring surface in v0 (SPEC.md §9, ADR-005). Validate the YAML document after decoding it to JSON. Derived from internal/pipeline.Pipeline, which decodes with KnownFields(true) — hence additionalProperties: false — plus the `uses:` key mandated by ADR-004, which the planner does not consume yet.",
+  "type": "object",
+  "required": ["name", "source"],
+  "additionalProperties": false,
+  "not": {
+    "required": ["waterfall"],
+    "description": "`waterfall:` is reserved syntax: the parser MUST accept the key and reject it with 'not implemented in v0' (SPEC.md §9), so a document carrying it is not a valid v0 pipeline."
+  },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Pipeline name; recorded in runs.pipeline."
+    },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Format version. Defaults to 1 when omitted; v0 understands only 1."
+    },
+    "source": {
+      "$ref": "#/definitions/step",
+      "description": "The one source step. Required. `when:` is not allowed on it."
+    },
+    "steps": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/step"},
+      "description": "Middle steps, executed strictly in order."
+    },
+    "deliver": {
+      "$ref": "#/definitions/step",
+      "description": "The optional delivery step."
+    },
+    "waterfall": {
+      "description": "Reserved (SPEC.md §9). Present only so v1 can add it without a format break; any value here MUST be rejected in v0."
+    }
+  },
+  "definitions": {
+    "step": {
+      "type": "object",
+      "required": ["use"],
+      "additionalProperties": false,
+      "not": {
+        "required": ["waterfall"],
+        "description": "Reserved on a step too; rejected in v0."
+      },
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Step id, unique within the pipeline. Defaults to 'source' / 'step-N' / 'deliver'."
+        },
+        "use": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adapter id, e.g. 'harvest/profile'."
+        },
+        "with": {
+          "type": "object",
+          "description": "The step's config, validated against the adapter's config_schema. Sent as OPEN.config."
+        },
+        "uses": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "ADR-004: an AI step's dynamic needs. Valid only on steps whose adapter role is filter/compose or another AI-backed role. The planner MUST validate it exactly as needs.required (SPEC.md §7), and at execution time the projected fields object MUST be built from `uses` rather than from the manifest's open-ended `needs`."
+        },
+        "when": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.\\-]+\\.passed$",
+          "description": "Gate. v0 supports only '<step_id>.passed', referencing an earlier step."
+        },
+        "cache": {
+          "type": "string",
+          "pattern": "^[0-9]+d$",
+          "description": "Freshness-window override for this step, e.g. '30d'."
+        },
+        "idempotency": {
+          "type": "string",
+          "description": "Deliver steps: the field whose value keys a delivery. Defaults to the identity key (SPEC.md §8)."
+        },
+        "waterfall": {
+          "description": "Reserved (SPEC.md §9); rejected in v0."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+story: guard
+invariant: >
+  A pipeline that would fail or overspend is caught before it starts, not
+  partway through.
+given: >
+  A pipeline.yaml with a step whose `needs.required` (or `uses`, for AI steps)
+  is not satisfied by any upstream `provides`.
+when: >
+  The operator runs `gtm plan`.
+then: >
+  The command exits non-zero with an error naming the specific step and field
+  (§7), performs zero network calls, and writes zero cost rows — the same
+  guarantee holds for an unresolvable declared credential (§6).
+spec_refs: ["§6", "§7", "§8 exit codes", "ADR-004"]

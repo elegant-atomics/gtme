@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-end.schema.json",
+  "title": "END (both directions)",
+  "description": "Terminates a stream (SPEC.md §5). Runner → adapter it means 'no more input'; adapter → runner it means 'no more output'. It carries nothing else.",
+  "type": "object",
+  "required": ["type"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "END"}
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-schema.schema.json",
+  "title": "SCHEMA (adapter → runner)",
+  "description": "An adapter's first message: the JSON Schema for the fields it will provide (SPEC.md §5). A deliver adapter that learns nothing still sends one, with an empty properties object.",
+  "type": "object",
+  "required": ["type", "provides"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "SCHEMA"},
+    "provides": {"type": "object", "description": "A JSON Schema document describing the adapter's output fields."}
+  }
+}

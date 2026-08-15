@@ -1,0 +1,47 @@
+{
+  "id": "apollo/search",
+  "version": 1,
+  "role": "source",
+  "entity_type": "person",
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "email": {"type": "string"},
+      "first_name": {"type": "string"},
+      "last_name": {"type": "string"},
+      "full_name": {"type": "string"},
+      "title": {"type": "string"},
+      "seniority": {"type": "string"},
+      "linkedin_url": {"type": "string"},
+      "city": {"type": "string"},
+      "state": {"type": "string"},
+      "country": {"type": "string"},
+      "company_name": {"type": "string"},
+      "company_domain": {"type": "string"},
+      "company_website": {"type": "string"},
+      "company_linkedin_url": {"type": "string"},
+      "company_employees": {"type": "integer"},
+      "company_industry": {"type": "string"},
+      "apollo_id": {"type": "string"},
+      "email_status": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "query": {"type": "string", "description": "Free-text search, e.g. \"vp marketing, saas, 50-200 employees\""},
+      "limit": {"type": "integer", "minimum": 1, "description": "Stop after this many people"},
+      "titles": {"type": "array", "items": {"type": "string"}, "description": "person_titles"},
+      "seniorities": {"type": "array", "items": {"type": "string"}, "description": "person_seniorities"},
+      "locations": {"type": "array", "items": {"type": "string"}, "description": "organization_locations"},
+      "employee_ranges": {"type": "array", "items": {"type": "string"}, "description": "organization_num_employees_ranges, e.g. \"50,200\""},
+      "domains": {"type": "array", "items": {"type": "string"}, "description": "q_organization_domains"},
+      "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+      "base_url": {"type": "string", "description": "Override the API host (testing)"}
+    }
+  },
+  "credentials": ["APOLLO_API_KEY"],
+  "cost_estimate_usd": 0
+}

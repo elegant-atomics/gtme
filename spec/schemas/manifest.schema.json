@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/manifest.schema.json",
+  "title": "Adapter manifest.json",
+  "description": "An adapter's contract (SPEC.md §6). Built-ins embed theirs; external adapters ship it next to the `run` executable in ~/.gtm/adapters/<name>/. Derived from internal/adapters.Manifest, which decodes with DisallowUnknownFields — hence additionalProperties: false here.",
+  "type": "object",
+  "required": ["id", "version", "role", "entity_type"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Adapter id, e.g. 'harvest/profile'. Provenance written to field_values.source is '<id>@<version>'."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Manifest version; part of the provenance string."
+    },
+    "role": {
+      "enum": ["source", "filter", "enrich", "verify", "compose", "deliver"],
+      "description": "What the adapter does in a pipeline. Only enrich/verify are cache-skippable (SPEC.md §7)."
+    },
+    "entity_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "'person' | 'company' (extensible)."
+    },
+    "needs": {
+      "type": "object",
+      "description": "JSON Schema for the projection the runner builds and hands in. `needs.required` is what the planner checks (SPEC.md §7). An object with additionalProperties:true and no properties is the needs-all wildcard."
+    },
+    "provides": {
+      "type": "object",
+      "description": "JSON Schema for the fields the adapter produces. Output RECORD fields are validated against it before the ledger write (SPEC.md §5)."
+    },
+    "credentials": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Env var names the runner MUST inject. A missing one is a plan-time error (SPEC.md §6)."
+    },
+    "credentials_optional": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Injected when present, never blocks a plan (SPEC.md §6). Used by adapters that can work several ways, e.g. an AI step with a local engine."
+    },
+    "config_schema": {
+      "type": "object",
+      "description": "JSON Schema for the step's `with:` block."
+    },
+    "freshness_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Default cache window for the fields this adapter provides; overridable per step with `cache:` (SPEC.md §6, §9)."
+    },
+    "emits_key_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Sources only: which output fields the runner should build the identity key from (SPEC.md §6)."
+    },
+    "cost_estimate_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Static per-record cost estimate. `gtm plan` prints '?' when absent (SPEC.md §7)."
+    },
+    "batch": {
+      "type": "boolean",
+      "description": "Marks adapters the runner must feed in batches — the AI steps — one invocation per batch_size records (SPEC.md §6, §9)."
+    }
+  }
+}

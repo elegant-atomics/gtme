@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-record-in.schema.json",
+  "title": "RECORD (runner → adapter)",
+  "description": "One record handed to a non-source adapter (SPEC.md §5). `fields` is exactly the projection of the adapter's `needs` (or of the step's `uses:`, ADR-004) — nothing more. The runner always canonicalizes and sends `key`; sources never receive this message.",
+  "type": "object",
+  "required": ["type", "key"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "RECORD"},
+    "key": {"$ref": "#/definitions/key"},
+    "fields": {"type": "object", "description": "Projection of the step's needs/uses. Omitted when the projection is empty."}
+  },
+  "definitions": {
+    "key": {
+      "type": "object",
+      "required": ["entity_type", "identity_key"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_type": {"type": "string", "description": "'person' | 'company' (extensible), SPEC.md §4."},
+        "identity_key": {"type": "string", "description": "Canonical identity key, SPEC.md §4."}
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+story: report
+invariant: >
+  What happened in a run, and what it cost, is always reconstructable after the
+  fact.
+given: >
+  One or more completed runs.
+when: >
+  The operator runs `gtm runs` (to list) or `gtm runs RUN_ID` (for one run's
+  receipt).
+then: >
+  The output reports, per step: records in/out, cache skips, and cost —
+  matching the sums in `step_events` and `costs` for that `run_id` exactly,
+  with no reconstruction required from raw table scans.
+spec_refs: ["§3", "§8 terminal receipt", "§11 M6"]

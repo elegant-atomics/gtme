@@ -1,0 +1,34 @@
+{
+  "id": "mock-enrich-py",
+  "version": 1,
+  "role": "enrich",
+  "entity_type": "person",
+  "needs": {
+    "type": "object",
+    "properties": {
+      "email": {"type": "string"},
+      "full_name": {"type": "string"}
+    }
+  },
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mock_score": {"type": "integer", "minimum": 0, "maximum": 100},
+      "mock_note": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "note": {"type": "string"},
+      "fail_on": {
+        "type": "string",
+        "description": "identity_key that makes this adapter exit non-zero, for resume tests"
+      }
+    }
+  },
+  "freshness_days": 30,
+  "cost_estimate_usd": 0
+}

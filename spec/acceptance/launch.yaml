@@ -1,0 +1,16 @@
+# Transcribed from SPEC.md "Operator stories — acceptance criteria" (ADR-012,
+# normative). Keep the wording here faithful to the prose; these files exist so
+# the criteria are structured data, not so they diverge.
+story: launch
+invariant: >
+  Starting a new pipeline against fresh data produces a receipted run and a
+  ledger that now knows those identities.
+given: >
+  A valid pipeline.yaml and a source with records the ledger has never seen.
+when: >
+  The operator runs `gtm plan` then `gtm run pipeline.yaml`.
+then: >
+  The run completes with status `done`, every sourced identity exists in
+  `identities` with at least one `field_values` row, and the terminal receipt
+  reports non-zero records processed and a total cost (or `?` where unpriced).
+spec_refs: ["§3", "§8", "§11 M1", "§11 M2"]

@@ -1,0 +1,11 @@
+bin/
+*.db
+*.db-wal
+*.db-shm
+
+# Design-session inputs — not build artifacts, not committed. Distilled into
+# DECISIONS.md/CLAUDE.md/PROCESS.md/ROADMAP.md/SPEC.md instead.
+TRANSCRIPT-*
+DECISIONS-SEED*.md
+HANDOFF.md
+NOTES.md

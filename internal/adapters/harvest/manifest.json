@@ -1,0 +1,41 @@
+{
+  "id": "harvest/profile",
+  "version": 1,
+  "role": "enrich",
+  "entity_type": "person",
+  "needs": {
+    "type": "object",
+    "required": ["linkedin_url"],
+    "properties": {
+      "linkedin_url": {"type": "string"}
+    }
+  },
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "headline": {"type": "string"},
+      "about": {"type": "string"},
+      "location": {"type": "string"},
+      "recent_posts": {"type": "array", "items": {"type": "string"}},
+      "role_history": {"type": "array", "items": {"type": "string"}},
+      "current_role": {"type": "string"},
+      "current_company": {"type": "string"},
+      "follower_count": {"type": "integer"},
+      "open_to_work": {"type": "boolean"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "posts_limit": {"type": "integer", "minimum": 0, "maximum": 20, "description": "Recent posts to fetch (0 skips the second call and its credits)"},
+      "main_only": {"type": "boolean", "description": "Ask for the cheaper main profile version"},
+      "cost_per_profile_usd": {"type": "number", "minimum": 0, "description": "What one lookup costs you, for the receipt"},
+      "base_url": {"type": "string", "description": "Override the API host (testing)"}
+    }
+  },
+  "credentials": ["HARVEST_API_KEY"],
+  "freshness_days": 30,
+  "cost_estimate_usd": 0.012
+}

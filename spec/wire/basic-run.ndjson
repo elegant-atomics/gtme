@@ -1,0 +1,22 @@
+{"stream":"source","dir":"runner->adapter","adapter":"csv/source","msg":{"type":"OPEN","step_id":"source","run_id":"01J8Z6QG4M0000000000000001","config":{"path":"internal/adapters/csvsource/fixtures/people.csv"}}}
+{"stream":"source","dir":"runner->adapter","adapter":"csv/source","msg":{"type":"END"}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"SCHEMA","provides":{"additionalProperties":false,"properties":{"column_6":{"type":"string"},"company_domain":{"type":"string"},"email":{"type":"string"},"full_name":{"type":"string"},"linkedin_url":{"type":"string"},"title":{"type":"string"}},"type":"object"}}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"RECORD","fields":{"company_domain":"acme.com","email":"Jane.Doe@Acme.com","full_name":"Jane Doe","linkedin_url":"https://www.linkedin.com/in/jane-doe/","title":"VP Marketing"}}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"RECORD","fields":{"company_domain":"https://www.globex.io","email":"bob@globex.io","full_name":"Bob Stone","linkedin_url":"linkedin.com/in/bob-stone","title":"Head of Growth"}}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"RECORD","fields":{"company_domain":"initech.dev","email":"carol@initech.dev","full_name":"Carol Ray"}}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"LOG","level":"info","msg":"read 3 rows from internal/adapters/csvsource/fixtures/people.csv"}}
+{"stream":"source","dir":"adapter->runner","adapter":"csv/source","msg":{"type":"END"}}
+{"stream":"enrich","dir":"runner->adapter","adapter":"mock-enrich-py","msg":{"type":"OPEN","step_id":"mock","run_id":"01J8Z6QG4M0000000000000001","config":{"note":"seen by the external adapter"}}}
+{"stream":"enrich","dir":"runner->adapter","adapter":"mock-enrich-py","msg":{"type":"RECORD","key":{"entity_type":"person","identity_key":"jane.doe@acme.com"},"fields":{"email":"Jane.Doe@Acme.com","full_name":"Jane Doe"}}}
+{"stream":"enrich","dir":"runner->adapter","adapter":"mock-enrich-py","msg":{"type":"RECORD","key":{"entity_type":"person","identity_key":"bob@globex.io"},"fields":{"email":"bob@globex.io","full_name":"Bob Stone"}}}
+{"stream":"enrich","dir":"runner->adapter","adapter":"mock-enrich-py","msg":{"type":"RECORD","key":{"entity_type":"person","identity_key":"carol@initech.dev"},"fields":{"email":"carol@initech.dev","full_name":"Carol Ray"}}}
+{"stream":"enrich","dir":"runner->adapter","adapter":"mock-enrich-py","msg":{"type":"END"}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "SCHEMA", "provides": {"type": "object", "additionalProperties": false, "properties": {"mock_score": {"type": "integer", "minimum": 0, "maximum": 100}, "mock_note": {"type": "string"}}}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "RECORD", "key": {"entity_type": "person", "identity_key": "jane.doe@acme.com"}, "fields": {"mock_score": 21, "mock_note": "seen by the external adapter"}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "COST", "key": {"entity_type": "person", "identity_key": "jane.doe@acme.com"}, "provider": "mock", "amount_usd": 0, "detail": {"credits": 0}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "RECORD", "key": {"entity_type": "person", "identity_key": "bob@globex.io"}, "fields": {"mock_score": 30, "mock_note": "seen by the external adapter"}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "COST", "key": {"entity_type": "person", "identity_key": "bob@globex.io"}, "provider": "mock", "amount_usd": 0, "detail": {"credits": 0}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "RECORD", "key": {"entity_type": "person", "identity_key": "carol@initech.dev"}, "fields": {"mock_score": 68, "mock_note": "seen by the external adapter"}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "COST", "key": {"entity_type": "person", "identity_key": "carol@initech.dev"}, "provider": "mock", "amount_usd": 0, "detail": {"credits": 0}}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "LOG", "level": "info", "msg": "enriched 3 records"}}
+{"stream":"enrich","dir":"adapter->runner","adapter":"mock-enrich-py","msg":{"type": "END"}}

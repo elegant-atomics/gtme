@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""mock/deliver — a fixture delivery target.
+
+Stands in for a real outbound tool (Instantly, a CRM) so delivery idempotency can
+be tested without sending anything to anyone. Every delivered record is appended
+as a JSON line to $MOCK_DELIVER_LOG, which the test then counts: a second run of
+the same pipeline must add no lines.
+"""
+
+import json
+import os
+import sys
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    log_path = os.environ.get("MOCK_DELIVER_LOG")
+    config = {}
+    delivered = 0
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        kind = msg.get("type")
+
+        if kind == "OPEN":
+            config = msg.get("config") or {}
+            send({"type": "SCHEMA", "provides": {"type": "object", "properties": {}}})
+            continue
+
+        if kind == "RECORD":
+            key = msg.get("key") or {}
+            fields = msg.get("fields") or {}
+            if log_path:
+                with open(log_path, "a", encoding="utf-8") as fh:
+                    fh.write(
+                        json.dumps(
+                            {
+                                "identity_key": key.get("identity_key"),
+                                "email": fields.get("email"),
+                                "first_line": fields.get("first_line"),
+                                "campaign": config.get("campaign"),
+                            }
+                        )
+                        + "\n"
+                    )
+            # An empty RECORD is the acknowledgement: delivered, nothing learned.
+            send({"type": "RECORD", "key": key, "fields": {}})
+            send({"type": "COST", "key": key, "provider": "mock", "amount_usd": 0})
+            delivered += 1
+            continue
+
+        if kind == "END":
+            break
+
+    send({"type": "LOG", "level": "info", "msg": f"delivered {delivered} records"})
+    send({"type": "END"})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

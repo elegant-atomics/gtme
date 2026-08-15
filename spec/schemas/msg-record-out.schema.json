@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/msg-record-out.schema.json",
+  "title": "RECORD (adapter → runner)",
+  "description": "One fact-bearing record from an adapter (SPEC.md §5). `key` is REQUIRED for every role but `source`: a source emits raw fields and the runner derives the identity key from them (SPEC.md §4, `emits_key_fields`), so a source's RECORD legitimately has no key.",
+  "type": "object",
+  "required": ["type"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "RECORD"},
+    "key": {"$ref": "#/definitions/key"},
+    "fields": {"type": "object", "description": "Fields learned. Validated against the manifest's `provides` before the ledger write."},
+    "confidence": {
+      "type": "object",
+      "description": "Per-field confidence, OPTIONAL, default 1.0 (SPEC.md §5).",
+      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+    }
+  },
+  "definitions": {
+    "key": {
+      "type": "object",
+      "required": ["entity_type", "identity_key"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_type": {"type": "string"},
+        "identity_key": {"type": "string"}
+      }
+    }
+  }
+}

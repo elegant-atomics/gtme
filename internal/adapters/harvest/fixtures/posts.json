@@ -1,0 +1,9 @@
+{
+  "elements": [
+    {"content": "We cut our CAC in half by killing three channels. Here is what we kept.", "postedAt": "2026-07-02"},
+    {"text": "Hiring two lifecycle marketers. DMs open.", "postedAt": "2026-06-20"},
+    {"content": "", "postedAt": "2026-06-01"},
+    {"content": "A fourth post that should not appear when the limit is three.", "postedAt": "2026-05-11"}
+  ],
+  "status": "ok"
+}

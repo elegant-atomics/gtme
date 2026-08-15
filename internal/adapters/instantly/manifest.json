@@ -1,0 +1,36 @@
+{
+  "id": "instantly/add-to-campaign",
+  "version": 1,
+  "role": "deliver",
+  "entity_type": "person",
+  "needs": {
+    "type": "object",
+    "required": ["email", "first_name"],
+    "properties": {
+      "email": {"type": "string"},
+      "first_name": {"type": "string"},
+      "last_name": {"type": "string"},
+      "company_name": {"type": "string"},
+      "title": {"type": "string"},
+      "first_line": {"type": "string"},
+      "ps_line": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "required": ["campaign"],
+    "additionalProperties": false,
+    "properties": {
+      "campaign": {"type": "string", "description": "Campaign name (resolved to an id once per run) or the campaign id itself"},
+      "skip_if_in_campaign": {"type": "boolean", "description": "Ask Instantly to ignore leads already in the campaign (default true)"},
+      "variables": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Extra fields to pass as custom variables (default: first_line, ps_line, title)"
+      },
+      "base_url": {"type": "string", "description": "Override the API host (testing)"}
+    }
+  },
+  "credentials": ["INSTANTLY_API_KEY"],
+  "cost_estimate_usd": 0
+}
