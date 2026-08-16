@@ -34,6 +34,11 @@
       "$ref": "#/definitions/step",
       "description": "The optional delivery step."
     },
+    "group": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ADR-021: the membership terminus. Records completing the run's final step are `added` to this group (created on demand). Valid with or without deliver:."
+    },
     "waterfall": {
       "description": "Reserved (SPEC.md §9). Present only so v1 can add it without a format break; any value here MUST be rejected in v0."
     }
@@ -41,7 +46,10 @@
   "definitions": {
     "step": {
       "type": "object",
-      "required": ["use"],
+      "anyOf": [
+        {"required": ["use"]},
+        {"required": ["group"]}
+      ],
       "additionalProperties": false,
       "not": {
         "required": ["waterfall"],
@@ -56,7 +64,37 @@
         "use": {
           "type": "string",
           "minLength": 1,
-          "description": "Adapter id, e.g. 'harvest/profile'."
+          "description": "Adapter id, e.g. 'harvest/profile'. Required everywhere except a group source, which declares group: instead."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ADR-021: group-as-source, valid only on the source step and mutually exclusive with use:. Members are projected from the ledger; provides are open (wildcard), needs enforced per record at run time."
+        },
+        "require": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "ADR-021: process only records currently members of EVERY listed group. Valid on interior steps and deliver, not the source. Referenced groups must exist at plan time."
+        },
+        "exclude": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "ADR-021: skip records currently members of ANY listed group — the judgment-memory mechanism. Valid on interior steps and deliver, not the source. Referenced groups must exist at plan time."
+        },
+        "record": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ADR-021, deliver only: the group successful deliveries append `touched` events to. Defaults to the pipeline name; created on demand."
+        },
+        "suppress": {
+          "type": "object",
+          "required": ["group", "within"],
+          "additionalProperties": false,
+          "properties": {
+            "group": {"type": "string", "minLength": 1},
+            "within": {"type": "string", "pattern": "^[0-9]+d$"}
+          },
+          "description": "ADR-021, deliver only: skip records with a `touched` event in the group within the window; skips are receipted with reasons. Layers above the idempotency floor."
         },
         "with": {
           "type": "object",

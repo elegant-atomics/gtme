@@ -232,6 +232,47 @@ CREATE TABLE deliveries (
   UNIQUE(target, idempotency)
 );
 
+-- Layer 3: groups — named associations between identities and a context
+-- (ADR-021). A group carries no type field and no executable logic: its
+-- character (campaign-like, DNC-like, pool-like) is derived from its events
+-- and the pipelines that reference it. Members are identities, so groups
+-- hold people and companies alike.
+
+CREATE TABLE groups (
+  id         TEXT PRIMARY KEY,           -- ULID
+  name       TEXT NOT NULL UNIQUE,
+  note       TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE group_events (
+  id          TEXT PRIMARY KEY,          -- ULID
+  group_id    TEXT NOT NULL REFERENCES groups(id),
+  identity_id TEXT NOT NULL REFERENCES identities(id),
+  event       TEXT NOT NULL,             -- 'added' | 'removed' | 'touched'
+  detail      TEXT,                      -- JSON provenance
+  run_id      TEXT,                      -- nullable: hand edits have no run
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX ix_ge_lookup ON group_events(group_id, identity_id, event, created_at DESC);
+
+-- Current membership: the newest added/removed event wins per (group,
+-- identity) — the ADR-003 append-then-derive pattern. touched events never
+-- affect membership; they are the delivery-history trail suppression windows
+-- read (§8).
+CREATE VIEW group_members AS
+SELECT group_id, identity_id
+FROM (
+  SELECT group_id, identity_id, event,
+         ROW_NUMBER() OVER (
+           PARTITION BY group_id, identity_id
+           ORDER BY created_at DESC, id DESC
+         ) AS rn
+  FROM group_events
+  WHERE event IN ('added', 'removed')
+)
+WHERE rn = 1 AND event = 'added';
+
 -- The current-value projection (ADR-003) is two views, not one: "highest
 -- confidence within the freshness window" cannot be answered by an
 -- unparameterized view, because the window is a per-caller argument (§7's
@@ -620,7 +661,25 @@ canonical name) is SUGGESTED in plan output, never silently guessed;
 tier (§4) — none at all is a plan error, and only the name-hash fallback
 tier is a plan warning.
 
+**Group checks (ADR-021):** group references are resolved against the
+local ledger — read-only, still zero network calls and zero spend. A
+group named by `require:`, `exclude:`, `suppress:`, or a group source
+(§9) MUST exist, or the plan fails naming the group and the fix
+(`gtm groups add <name> …`). A `record:` target and a group terminus are
+*created on demand* at run time (they record outcomes; requiring them to
+pre-exist would make every new pipeline a two-step dance), so plan only
+checks their names are non-empty. A `suppress.within` window MUST parse
+as `Nd` (§9's cache grammar). The plan output lists each step's
+membership gates and the deliver step's touch scope.
+
 At execution time, per step, per record:
+- **Membership gates (ADR-021):** a step with `require:` processes only
+  records currently members of EVERY listed group; a step with `exclude:`
+  skips records currently members of ANY listed group. Gated records do
+  not advance past the step and are counted like `when:` gates. Exclusion
+  is the judgment-memory mechanism: a qualify pipeline that excludes its
+  own output groups sends only never-judged records to its filter, so an
+  identity is judged once per scope — determinism first, cost second.
 - **Cache check (enrich/verify only):** if every field in the step's
   `provides` already has a current value within the freshness window,
   the runner MUST skip the record (`step_events.event='skipped_cache'`, no
@@ -646,10 +705,12 @@ gtm show <identity-key>           # read-only projection inspector
 gtm show --run last [--fields ...] [--provenance] [--limit N]
 gtm runs [RUN_ID]                 # list runs / show one run's receipt
 gtm freeze [RUN_ID|last] [--bundle DIR] # bare: YAML to stdout; --bundle: campaign bundle
+gtm groups [show NAME | add NAME ... | remove NAME ...]   # ADR-021, see below
 gtm help --agent                  # machine-readable full CLI + adapter surface
 ```
 
-This is the entire v0 verb set (ADR-005). There is no `gtm x`, no
+This is the entire v0 verb set (ADR-005, extended by ADR-021's `gtm
+groups` in M9; ADR-030's `gtm vacuum` is decided with build queued). There is no `gtm x`, no
 multi-process pipe chaining, and no standalone `source`/`filter`/`enrich`/
 `compose`/`deliver` subcommands — those existed only to support pipe mode
 and are cut along with it. `uses:`, `cache:`, `when:` and every other
@@ -741,6 +802,60 @@ the same command without the flag; a dry run is an ordinary run in every
 other respect (its own run id, receipt, and `gtm runs` entry), and because
 it writes no deliveries, the armed run's idempotency behaves as if the dry
 run had never happened.
+
+### Groups: touch scoping, suppression, terminus, and `gtm groups` (ADR-021)
+
+Groups are runner-owned semantics: adapters see only projections, never
+the ledger, and nothing below changes the wire protocol.
+
+**Touch scoping — `record:`.** On a successful delivery, the runner MUST
+append a `touched` event to the group named by the deliver step's
+`record:` — **defaulting to the pipeline name** — creating the group on
+demand. Every pipeline is thereby safely scoped by default; sharing a
+scope across pipelines is an explicit override. The event's `detail`
+carries the target adapter and run id.
+
+**Suppression — `suppress: {group: G, within: Nd}`.** Before delivering
+a record, the runner MUST skip it when the record has a `touched` event
+in G within the window. A suppressed record records a fail verdict for
+the deliver step with reason `suppressed` (the `on_missing` pattern),
+and the terminal receipt lists every suppressed record with the group
+and the age of the blocking touch. Suppression layers above the §8
+idempotency floor: idempotency stops the *same* delivery twice;
+suppression enforces a *chosen* contact policy across deliveries.
+
+**Terminus — top-level `group: <name>`.** A pipeline MAY end in group
+membership instead of (or in addition to) a deliver step: every record
+that completes the run's final step is `added` to the named group
+(created on demand), with the pipeline and run id as provenance. This is
+the recommended campaign decomposition: a qualify pipeline
+(source → enrich → filter ⇒ group) runs cheaply and often; the group is
+a durable, reviewable, hand-editable artifact; a separate send pipeline
+consumes it deliberately.
+
+**Dry runs assert nothing durable:** under `--dry-run` (and `--simulate`)
+the runner MUST NOT write `touched` events or terminus `added` events —
+the receipt reports what an armed run would have recorded. A rehearsal
+that mutated durable associations would not be a rehearsal.
+
+**`gtm groups` verbs:**
+```
+gtm groups                          # list groups with derived character
+gtm groups show NAME                # members (current), recent events
+gtm groups add NAME KEY...          # hand-edit membership by identity key
+gtm groups add NAME --from-segment SEGMENT | --query "SQL"
+gtm groups remove NAME KEY...
+```
+`gtm groups` lists each group with member count and event tallies
+(added/removed/touched) — character is derived, never stored. The
+snapshot forms evaluate an intensional definition into extensional
+membership: `--from-segment` runs a saved segment, `--query` a one-off
+SELECT; either MUST yield an `identity_id` column (segments-as-SQL
+naturally join `identities`), and each `added` event's detail records
+what was evaluated and when. A KEY is matched against
+`identities.identity_key`; if it matches more than one entity type, the
+command fails asking for `--type`. All writes are events — membership
+edits are append-only like everything else.
 
 ### Simulation gate — `gtm run --simulate` (ADR-028; built in M8)
 
@@ -856,6 +971,42 @@ is reserved syntax: the YAML parser MUST accept and reject it with "not
 implemented in v0" (so v1 adds it without a format break). This is the only
 pipeline authoring surface in v0 (ADR-005); the JSON Schema for this format
 is `spec/schemas/pipeline.schema.json`.
+
+**Groups in pipeline YAML (ADR-021).** Five keys, all plan-validated
+(§7), all runner-owned (§8):
+
+```yaml
+name: q3-qualify
+source:
+  group: q3-warm            # group as source: members projected from the ledger
+
+steps:
+  - id: judge
+    use: ai/filter
+    exclude: [q3-qualified, q3-rejected]   # judgment memory: judge once per scope
+    uses: [full_name, title]
+    with: { prompt: ... }
+
+group: q3-qualified         # terminus: records completing the run are added
+
+# …and on a send pipeline's deliver step:
+#   record: q3-sent                        # touch scope; defaults to pipeline name
+#   suppress: { group: q3-sent, within: 30d }
+```
+
+- A **group source** is `source: {group: <name>}` — no `use:`, mutually
+  exclusive with it. Members (people and companies alike) are projected
+  from the ledger like any record. A group source declares no static
+  provides: the plan treats the available-field set as open, and each
+  step's needs are enforced per record at run time, exactly like the
+  needs-all wildcard.
+- `require: [<group>, …]` / `exclude: [<group>, …]` are valid on interior
+  steps and the deliver step (not the source): membership gates, checked
+  per record against current membership (§7).
+- `record: <name>` and `suppress: {group: <name>, within: Nd}` are valid
+  only on the deliver step (§8). `record:` defaults to the pipeline name.
+- Top-level `group: <name>` is the membership terminus (§8), valid with
+  or without a `deliver:` block; a pipeline with neither simply enriches.
 
 ---
 
@@ -1154,10 +1305,22 @@ decided contract, not shipped behavior.
   first net-new integration is a pure-YAML **Attio** binding (assert
   endpoint, idempotency: native) passing conformance; the campaign-zero
   pipeline simulates end-to-end with zero network calls.
-- **M9 — groups (ADR-021).** The reconciliation-plus-build pass its ADR
-  defers: spec impact applied (§3 DDL, §7/§8/§9 semantics, `gtm groups`
-  verbs), then built. ✅ Acceptance: per the ADR's spec-impact list once
-  applied.
+- **M9 — groups (ADR-021).** Spec impact applied (changelog v0.7: §3
+  DDL, §7 gates and plan checks, §8 touch/suppress/terminus and
+  `gtm groups`, §9 surface), then built. ✅ Unit: the membership view
+  derives current membership from added/removed sequences (last event
+  wins; `touched` never affects membership); suppression window
+  arithmetic. ✅ E2E, offline: a qualify pipeline (csv → ai/filter ⇒
+  group terminus) adds exactly the passers; re-running it with
+  `exclude:` on its own output groups judges nothing a second time
+  (zero AI-engine calls — judgment memory); a send pipeline's deliver
+  writes `touched` under its default (pipeline-name) scope, and a second
+  pipeline sharing the scope via `record:` suppresses within the window,
+  receipted with reasons; a group source feeds a pipeline the members a
+  qualify run added; `gtm plan` fails naming a `require:`/`exclude:`/
+  `suppress:`/source group that does not exist; a `--dry-run` writes no
+  `touched` and no terminus `added` events; `gtm groups` list/show/
+  add/remove round-trip, including `--query` snapshot with provenance.
 - **M10 — campaign bundles (ADR-029; §8).** `gtm freeze --bundle`,
   `gtm run` on a bundle path, simulate-on-bundle. ✅ Acceptance: freeze
   campaign zero, move the bundle to a clean ledger, simulate and dry-run
@@ -1303,6 +1466,24 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.7 — 2026-08-16 (M9: groups — ADR-021 reconciliation)
+**Added:** §3 layer-3 DDL — `groups`, append-only `group_events` with
+exactly three event kinds (added/removed/touched), and the
+`group_members` last-event-wins view (ADR-003's append-then-derive
+pattern); §7 membership gates (`require:`/`exclude:`, the
+judgment-memory mechanism) and plan-time group checks (referenced groups
+must exist; `record:`/terminus create on demand; windows well-formed;
+read-only ledger access at plan time stated); §8 touch scoping
+(`record:`, defaulting to the pipeline name), suppression
+(`suppress: {group, within}` layered above the idempotency floor, skips
+receipted), the membership terminus, the
+dry-runs-assert-nothing-durable rule, and the `gtm groups` verb set
+(list with derived character, show, add/remove by key,
+`--from-segment`/`--query` snapshots with evaluation provenance); §9
+the five group keys with the qualify/send decomposition example;
+milestone M9 acceptance criteria. Mirrored in `spec/ledger.sql` and
+`spec/schemas/pipeline.schema.json`.
 
 ### v0.6 — 2026-08-16 (M8 build: binding engine + simulation gate)
 **Changed:** `spec/binding-schema.json` hardened by the M8 build against the

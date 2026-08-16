@@ -115,3 +115,43 @@ CREATE VIEW current_fields AS
 SELECT identity_id, field, value, source, confidence, run_id, created_at
 FROM field_value_ranks
 WHERE rank = 1;
+
+-- Layer 3: groups — named associations between identities and a context
+-- (ADR-021, SPEC §3). A group carries no type field and no executable logic:
+-- its character is derived from its events and the pipelines that reference
+-- it. Members are identities, so groups hold people and companies alike.
+
+CREATE TABLE groups (
+  id         TEXT PRIMARY KEY,           -- ULID
+  name       TEXT NOT NULL UNIQUE,
+  note       TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE group_events (
+  id          TEXT PRIMARY KEY,          -- ULID
+  group_id    TEXT NOT NULL REFERENCES groups(id),
+  identity_id TEXT NOT NULL REFERENCES identities(id),
+  event       TEXT NOT NULL,             -- 'added' | 'removed' | 'touched'
+  detail      TEXT,                      -- JSON provenance
+  run_id      TEXT,                      -- nullable: hand edits have no run
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX ix_ge_lookup ON group_events(group_id, identity_id, event, created_at DESC);
+
+-- Current membership: the newest added/removed event wins per (group,
+-- identity) — the ADR-003 append-then-derive pattern. touched events never
+-- affect membership; they are the delivery-history trail suppression windows
+-- read (SPEC §8).
+CREATE VIEW group_members AS
+SELECT group_id, identity_id
+FROM (
+  SELECT group_id, identity_id, event,
+         ROW_NUMBER() OVER (
+           PARTITION BY group_id, identity_id
+           ORDER BY created_at DESC, id DESC
+         ) AS rn
+  FROM group_events
+  WHERE event IN ('added', 'removed')
+)
+WHERE rn = 1 AND event = 'added';
