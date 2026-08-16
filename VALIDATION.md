@@ -17,8 +17,8 @@ Two campaigns, run in order:
   two adapters, zero enrichment spend. Per DECISIONS.md ADR-019: everything
   that makes a delivery pipeline trustworthy — identity, both edge mappings,
   dynamic needs, plan coherence, per-record verdicts, idempotent delivery, an
-  armed gate — in the smallest shape that exercises all of it. **Currently
-  blocked** — see below.
+  armed gate — in the smallest shape that exercises all of it. **Runnable**
+  (awaiting the human go this document never grants) — see below.
 - **Campaign 1** — the fuller funnel (originally this file's only campaign,
   per ADR-016). Real Apollo pull, AI filter/compose, Harvest enrichment,
   real delivery. Runs today; exercises cache windows, real spend, and the
@@ -26,32 +26,32 @@ Two campaigns, run in order:
 
 ## Campaign zero — the essence (ADR-019)
 
-### Status: blocked, not runnable yet
+### Status: runnable (human go still required)
 
-Campaign zero depends on mechanics DECISIONS.md ADR-017/018/019 describe but
-that do not exist in code or SPEC.md yet (scoped deliberately as a
-docs-only pass on 2026-08-15 — see the "Session packet, 2026-08-15" section
-of DECISIONS.md). Specifically, before this campaign can run for real:
+The mechanics this campaign depends on were built by the 2026-08-15
+reconciliation-plus-build pass (SPEC.md v0.4, milestone M7 — `make check`
+green including M7's offline acceptance tests, which run this exact
+pipeline shape against the `mock/deliver` fixture in
+`test/e2e/campaign_zero_test.go`):
 
-- `csv/source` needs a `columns:` config mapping CSV headers → canonical
-  field names (ADR-018) — today it only auto-detects a fixed set of
-  identity-key aliases (DECISIONS.md's 2026-08-12 "Name-hash key inputs"
-  entry), not arbitrary header mapping.
-- `instantly/add-to-campaign` needs a `variables:` config mapping ledger
-  fields → Instantly merge-field names (ADR-018) — today its merge fields
-  are hard-coded (`first_line`, `ps_line`; SPEC §10.6).
-- The manifest schema needs `needs: dynamic` generalized beyond AI steps
-  (ADR-019) so a deliver step's needs derive from `variables:`, the same
-  way an AI step's derive from `uses:` (ADR-004) today.
-- The runner needs the `on_missing: skip | fail` policy (default skip with
-  a verdict) and a dry-run mode that renders resolved variables per record
-  — the "review before arming" gate below has nothing to review without it.
+- `csv/source` takes `columns:` mapping canonical field names → CSV headers,
+  with auto-map for canonical headers, plan-time near-miss suggestions, and
+  registry normalization at ingress (ADR-018, SPEC §10.1).
+- `instantly/add-to-campaign` declares dynamic needs with an `email` floor;
+  its merge fields derive entirely from the step-level `variables:` mapping
+  (ADR-018/019, SPEC §10.6) — nothing is hard-coded.
+- `needs: dynamic` is generalized (ADR-019, SPEC §6): a deliver step's
+  needs derive from `variables:` exactly as an AI step's derive from
+  `uses:`, validated at plan time.
+- The runner enforces `on_missing: skip | fail` (default skip with a
+  recorded verdict; blank merge fields never send) and `gtm run --dry-run`
+  renders each record's resolved variables in the receipt — the artifact
+  the "review before arming" gate below reviews (SPEC §8).
 
-None of that is built. This section documents the *target* shape so it
-isn't lost, per the scope note in DECISIONS.md — building it is separate,
-future work.
+What remains is only what must remain: a human go, real ~10-record CSV,
+and a controlled Instantly campaign.
 
-### Target pipeline
+### Pipeline
 
 ```yaml
 name: campaign-zero
@@ -75,15 +75,22 @@ deliver:
   idempotency: email
 ```
 
-### Target enactment script (once unblocked)
+### Enactment script
 
 1. **Guard.** `gtm plan campaign-zero.yaml` against a CSV missing an email
-   column entirely — confirm ADR-018's rule fires ("no identity-key path")
-   as a plan error, not a runtime surprise partway through.
-2. **Dry run.** `gtm run campaign-zero.yaml --dry-run` (or equivalent, once
-   the gate exists) against the real ~10-record CSV. Capture: the receipt
-   renders each record's *resolved* `variables:` values — this is the
-   artifact a human actually reviews, per ADR-019, before anything sends.
+   column entirely — confirm the plan fails (exit 2) before any row is
+   read. With name columns still present the failure comes from the deliver
+   adapter's `email` floor ("needs email, which no earlier step provides"),
+   since a names-only CSV legitimately keys on the name-hash tier (plan
+   *notes* the weak tier rather than blocking on it); strip the name
+   columns too and ADR-018's "no identity-key path" rule fires at the
+   source instead. Either way: a plan error, not a runtime surprise
+   partway through.
+2. **Dry run.** `gtm run campaign-zero.yaml --dry-run` against the real
+   ~10-record CSV. Capture: the receipt renders each record's *resolved*
+   `variables:` values (and lists any record held back by `on_missing`,
+   with its reason) — this is the artifact a human actually reviews, per
+   ADR-019, before anything sends. Confirm `deliveries` gained zero rows.
 3. **Arm.** Review the dry-run receipt by eye. If it looks right, run for
    real (the "arm" step) against the same ~10 records into the controlled
    Instantly campaign.
