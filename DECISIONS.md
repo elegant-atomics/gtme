@@ -176,7 +176,11 @@ than SPEC §4 currently has, and possibly two more key tiers.
   later.
 
 ### ADR-018: Mapping exists only at the edges
-**Status:** Accepted (spec impact deferred — see scope note above)
+**Status:** Accepted (spec impact deferred — see scope note above).
+*Escape-hatch note (2026-08-16):* the code-transform escape hatch for
+computed fields named below is superseded in practice by `sql/enrich` /
+`sql/filter` (ADR-027), which give computed fields a declarative,
+plan-validatable home.
 **Context:** The minimal pipeline (csv/source → instantly/add-to-campaign) exposes two foreign vocabularies: CSV headers (user's world) and campaign merge fields (Instantly template author's world). Neither is gtme's; the interior is.
 **Decision:** Exactly two mapping sites, both declarative, both in step config:
 - Ingress: `csv/source` takes `columns:` mapping headers → canonical names. Headers already matching canonical names auto-map with zero config; near-misses are SUGGESTED in plan output, never silently guessed. A mapping that yields no identity-key path (person: no email) is a plan error. Normalization per the registry happens at ingress; invalid values are per-record verdicts, not crashes.
@@ -375,6 +379,304 @@ lines, §7 plan checks (referenced groups exist; windows well-formed), a
 --from-segment/--query`), and acceptance criteria. To be applied only
 after human approval, as a reconciliation-plus-build pass like
 ADR-017/018/019's.
+
+---
+
+## Session packet, 2026-08-16 (declarative bindings, universal adapters, transform floor)
+
+Third design-session packet (`DECISIONS-SEED-3.md`, a session artifact,
+never committed — same handling as the first two). The packet was authored
+before repo ADR-020/021 existed and instructed "append as ADR-020..025";
+the repo had already reached ADR-021, so its six entries land here
+renumbered **ADR-022..027**, with the packet's internal cross-references
+adjusted to the new numbers. Per PROCESS.md, where a packet conflicts with
+the repo the repo wins; two such conflicts surfaced in transcription and
+are reconciled inline where they occur — the universal set's `query/source`
+claim (see ADR-023) and the relationship between `sql/filter` and
+ADR-021's membership gates (see ADR-027). The packet also names its build
+(the binding engine) "the first post-campaign-zero milestone"; repo
+ADR-021's groups build is queued too, and the relative order of the two is
+a pending human decision, deliberately not asserted by this transcription.
+
+### ADR-022: Declarative binding tier — adapters as data
+**Status:** Accepted
+**Context:** Most GTM vendor APIs are CRUD-shaped HTTP. Hand-coding each
+adapter repeats Singer's maintenance failure; Airbyte's migration of most
+of its catalog to declarative low-code manifests interpreted by a generic
+engine is precedent that bindings work at ecosystem scale. Verified
+against real vendors: Instantly (deliver), Attio (assert/upsert), Apollo
+(search), HarvestAPI (lead-search, get-profile — clean REST over their
+managed scraping, publishes OpenAPI + llms.txt).
+**Decision:** The runner gains one generic HTTP execution engine. A tier-1
+adapter is a YAML **binding** the engine interprets deterministically —
+all judgment frozen at authoring time, never per-call. Binding schema
+lives at `spec/binding-schema.json`, kept to ~8 primitives:
+1. auth (type, header/param name, env var ref)
+2. request template — method, URL, **body AND query-param** templating
+   from config + canonical fields
+3. pagination (strategy: page|cursor|offset; termination; max)
+4. extraction — records JSONPath + per-field response→canonical paths,
+   with a `transform:` hook restricted to REGISTRY normalization rules
+   (e.g. `slug_from_url`) — never arbitrary logic
+5. error→verdict mapping
+6. idempotency: `native | ledger` — declares which party guarantees
+   dedupe (Attio assert = native; Instantly = ledger via deliveries table)
+7. cost declaration (per record / per request / unit)
+8. retry/rate policy incl. hourly windows; optional session declaration
+   (UUID-per-run passed through, for vendors like HarvestAPI that offer
+   pagination-consistency sessions)
+**Roles:** source (pagination + cursor/STATE), enrich (per-record
+request), deliver (idempotency + dry-run receipts). Same manifest surface
+as process adapters (needs/provides/config_schema/freshness).
+**Graduation rule (hard):** the moment a binding needs logic —
+conditionals, expressions, multi-call workflows, OAuth dances, request
+signing, computation — it graduates to a process (NDJSON) adapter. No
+expression language may ever grow inside binding YAML. Two-tier taxonomy:
+bindings cover anything that SELLS an API; process adapters cover
+anything that must be FOUGHT for.
+**Engine unification:** inline `http/*` steps (ADR-023/024) are the
+binding engine invoked anonymously; a named binding is the same config
+published, versioned, and conformance-tested. Recurring inline config
+across pipelines is the signal to extract and name a binding.
+**Security consequence (record explicitly):** bindings cannot execute
+code; their blast radius is what the engine permits. Community bindings
+are reviewable, diffable data — this is what makes a future adapter
+marketplace safe to host.
+**POC & sequencing:** the packet names this the first post-campaign-zero
+milestone (relative order against ADR-021's groups build not yet
+sequenced — see the packet intro above). Port all three real Go adapters
+(apollo/search, harvest/profile, instantly/add-to-campaign) to bindings;
+acceptance = **receipt diff against each Go twin** on campaign-zero data
+(dry runs where delivery is involved). Three matches proves the engine in
+read, enrich, and write directions; the Go adapters were scaffolding.
+First net-new integration ships as pure YAML: **Attio** (assert endpoint,
+idempotency: native).
+**Spec impact:** AMEND — new binding-tier section;
+`spec/binding-schema.json`; adapter model becomes two-tier; conformance
+kit extended to bindings (fixture payloads in → canonical records out);
+roadmap entry for marketplace security note.
+
+### ADR-023: Universal adapter set (the floor)
+**Status:** Accepted
+**Context:** Smallest set of adapters with near-total reach, docking onto
+the three universal transports: files, webhooks, the web. Universality is
+bought by pushing semantics into user config, so universal adapters are
+always the WORST version of any given integration — their job is the
+guarantee ("wireable today"), not excellence. Bindings are the ceiling.
+**Decision:** The universal six:
+- In: `csv/source` (exists) · `webhook/source` (ADR-009, exists) ·
+  **group-as-source (ADR-021)**. *Reconciliation note:* the packet listed
+  `query/source` (saved ledger query as source) here as "exists as
+  decided" — it does not exist and was never decided; intensional
+  segments-as-sources remains a ROADMAP.md design pass. What IS decided
+  is repo ADR-021's group-as-source — members of an asserted group
+  projected from the ledger, the extensional half — and that is the
+  universal-floor In slot: any set you can name, import, or snapshot
+  (`gtm groups add --from-segment/--query`) becomes a source.
+  `query/source` stays parked in ROADMAP.md.
+- Transform: `ai/*` steps — kept PURE: fields in via uses:, fields/
+  verdicts out, NO network access (see ADR-024 for the fetch half)
+- Out: `http/deliver` — POST mapped variables per record to any URL;
+  idempotency-key template REQUIRED in config (even the trivial case
+  cannot infer semantics — it must be told) · `csv/deliver` — write a
+  segment/run's records to CSV; universal output to anything with an
+  import button and the natural human-review artifact
+**Floor/ceiling growth loop (record as standing position):** receipts
+showing the same http target recurring across runs = the tool's cue to
+suggest minting a proper binding (and later, the codegen skill's demand
+signal).
+**Spec impact:** AMEND — add http/deliver and csv/deliver to adapter
+roadmap (post-binding-engine, both small); universal-set framing in the
+adapters section.
+
+### ADR-024: `http/enrich` — generic fetch enricher with markdown mode
+**Status:** Accepted
+**Context:** Research enrichment ("read the company's website") currently
+has no home; putting network access inside AI steps would make them
+nondeterministic, uncacheable black boxes.
+**Decision:** `http/enrich`: per-record HTTP request templated from
+canonical fields; two modes: (a) JSON extraction (the binding engine's
+enrich role, inline) and (b) `markdown: true` — fetch a page, convert to
+markdown, store as a ledger field (e.g. `homepage_markdown`). Division of
+labor: http/enrich does deterministic acquisition; `ai/*` judges it via
+`uses:`. Content fields are facts with provenance and a MANDATORY
+`freshness_days` (web content rots) and an engine-enforced size cap;
+fetch-once economics means N AI steps across M runs reuse one fetch, and
+receipts show exactly what content was judged.
+**Dynamic provides** (mirror of ADR-019): the step declares its output
+field name in config; plan validates downstream `uses:` against it;
+ad-hoc names are namespaced unless mapped to a canonical field.
+**Limit stated honestly:** no-JS fetching only. JS-heavy pages route to a
+reader-provider binding (Jina Reader / Firecrawl class — URL→markdown as
+an API): the provider-shape absorbs the hard version, same as harvest.
+**Spec impact:** AMEND — dynamic provides added to plan semantics beside
+dynamic needs; http/enrich spec'd with freshness/size requirements; ai/*
+purity (no network) stated as an invariant.
+
+### ADR-025: OpenAPI is codegen input, never runtime input
+**Status:** Accepted
+**Context:** ChatGPT Actions proves an LLM can drive any API from its
+OpenAPI spec — but Actions puts the model in the loop PER CALL (it
+re-derives operation choice and field mapping every invocation, with
+human confirmation on consequential calls). gtme runs unattended batches
+where approval is concentrated at the plan gate; per-call model judgment
+means per-row cost, nondeterminism where money moves, records in model
+context (violates ledger-as-bus), and steps plan cannot validate.
+**Decision:** Runtime OpenAPI-driven generic adapter: REJECTED (record
+the syntax-vs-semantics reason: specs describe endpoints; adapters encode
+operation selection, idempotency keys, verdicts, canonical mapping —
+judgment no spec contains). Instead, move the Actions maneuver to BIND
+TIME: the adapter-authoring skill's happy path is paste an OpenAPI URL →
+model proposes a binding (operation, mapping, idempotency, pagination) →
+conformance tests pass → adapter exists. Actions ease, batch-grade
+determinism. Same idea, two binding times: Actions binds per-call; gtme
+binds once.
+**Consequences:** Strengthens the central AI-adapter bet again —
+generating constrained YAML against a schema is far more reliable than
+generating Go, and OpenAPI→binding is a spec-to-data transformation.
+HarvestAPI (OpenAPI + llms.txt published) is the ideal first codegen
+target.
+**Spec impact:** Adapter-authoring skill requirements; roadmap.
+
+### ADR-026: Adapter naming — contract owner names the adapter
+**Status:** Accepted
+**Decision:** An adapter is named by whoever DEFINES ITS CONTRACT.
+`apollo/search`: Apollo's API defines the step's meaning → vendor-named.
+`ai/filter`, `ai/compose`: the contract is the operation (uses: in,
+verdict/fields out, judged against a prompt); the model provider is an
+interchangeable engine → operation-named, provider is config.
+Provider-naming AI steps would vendor-couple pipelines exactly where
+nothing vendor-specific exists and multiply the closed grammar with
+synonyms. Provenance carries the engine anyway: `field_values.source`
+records e.g. `ai/compose @ claude-sonnet-4-6`, and COST attributes spend
+per model — the ID says what KIND of fact, provenance says who produced
+it. Flip side: when a provider capability leaks into the contract (e.g. a
+citations format that IS the product), it takes the vendor name. Same
+logic as fields: canonical when shared, namespaced when proprietary.
+**Spec impact:** Naming rule added to adapter authoring section;
+provenance format includes model identifier for ai/* steps.
+
+### ADR-027: `sql/enrich` and `sql/filter` — the deterministic transform floor
+**Status:** Accepted
+**Context:** The transform floor was fuzzy-only (ai/*). Common
+deterministic work — splitting full_name, domain-from-email,
+title→seniority bucketing, boolean flags, and set-based derivation over
+relations ("count of known people at this company") — was homeless or
+wastefully sent to AI steps. SQL is the ledger's own language; "the
+ledger is the bus" implies SQL steps as a corollary.
+**Decision:** `sql/enrich`: a SELECT over the projection view
+(+ relations), scoped to the run's records; result columns become field
+values appended by the ENGINE like any adapter output (the step never
+writes storage directly — append-only, provenance `sql/enrich @
+<query-hash>`, freshness all preserved). Contracts are DECLARED, not
+parsed: config carries uses:/provides:; plan validates both; engine
+checks result columns match provides. Read-only, timeboxed, no side
+effects. `sql/filter`: same mechanism producing verdicts from a predicate
+— closes membership-by-ledger-facts cases ("has replied ever", "3+ known
+contacts at company") that where= combinators don't reach.
+**Relation to ADR-021's membership gates (reconciliation note):**
+`sql/filter` and ADR-021's `require:`/`exclude:` are complementary, not
+competing. `sql/filter` computes a verdict from what the ledger *implies*
+— facts and relations, a predicate re-evaluated every run — while
+`require:`/`exclude:` gate on what a group *asserts* — membership someone
+recorded, stable until deliberately edited. The qualify-pipeline pattern
+uses both: a filter (sql/ or ai/) decides, the group terminus records the
+decision, and `exclude:` makes it judgment memory.
+**Consequences:** Shrinks ADR-018's code-transform escape hatch to nearly
+nothing — computed fields get a declarative, testable home in a language
+that already exists, which is also the anti-creep move (no expression
+language needs inventing inside YAML). Transform floor is now symmetric:
+sql/* for the computable, ai/* for the judgeable; both read projections,
+both write facts, both free to re-run.
+**Spec impact:** AMEND — two new built-in steps; plan semantics for
+declared SQL contracts; ADR-018 escape-hatch note updated to point here.
+
+### Standing notes (not ADRs)
+- HarvestAPI lead-search returns NO email → identity ladder
+  (linkedin_slug as rung 2) validated against real payloads. Kept as a
+  design-confirmation note.
+- HarvestAPI also exposes send-connection / send-message → a future
+  LinkedIn outreach deliver BINDING (multichannel with zero new
+  architecture). Parked in ROADMAP.md.
+- Harvest example in the two-tier taxonomy corrected:
+  harvest-via-provider is tier 1 (the provider absorbed the fight); only
+  DIY scraping is tier 2.
+
+---
+
+## Session packet, 2026-08-16 (consequences of adapters-as-data)
+
+Fourth packet (`DECISIONS-SEED-4.md`), same session date. Both entries
+are consequences of ADR-022's binding tier; the packet instructed
+"append as ADR-026..027" and is renumbered **ADR-028..029** for the same
+reason as the previous packet, cross-references adjusted. Neither blocks
+the binding-engine milestone: ADR-028 lands naturally with it, ADR-029
+immediately after.
+
+### ADR-028: Simulation gate — `gtm run --simulate`
+**Status:** Accepted
+**Context:** Bindings execute against fixture payloads as easily as
+against live vendors (ADR-022's conformance kit already requires
+fixtures). That makes whole-pipeline offline execution nearly free, and
+it fills a gap in the gate ladder: plan validates contracts but executes
+nothing; dry-run executes but touches live read APIs (spend) and stops
+only at delivery.
+**Decision:** `gtm run --simulate <pipeline>`: executes the ENTIRE
+pipeline with every binding served from its conformance fixtures and
+every process/AI step either fixture-served or stubbed (AI steps replay
+recorded fixture responses when present, else emit a marked synthetic
+verdict). No network, no spend, no sends, deterministic. Output is a full
+receipt marked SIMULATED, never written to the durable identity layer
+(simulation runs are ephemeral or flagged so cache/projection ignore
+them). The gate ladder — extending §8's dry/armed gate built in M7 —
+becomes: **simulate → plan → dry-run → armed**, and the agent loop gets
+its missing rung: an agent that authors a pipeline can now fully validate
+it offline — structure via plan, BEHAVIOR via simulate — before a human
+reviews anything.
+**Consequences:** Conformance fixtures do double duty (adapter validation
++ pipeline simulation), which raises the incentive to keep them good.
+VALIDATION scripts can open with a simulated pass. Requires fixture
+coverage discipline: a binding without fixtures is visible as a
+simulation gap in the receipt.
+**Spec impact:** AMEND — run verb gains --simulate; receipt schema gains
+simulated flag; ledger semantics note (simulated runs excluded from
+projection/cache); acceptance criterion: campaign-zero pipeline simulates
+end-to-end with zero network calls.
+
+### ADR-029: Campaign bundle — freeze output as a portable folder
+**Status:** Accepted
+**Context:** With bindings (ADR-022), prompts, queries, and pipeline YAML
+all being data, a campaign is fully expressible as a folder of text files
+— no code. `freeze` already snapshots a pipeline; this names its output
+format and scope.
+**Decision:** `gtm freeze` produces a **campaign bundle**: a directory
+(or tarball) containing the pipeline YAML, every referenced binding at
+its exact version, AI prompt files, saved queries, the relevant registry
+slice, and a manifest (bundle format version, content hashes, source run
+id). Properties to guarantee: (a) self-contained — `gtm run` on a bundle
+resolves nothing outside it except credentials; (b) diffable — text
+files, stable ordering; (c) portable — same bundle runs on any
+machine/ledger (membership and cache naturally differ; contracts don't).
+Simulation (ADR-028) must work on a bundle using fixtures included in it,
+making a bundle a fully offline-verifiable artifact.
+**Interaction with groups (ADR-021, reconciliation note):** a bundle
+captures contracts, not ledger state. Group references in a bundled
+pipeline (`require:`/`exclude:`/`record:`/`suppress:`, a group terminus
+or group source) are names resolved against whatever ledger the bundle
+runs on — membership travels with the ledger, not the bundle, exactly
+the "membership and cache naturally differ" category above. ADR-021's
+plan check (referenced groups exist) is what makes a bundle moved to a
+clean ledger fail loudly at plan rather than silently run ungated;
+simulation on a bundle evaluates group gates against the target ledger's
+(possibly empty) membership.
+**Consequences:** Campaigns become reviewable, versionable, shareable
+artifacts — the unit of distribution for playbooks/recipes and the
+natural thing to keep in a git repo per client.
+**Spec impact:** AMEND — freeze section specifies bundle layout +
+manifest schema (`spec/bundle-manifest.json`); run accepts a bundle path;
+acceptance: freeze campaign zero, move bundle to a clean ledger, simulate
++ dry-run it successfully.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.

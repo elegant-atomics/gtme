@@ -84,7 +84,64 @@ minus anyone touched in scope X, judged pass in Y" is one query. Making a
 segment a *source* (pipeline input) needs: read-only evaluation feeding
 identity keys, membership snapshotting semantics for the run, and a story
 for fields the segment's SELECT carries along. Unresolved; needs a design
-pass.
+pass. ADR-023 (the universal adapter set) confirmed this stays parked: its
+`query/source` slot was reconciled to ADR-021's group-as-source (the
+decided, extensional half); a segment-as-source remains the intensional
+half, still needing the design pass above. The
+`gtm groups add --from-segment` snapshot affordance (ADR-021) covers the
+common case in the meantime.
+
+## Universal Out floor — `http/deliver` and `csv/deliver`
+
+Decided by ADR-023, deferred to after the binding engine (both small).
+`http/deliver` POSTs mapped variables per record to any URL, with an
+idempotency-key template REQUIRED in config (even the trivial case cannot
+infer delivery semantics — it must be told). `csv/deliver` writes a
+segment/run's records to CSV — universal output to anything with an
+import button, and the natural human-review artifact. Parked here only
+for sequencing; the decisions are made.
+
+## Floor→ceiling growth loop
+
+Standing position from ADR-023: receipts showing the same `http/*` target
+recurring across runs are the tool's cue to suggest minting a named
+binding — and, later, the demand signal that prioritizes what the
+adapter-authoring codegen skill should target. Needs a design pass on
+where the suggestion surfaces (receipt footer? `gtm plan` note?).
+
+## Reader-provider binding for JS-heavy pages
+
+ADR-024 scopes `http/enrich` to no-JS fetching, honestly. The hard
+version routes to a reader-provider binding (Jina Reader / Firecrawl
+class — URL→markdown as an API): the provider-shape absorbs the fight,
+same as harvest. Pure binding YAML once the binding engine exists; needs
+a provider pick and a cost model, nothing architectural.
+
+## OpenAPI→binding codegen in the adapter-authoring skill
+
+ADR-025: runtime OpenAPI interpretation is rejected; bind-time codegen is
+the happy path — paste an OpenAPI URL, the model proposes a binding
+(operation, mapping, idempotency, pagination), conformance tests gate it.
+HarvestAPI (OpenAPI + llms.txt published) is the ideal first target. The
+skill's requirements get written when the binding engine and its
+conformance kit exist to generate against.
+
+## LinkedIn outreach deliver binding
+
+HarvestAPI exposes send-connection / send-message endpoints (standing
+note, 2026-08-16 packet): a future LinkedIn outreach deliver BINDING
+would make gtme multichannel with zero new architecture. Gated on the
+binding engine, a deliverability/safety review, and the same armed-gate
+discipline as email delivery.
+
+## Adapter marketplace — the bindings security framing
+
+The marketplace itself stays a §13 non-goal. When it comes, ADR-022's
+security consequence is the load-bearing fact: bindings cannot execute
+code, their blast radius is what the engine permits, and community
+bindings are reviewable, diffable data — which is what makes hosting
+third-party adapters safe at all. Recorded here so the marketplace
+conversation starts from that framing rather than rediscovering it.
 
 ## MCP as a control-plane doorway
 
