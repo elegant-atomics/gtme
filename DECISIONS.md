@@ -395,8 +395,10 @@ are reconciled inline where they occur — the universal set's `query/source`
 claim (see ADR-023) and the relationship between `sql/filter` and
 ADR-021's membership gates (see ADR-027). The packet also names its build
 (the binding engine) "the first post-campaign-zero milestone"; repo
-ADR-021's groups build is queued too, and the relative order of the two is
-a pending human decision, deliberately not asserted by this transcription.
+ADR-021's groups build is queued too, and the relative order of the two
+was deliberately not asserted by this transcription. *Sequenced by the
+human later the same day (2026-08-16): binding engine first — SPEC §11
+M8 (bindings + simulate), M9 (groups), M10 (bundles).*
 
 ### ADR-022: Declarative binding tier — adapters as data
 **Status:** Accepted
@@ -443,8 +445,8 @@ code; their blast radius is what the engine permits. Community bindings
 are reviewable, diffable data — this is what makes a future adapter
 marketplace safe to host.
 **POC & sequencing:** the packet names this the first post-campaign-zero
-milestone (relative order against ADR-021's groups build not yet
-sequenced — see the packet intro above). Port all three real Go adapters
+milestone (confirmed by the human 2026-08-16, sequenced ahead of
+ADR-021's groups build — see the packet intro above and SPEC §11 M8). Port all three real Go adapters
 (apollo/search, harvest/profile, instantly/add-to-campaign) to bindings;
 acceptance = **receipt diff against each Go twin** on campaign-zero data
 (dry runs where delivery is involved). Three matches proves the engine in

@@ -1136,17 +1136,30 @@ offline.
   `deliveries` rows, and applies `on_missing: skip` verdicts; the same
   pipeline armed delivers, and re-run delivers nothing twice.
 
-**Next milestones (decided, not yet sequenced).** Two
-reconciliation-plus-build passes are queued: **groups** (ADR-021, spec
-impact not yet applied) and the **binding engine** (§10a — the engine and
-binding schema; apollo/search, harvest/profile, and
-instantly/add-to-campaign ported to bindings with acceptance = receipt
-diff against each Go twin on campaign-zero data, dry runs where delivery
-is involved; first net-new integration = an Attio binding, idempotency
-native; `--simulate` (§8) lands with it and bundles (§8) immediately
-after). Their relative order is a pending human decision; this list
-resumes numbering (M8, M9) once it is made. Until each builds, its
-sections above are decided contract, not shipped behavior.
+The following milestones were sequenced by the human on 2026-08-16
+(bindings before groups: receipt-diff acceptance is strongest while
+campaign-zero data and the Go twins are current, and `--simulate` then
+de-risks the groups build). Until each builds, its sections above are
+decided contract, not shipped behavior.
+
+- **M8 — binding engine + simulation gate (ADR-022, ADR-028; §10a, §8).**
+  The generic HTTP engine interpreting `spec/binding-schema.json`;
+  `apollo/search`, `harvest/profile`, and `instantly/add-to-campaign`
+  ported to bindings; the conformance kit extended to bindings;
+  `gtm run --simulate`. ✅ Acceptance: receipt diff against each Go twin
+  on campaign-zero data matches (dry runs where delivery is involved);
+  first net-new integration is a pure-YAML **Attio** binding (assert
+  endpoint, idempotency: native) passing conformance; the campaign-zero
+  pipeline simulates end-to-end with zero network calls.
+- **M9 — groups (ADR-021).** The reconciliation-plus-build pass its ADR
+  defers: spec impact applied (§3 DDL, §7/§8/§9 semantics, `gtm groups`
+  verbs), then built. ✅ Acceptance: per the ADR's spec-impact list once
+  applied.
+- **M10 — campaign bundles (ADR-029; §8).** `gtm freeze --bundle`,
+  `gtm run` on a bundle path, simulate-on-bundle. ✅ Acceptance: freeze
+  campaign zero, move the bundle to a clean ledger, simulate and dry-run
+  it successfully. Sequenced after groups so bundled pipelines carry
+  group references against built semantics from day one.
 
 Repo layout:
 ```
