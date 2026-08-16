@@ -878,7 +878,7 @@ MUST surface in the simulated receipt as a simulation gap, not silently
 pass. Acceptance criterion: the campaign-zero pipeline simulates
 end-to-end with zero network calls.
 
-### Campaign bundles — `gtm freeze --bundle` (ADR-029; decided 2026-08-16, build queued — see §11)
+### Campaign bundles — `gtm freeze --bundle` (ADR-029; built in M10)
 
 `gtm freeze --bundle DIR` produces a **campaign bundle**: a directory (or
 tarball) containing the pipeline YAML, every referenced binding at its
@@ -1321,11 +1321,11 @@ decided contract, not shipped behavior.
   `suppress:`/source group that does not exist; a `--dry-run` writes no
   `touched` and no terminus `added` events; `gtm groups` list/show/
   add/remove round-trip, including `--query` snapshot with provenance.
-- **M10 — campaign bundles (ADR-029; §8).** `gtm freeze --bundle`,
-  `gtm run` on a bundle path, simulate-on-bundle. ✅ Acceptance: freeze
-  campaign zero, move the bundle to a clean ledger, simulate and dry-run
-  it successfully. Sequenced after groups so bundled pipelines carry
-  group references against built semantics from day one.
+- **M10 — campaign bundles (ADR-029; §8). Built 2026-08-16.**
+  `gtm freeze --bundle`, `gtm run` on a bundle path, simulate-on-bundle.
+  ✅ Acceptance: freeze campaign zero, move the bundle to a clean ledger,
+  simulate and dry-run it successfully. Sequenced after groups so bundled
+  pipelines carry group references against built semantics from day one.
 
 Repo layout:
 ```
@@ -1466,6 +1466,20 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.8 — 2026-08-16 (M10 build: campaign bundles)
+**Changed:** §8 bundles marked built. Behavioral notes from the build:
+`gtm freeze` now preserves the frozen pipeline's own name (falling back
+to `frozen-<id>` only for ad hoc runs, `--name` still wins) — a bundle
+carries the campaign's identity; bundle adapter resolution takes
+precedence over built-ins and the search path while a bundle runs, so
+frozen binding versions win; external process adapters do not travel
+(executables are not data) and freeze warns per step; a bundle's
+relative input files (a source CSV) and credentials remain
+operator-provided, per "membership and cache naturally differ". Bundles
+carry each referenced binding's conformance fixtures, which is what
+makes simulate-on-bundle fully offline; content hashes are verified on
+every bundle run and a mismatch is a validation error.
 
 ### v0.7 — 2026-08-16 (M9: groups — ADR-021 reconciliation)
 **Added:** §3 layer-3 DDL — `groups`, append-only `group_events` with

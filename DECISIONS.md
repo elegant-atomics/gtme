@@ -1138,3 +1138,37 @@ tests rather than given a verb.
 end-to-end offline in the acceptance tests, with zero AI calls on the
 top-up — the determinism claim made checkable.
 **Spec impact:** None beyond v0.7 — this entry records the internal seams.
+
+### 2026-08-16 — M10 internals: campaign bundles
+
+**Question:** What exactly travels in a bundle, and how does a bundle run
+resolve against a machine that has its own adapters?
+**Choice:** (1) A bundle packs the pipeline YAML, every referenced
+binding at its exact version WITH its conformance fixtures (that is what
+makes simulate-on-bundle fully offline), the registry slice (for review
+and diffing — the binary still enforces its embedded copy, per §4a's
+one-artifact rule), and a hash manifest. AI prompts already live inside
+the pipeline YAML in v0, so there are no separate prompt files yet; saved
+queries are not referenced by pipelines in v0 and are not packed —
+recorded here so ADR-029's fuller list is a checklist for when those
+referents exist. (2) Resolution precedence while a bundle runs:
+bundle adapters/ first, then built-ins, then the search path — the frozen
+binding version wins over whatever the binary or machine carries, which
+is what "resolves nothing outside it except credentials" means
+operationally. (3) External process adapters do not travel — executables
+are not data (the ADR-022 security line, applied in reverse) — and
+freeze warns per step instead of silently narrowing the bundle. Built-in
+process adapters ship inside the gtm binary itself. (4) Content hashes
+are verified on every bundle run; a mismatch is a validation error
+naming the file — diffable means the manifest is the truth. (5) Relative
+input files (a source CSV) and credentials stay operator-provided, the
+same category as membership and cache. (6) `gtm freeze` now preserves
+the pipeline's own name (`--name` wins; `frozen-<id>` only for ad hoc
+runs) — a bundle carries the campaign's identity, and the old
+always-rename behavior predated anything caring about the name.
+**Why:** The acceptance ran the full loop offline: freeze from one
+ledger, simulate on a clean one with zero keys and zero network (source
+served from bundled fixtures), dry-run live against a local fixture
+server, tamper detection on a one-byte edit.
+**Spec impact:** Changelog v0.8; no new normative text — §8's bundle
+section was written in the v0.5 pass and this build implements it.

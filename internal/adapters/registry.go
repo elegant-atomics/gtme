@@ -116,10 +116,23 @@ func SearchPath() []string {
 	return dirs
 }
 
-// Resolve finds an adapter by id: built-ins first, then each search path
-// directory. An id with slashes may live in nested directories
-// (harvest/profile) or in one flattened directory (harvest-profile).
+// BundleDir, when set, is a campaign bundle's adapters directory (SPEC §8,
+// ADR-029): it is consulted BEFORE built-ins and the search path, so a bundle
+// resolves its own bindings — at their frozen versions — rather than whatever
+// this binary or machine happens to carry.
+var BundleDir string
+
+// Resolve finds an adapter by id: the active bundle first (if any), then
+// built-ins, then each search path directory. An id with slashes may live in
+// nested directories (harvest/profile) or in one flattened directory
+// (harvest-profile).
 func Resolve(id string) (*Resolved, error) {
+	if BundleDir != "" {
+		if res, err := resolveBindingDir(BundleDir, id); err != nil || res != nil {
+			return res, err
+		}
+	}
+
 	builtinsMu.RLock()
 	b, ok := builtins[id]
 	builtinsMu.RUnlock()
@@ -137,19 +150,8 @@ func Resolve(id string) (*Resolved, error) {
 			if err != nil {
 				// A directory holding a binding.yaml instead of an executable is a
 				// binding adapter (SPEC §10a discovery, mirror of §6).
-				if BindingLoader != nil {
-					if rawB, berr := os.ReadFile(filepath.Join(dir, "binding.yaml")); berr == nil {
-						m, newFunc, hasFixtures, lerr := BindingLoader(dir, rawB)
-						if lerr != nil {
-							return nil, fmt.Errorf("adapters: %s: %w", filepath.Join(dir, "binding.yaml"), lerr)
-						}
-						if m.ID != id {
-							return nil, fmt.Errorf("adapters: %s declares id %q, expected %q",
-								filepath.Join(dir, "binding.yaml"), m.ID, id)
-						}
-						return &Resolved{Manifest: m, Dir: dir, newFunc: newFunc,
-							Binding: true, HasFixtures: hasFixtures}, nil
-					}
+				if res, berr := resolveBindingDir(root, id); berr != nil || res != nil {
+					return res, berr
 				}
 				tried = append(tried, manifestPath)
 				continue
@@ -182,6 +184,33 @@ func Resolve(id string) (*Resolved, error) {
 		fmt.Fprintf(msg, "\n  looked for: %s", t)
 	}
 	return nil, errNotFound{msg.String()}
+}
+
+// resolveBindingDir tries to load <root>/<id-or-flattened>/binding.yaml as a
+// binding adapter. (nil, nil) means "not here"; used by both the search path
+// and bundle resolution.
+func resolveBindingDir(root, id string) (*Resolved, error) {
+	if BindingLoader == nil {
+		return nil, nil
+	}
+	for _, name := range []string{filepath.FromSlash(id), strings.ReplaceAll(id, "/", "-")} {
+		dir := filepath.Join(root, name)
+		raw, err := os.ReadFile(filepath.Join(dir, "binding.yaml"))
+		if err != nil {
+			continue
+		}
+		m, newFunc, hasFixtures, err := BindingLoader(dir, raw)
+		if err != nil {
+			return nil, fmt.Errorf("adapters: %s: %w", filepath.Join(dir, "binding.yaml"), err)
+		}
+		if m.ID != id {
+			return nil, fmt.Errorf("adapters: %s declares id %q, expected %q",
+				filepath.Join(dir, "binding.yaml"), m.ID, id)
+		}
+		return &Resolved{Manifest: m, Dir: dir, newFunc: newFunc,
+			Binding: true, HasFixtures: hasFixtures}, nil
+	}
+	return nil, nil
 }
 
 // Installed lists every adapter manifest gtm can currently resolve: every

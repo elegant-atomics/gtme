@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/trevorfox/gtm/internal/adapters"
+	"github.com/trevorfox/gtm/internal/bundle"
 	"github.com/trevorfox/gtm/internal/httpx"
 	"github.com/trevorfox/gtm/internal/ledger"
 	"github.com/trevorfox/gtm/internal/pipeline"
@@ -36,9 +38,26 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		return fail(ExitValidation, "--simulate runs are ephemeral and cannot be resumed")
 	}
 
-	p, err := pipeline.Load(positional[0])
-	if err != nil {
-		return fail(ExitValidation, "%v", err)
+	// A bundle path is accepted wherever a pipeline path is (SPEC §8,
+	// ADR-029): hashes verify, the pipeline loads from inside, and the
+	// bundle's own bindings resolve first — nothing outside it except
+	// credentials.
+	var p *pipeline.Pipeline
+	if bundle.IsBundle(positional[0]) {
+		m, bp, err := bundle.Load(positional[0])
+		if err != nil {
+			return fail(ExitValidation, "%v", err)
+		}
+		p = bp
+		adapters.BundleDir = bundle.AdaptersDir(positional[0])
+		defer func() { adapters.BundleDir = "" }()
+		fmt.Fprintf(env.Stderr, "bundle %s (frozen from run %s) — hashes verified\n", m.Name, m.SourceRunID)
+	} else {
+		loaded, err := pipeline.Load(positional[0])
+		if err != nil {
+			return fail(ExitValidation, "%v", err)
+		}
+		p = loaded
 	}
 	plan, err := planner.Build(p)
 	if err != nil {

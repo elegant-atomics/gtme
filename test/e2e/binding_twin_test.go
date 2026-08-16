@@ -49,6 +49,16 @@ func (h *harness) writeBinding(newID string, yamlPath string) {
 	if err := os.WriteFile(filepath.Join(dir, "binding.yaml"), []byte(doc), 0o644); err != nil {
 		h.t.Fatalf("write binding: %v", err)
 	}
+	// The conformance fixtures travel with the binding — they are what
+	// --simulate serves and what a bundle packs (SPEC §8).
+	if fixtures, err := os.ReadFile(filepath.Join(filepath.Dir(yamlPath), "fixtures", "conformance.json")); err == nil {
+		if err := os.MkdirAll(filepath.Join(dir, "fixtures"), 0o755); err != nil {
+			h.t.Fatalf("mkdir fixtures: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "fixtures", "conformance.json"), fixtures, 0o644); err != nil {
+			h.t.Fatalf("write fixtures: %v", err)
+		}
+	}
 }
 
 // ledgerFields reads every field value in a harness ledger, keyed by identity.

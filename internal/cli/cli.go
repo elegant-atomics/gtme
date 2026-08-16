@@ -138,6 +138,7 @@ Usage:
   gtm show --run last               list a run's records
   gtm runs [RUN_ID|last]            list runs / show one run's receipt
   gtm freeze [RUN_ID|last]          rebuild a pipeline.yaml from a run
+  gtm freeze [RUN_ID|last] --bundle DIR   assemble a portable campaign bundle
   gtm secret set KEY [VALUE]        store a credential in ~/.gtm/secrets
   gtm groups                        list groups with their derived character
   gtm groups show NAME              members and recent events
