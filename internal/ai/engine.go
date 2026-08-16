@@ -81,11 +81,14 @@ func Resolve(engine, model string, getenv func(string) string) (Engine, string, 
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	if v := os.Getenv("GTM_AI_ENGINE"); v != "" {
+	// The Ports view is consulted first so the runner can put a step onto the
+	// fixture engine under --simulate (SPEC §8) without touching process env;
+	// process env still works for tests and operators.
+	if v := envOverride(getenv, "GTM_AI_ENGINE"); v != "" {
 		engine = v
 	}
 	if model == "" {
-		model = os.Getenv("GTM_AI_MODEL")
+		model = envOverride(getenv, "GTM_AI_MODEL")
 	}
 	if model == "" {
 		model = DefaultModel
@@ -99,9 +102,40 @@ func Resolve(engine, model string, getenv func(string) string) (Engine, string, 
 		e, err := newClaudeCodeEngine()
 		return e, model, err
 	case EngineFixture:
-		e, err := newFixtureEngine()
+		e, err := newFixtureEngine(getenv)
 		return e, model, err
 	default:
 		return nil, model, fmt.Errorf("ai: unknown engine %q (want %q or %q)", engine, EngineAPI, EngineClaudeCode)
 	}
+}
+
+func envOverride(getenv func(string) string, key string) string {
+	if v := getenv(key); v != "" {
+		return v
+	}
+	return os.Getenv(key)
+}
+
+// ProvenanceModel is the model identifier ai/* provenance records (SPEC §10a,
+// ADR-026: `ai/compose @ <model-id>`). It mirrors Resolve's engine/model
+// resolution without constructing an engine, so the runner — which writes
+// provenance — computes the same answer the adapter will. The fixture engine
+// reports "fixture", which is what marks simulated judgments as synthetic.
+func ProvenanceModel(engine, model string, getenv func(string) string) string {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if v := envOverride(getenv, "GTM_AI_ENGINE"); v != "" {
+		engine = v
+	}
+	if strings.TrimSpace(engine) == EngineFixture {
+		return "fixture"
+	}
+	if model == "" {
+		model = envOverride(getenv, "GTM_AI_MODEL")
+	}
+	if model == "" {
+		model = DefaultModel
+	}
+	return model
 }

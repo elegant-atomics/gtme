@@ -13,7 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"strings"
+
 	"github.com/trevorfox/gtm/internal/adapters"
+	"github.com/trevorfox/gtm/internal/ai"
+	"github.com/trevorfox/gtm/internal/binding"
 	"github.com/trevorfox/gtm/internal/identity"
 	"github.com/trevorfox/gtm/internal/ledger"
 	"github.com/trevorfox/gtm/internal/planner"
@@ -40,6 +44,13 @@ type Options struct {
 	// resolved and receipted per record, but no deliver adapter is invoked and
 	// no deliveries row is written. Every other step runs normally.
 	DryRun bool
+	// Simulate executes the whole pipeline offline (SPEC §8, ADR-028):
+	// bindings serve their conformance fixtures, AI steps run on the fixture
+	// engine, credentialed process adapters are stubbed (a visible simulation
+	// gap), and deliver steps behave as under DryRun. The caller is expected
+	// to hand in an ephemeral ledger — nothing a simulated run writes may
+	// reach the durable identity layer.
+	Simulate bool
 }
 
 // StepStat is one step's contribution to the receipt.
@@ -52,8 +63,10 @@ type StepStat struct {
 	CacheSkips     int
 	Filtered       int // failed a filter verdict
 	Failed         int
-	Gated          int // excluded by when:
-	Skipped        int // deliver records held back by on_missing (SPEC §8)
+	Gated          int  // excluded by when:
+	Skipped        int  // deliver records held back by on_missing (SPEC §8)
+	SimGap         bool // stubbed under --simulate: no fixtures to serve (SPEC §8)
+	SimGapRecords  int  // records that passed through the gap untouched
 	CostUSD        float64
 	AvoidedUSD     float64
 	AvoidedUnknown bool
@@ -75,10 +88,11 @@ type RecordVariables struct {
 
 // Result is the outcome of a run.
 type Result struct {
-	RunID  string
-	Status string
-	DryRun bool
-	Steps  []StepStat
+	RunID     string
+	Status    string
+	DryRun    bool
+	Simulated bool
+	Steps     []StepStat
 }
 
 // Concurrency resolves the worker pool size: the option, else GTM_CONCURRENCY,
@@ -96,14 +110,18 @@ func Concurrency(opt int) int {
 }
 
 type runner struct {
-	l      *ledger.Ledger
-	plan   *planner.Plan
-	stderr io.Writer
-	conc   int
-	runID  string
-	dry    bool
-	reg    *registry.Registry
-	now    func() time.Time
+	l        *ledger.Ledger
+	plan     *planner.Plan
+	stderr   io.Writer
+	conc     int
+	runID    string
+	dry      bool
+	simulate bool
+	// aiFixture is the synthesized $auto script injected into AI steps under
+	// --simulate when the operator has no recorded one (SPEC §8).
+	aiFixture string
+	reg       *registry.Registry
+	now       func() time.Time
 	// out is the downstream NDJSON stream in pipe mode, nil for `gtm run`.
 	out *protocol.Writer
 
@@ -124,16 +142,26 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("runner: %w", err)
 	}
 	r := &runner{
-		l:      o.Ledger,
-		plan:   o.Plan,
-		stderr: o.Stderr,
-		conc:   Concurrency(o.Concurrency),
-		dry:    o.DryRun,
-		reg:    reg,
-		now:    time.Now,
-		stats:  map[string]*StepStat{},
+		l:        o.Ledger,
+		plan:     o.Plan,
+		stderr:   o.Stderr,
+		conc:     Concurrency(o.Concurrency),
+		dry:      o.DryRun || o.Simulate,
+		simulate: o.Simulate,
+		reg:      reg,
+		now:      time.Now,
+		stats:    map[string]*StepStat{},
 	}
-	if r.dry {
+	switch {
+	case r.simulate:
+		fmt.Fprintln(r.stderr, "simulate: fixtures only — no network, no spend, nothing sends, nothing persists")
+		path, err := writeAutoFixture()
+		if err != nil {
+			return nil, fmt.Errorf("runner: %w", err)
+		}
+		r.aiFixture = path
+		defer os.Remove(path)
+	case r.dry:
 		fmt.Fprintln(r.stderr, "dry run: deliver steps will resolve and receipt their variables, but nothing sends")
 	}
 
@@ -172,7 +200,43 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		runErr = err
 	}
 
-	return &Result{RunID: r.runID, Status: status, DryRun: r.dry, Steps: r.collect()}, runErr
+	return &Result{RunID: r.runID, Status: status, DryRun: r.dry && !r.simulate,
+		Simulated: r.simulate, Steps: r.collect()}, runErr
+}
+
+// writeAutoFixture synthesizes the fixture-engine script simulated AI steps
+// fall back to when the operator recorded none: every batch gets a valid,
+// visibly synthetic answer (SPEC §8; the fixture engine marks its output with
+// model "fixture", which the ai/* provenance carries).
+func writeAutoFixture() (string, error) {
+	f, err := os.CreateTemp("", "gtm-simulate-ai-*.json")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(`["$auto"]`); err != nil {
+		f.Close()
+		return "", err
+	}
+	return f.Name(), f.Close()
+}
+
+// isAIStep reports an operation-named AI step (ADR-026).
+func isAIStep(st *planner.Step) bool {
+	return strings.HasPrefix(st.Manifest.ID, "ai/")
+}
+
+// stubbed reports whether a step is served nothing under --simulate: a binding
+// without fixtures, or a credentialed process adapter (network by declaration)
+// that is not an AI step. Stubbed steps are the simulation gaps the receipt
+// must surface (SPEC §8).
+func (r *runner) stubbed(st *planner.Step) bool {
+	if !r.simulate || isAIStep(st) || st.IsDeliver {
+		return false
+	}
+	if st.Adapter != nil && st.Adapter.Binding {
+		return !st.Adapter.HasFixtures
+	}
+	return len(st.Manifest.Credentials) > 0
 }
 
 func (r *runner) execute(ctx context.Context) error {
@@ -218,11 +282,33 @@ func (r *runner) prov(stepID string) ledger.Provenance {
 // yet: the caller streams OPEN plus its records with Session.SendStream so writes
 // and reads overlap.
 func (r *runner) openSession(ctx context.Context, st *planner.Step) (*adapters.Session, error) {
-	sess, err := st.Adapter.Open(ctx, adapters.Ports{Env: st.Credentials, Log: r.stderr})
+	sess, err := st.Adapter.Open(ctx, adapters.Ports{Env: r.sessionEnv(st), Log: r.stderr})
 	if err != nil {
 		return nil, fmt.Errorf("runner: %s: %w", st.ID, err)
 	}
 	return sess, nil
+}
+
+// sessionEnv is a step's Ports environment: its resolved credentials, plus the
+// simulate signals (SPEC §8) — bindings switch to fixture-served mode, AI
+// steps to the fixture engine (an operator-recorded GTM_AI_FIXTURE in the
+// process env still wins over the synthesized $auto script).
+func (r *runner) sessionEnv(st *planner.Step) map[string]string {
+	if !r.simulate {
+		return st.Credentials
+	}
+	env := make(map[string]string, len(st.Credentials)+3)
+	for k, v := range st.Credentials {
+		env[k] = v
+	}
+	env[binding.SimulateEnv] = "1"
+	if isAIStep(st) {
+		env["GTM_AI_ENGINE"] = ai.EngineFixture
+		if os.Getenv("GTM_AI_FIXTURE") == "" {
+			env["GTM_AI_FIXTURE"] = r.aiFixture
+		}
+	}
+	return env
 }
 
 // openMessage is the OPEN that starts every session (SPEC §5). A deliver
@@ -263,6 +349,15 @@ func (r *runner) runSource(ctx context.Context) error {
 		stat.Out = len(records)
 		fmt.Fprintf(r.stderr, "%s: already sourced (%d records)\n", st.ID, len(records))
 		return nil
+	}
+
+	if r.stubbed(st) {
+		// A stubbed source under --simulate sources nothing: a visible gap, not a
+		// silent pass (SPEC §8).
+		r.bump(st, func(s *StepStat) { s.SimGap = true })
+		fmt.Fprintf(r.stderr, "%s: simulation gap — nothing to source from (no fixtures)\n", st.ID)
+		return r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done",
+			map[string]any{"records": 0, "simulation_gap": true})
 	}
 
 	sess, err := r.openSession(ctx, st)
@@ -354,7 +449,7 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 		return err
 	}
 
-	if _, err := r.l.WriteFieldMap(ctx, ident.ID, st.Manifest.Source(), r.prov(st.ID), m.Fields, m.Confidence); err != nil {
+	if _, err := r.l.WriteFieldMap(ctx, ident.ID, r.source(st), r.prov(st.ID), m.Fields, m.Confidence); err != nil {
 		return err
 	}
 	if err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
@@ -421,6 +516,19 @@ func (r *runner) emit(key protocol.Key, fields map[string]any) {
 	if err := r.out.Write(protocol.Record(key, fields, nil)); err != nil {
 		fmt.Fprintf(r.stderr, "warning: writing downstream: %v\n", err)
 	}
+}
+
+// source is the provenance string a step's writes carry. AI steps record the
+// engine's model identifier (SPEC §10a, ADR-026): the id says what kind of
+// fact, provenance says who produced it.
+func (r *runner) source(st *planner.Step) string {
+	if isAIStep(st) {
+		engine, _ := st.Config["engine"].(string)
+		model, _ := st.Config["model"].(string)
+		getenv := func(k string) string { return r.sessionEnv(st)[k] }
+		return st.Manifest.ID + " @ " + ai.ProvenanceModel(engine, model, getenv)
+	}
+	return st.Manifest.Source()
 }
 
 // checkRegistry is enforcement layer 2 (SPEC §4a): canonical fields in adapter

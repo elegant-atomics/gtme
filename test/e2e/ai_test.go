@@ -102,8 +102,11 @@ func TestAIStepsFilterComposeAndDeliver(t *testing.T) {
 	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'first_line'`); n != 2 {
 		t.Errorf("first_line values = %d, want 2 (the filtered record must not be composed)", n)
 	}
+	// ai/* provenance carries the engine's model identifier (SPEC §10a,
+	// ADR-026) — under the fixture engine, that identifier is "fixture",
+	// which is also what marks the judgment as synthetic.
 	if n := h.queryInt(
-		`SELECT count(*) FROM field_values WHERE field = 'ps_line' AND source = 'ai/compose@1'`); n != 2 {
+		`SELECT count(*) FROM field_values WHERE field = 'ps_line' AND source = 'ai/compose @ fixture'`); n != 2 {
 		t.Errorf("ps_line values = %d, want 2", n)
 	}
 

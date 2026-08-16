@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"os"
 
 	"github.com/trevorfox/gtm/internal/httpx"
 	"github.com/trevorfox/gtm/internal/ledger"
@@ -19,12 +21,19 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	resume := fs.String("resume", "", "resume an existing run by id (or 'last')")
 	concurrency := fs.Int("concurrency", 0, "worker pool size per step (default 4 or $GTM_CONCURRENCY)")
 	dryRun := fs.Bool("dry-run", false, "hold deliver steps back: resolve and receipt their variables, send nothing (SPEC §8)")
+	simulate := fs.Bool("simulate", false, "execute the whole pipeline offline from fixtures: no network, no spend, nothing sends, nothing persists (SPEC §8)")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtm run pipeline.yaml [--resume RUN_ID] [--dry-run]")
+		return fail(ExitValidation, "usage: gtm run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]")
+	}
+	if *simulate && *dryRun {
+		return fail(ExitValidation, "--simulate already withholds delivery; drop --dry-run")
+	}
+	if *simulate && *resume != "" {
+		return fail(ExitValidation, "--simulate runs are ephemeral and cannot be resumed")
 	}
 
 	p, err := pipeline.Load(positional[0])
@@ -33,7 +42,13 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	}
 	plan, err := planner.Build(p)
 	if err != nil {
-		return planFailure(err)
+		// A simulated run touches no live API, so a missing credential must not
+		// block it (SPEC §8: an agent validates offline before anyone sets keys);
+		// every other plan problem still does.
+		if !*simulate || !onlyCredentialProblems(err) {
+			return planFailure(err)
+		}
+		fmt.Fprintf(env.Stderr, "simulate: ignoring missing credentials (%v)\n", err)
 	}
 
 	l, err := openLedger(ctx)
@@ -41,6 +56,19 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	defer l.Close()
+
+	if *simulate {
+		// Ephemerality is the durability exclusion (SPEC §8): the simulated run
+		// executes against a throwaway copy of the ledger, so its writes cannot
+		// reach projection or cache and it never appears in `gtm runs`.
+		tmp, cleanup, err := ephemeralLedger(ctx, l)
+		if err != nil {
+			return fail(ExitOther, "%v", err)
+		}
+		defer cleanup()
+		l.Close()
+		l = tmp
+	}
 
 	runID, err := resolveRunID(ctx, l, *resume)
 	if err != nil {
@@ -54,6 +82,7 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		Concurrency: *concurrency,
 		ResumeRunID: runID,
 		DryRun:      *dryRun,
+		Simulate:    *simulate,
 	})
 	if res != nil {
 		runner.PrintReceipt(env.Stderr, res)
@@ -91,6 +120,47 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 	}
 	planner.Print(env.Stderr, plan)
 	return nil
+}
+
+// onlyCredentialProblems reports whether every plan problem is a missing
+// credential.
+func onlyCredentialProblems(err error) bool {
+	var pe *planner.Errors
+	if !errors.As(err, &pe) || len(pe.Problems) == 0 {
+		return false
+	}
+	for _, p := range pe.Problems {
+		if p.Kind != planner.KindCredential {
+			return false
+		}
+	}
+	return true
+}
+
+// ephemeralLedger copies the ledger into a throwaway file (VACUUM INTO — a
+// consistent snapshot even under WAL) and opens it. cleanup removes it.
+func ephemeralLedger(ctx context.Context, l *ledger.Ledger) (*ledger.Ledger, func(), error) {
+	f, err := os.CreateTemp("", "gtm-simulate-*.db")
+	if err != nil {
+		return nil, nil, err
+	}
+	path := f.Name()
+	f.Close()
+	os.Remove(path) // VACUUM INTO refuses an existing file
+	if _, err := l.DB().ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
+		return nil, nil, fmt.Errorf("copying ledger for simulation: %w", err)
+	}
+	tmp, err := ledger.Open(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(path)
+		os.Remove(path + "-wal")
+		os.Remove(path + "-shm")
+	}
+	return tmp, cleanup, nil
 }
 
 // planFailure maps plan problems onto exit codes (SPEC §8): contract and config

@@ -49,6 +49,7 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		return err
 	}
 
+	stub := r.stubbed(st)
 	var work []*item
 	for _, rr := range records {
 		if err := ctx.Err(); err != nil {
@@ -68,6 +69,22 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			continue
 		}
 
+		if stub {
+			// A stubbed step under --simulate passes records through untouched: no
+			// adapter call, no fields, no verdicts — a counted gap (SPEC §8). A
+			// stubbed filter judges nothing, so downstream when: gates will hold
+			// records back; that consequence is the gap made visible, not a bug.
+			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), rr.IdentityID, "simulated",
+				map[string]any{"simulation_gap": true}); err != nil {
+				return err
+			}
+			if err := r.l.SetRunRecordState(ctx, r.runID, rr.IdentityID, st.ID); err != nil {
+				return err
+			}
+			r.bump(st, func(s *StepStat) { s.SimGap = true; s.SimGapRecords++ })
+			continue
+		}
+
 		it, err := r.prepare(ctx, st, rr.IdentityID)
 		if err != nil {
 			return err
@@ -77,6 +94,10 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		}
 	}
 
+	if stub {
+		r.printStepLine(st)
+		return nil
+	}
 	return r.dispatch(ctx, st, work)
 }
 
@@ -503,7 +524,7 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 		return r.failItem(ctx, st, it, err.Error())
 	}
 
-	n, err := r.l.WriteFieldMap(ctx, it.identityID, st.Manifest.Source(), r.prov(st.ID), m.Fields, m.Confidence)
+	n, err := r.l.WriteFieldMap(ctx, it.identityID, r.source(st), r.prov(st.ID), m.Fields, m.Confidence)
 	if err != nil {
 		return err
 	}

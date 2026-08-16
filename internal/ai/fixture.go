@@ -33,8 +33,11 @@ var (
 	fixtures   = map[string]*fixtureEngine{}
 )
 
-func newFixtureEngine() (Engine, error) {
-	path := os.Getenv("GTM_AI_FIXTURE")
+func newFixtureEngine(getenv func(string) string) (Engine, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	path := envOverride(getenv, "GTM_AI_FIXTURE")
 	if path == "" {
 		return nil, fmt.Errorf("ai: engine fixture needs GTM_AI_FIXTURE to point at a responses file")
 	}

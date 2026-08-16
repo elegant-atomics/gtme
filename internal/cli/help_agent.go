@@ -44,7 +44,7 @@ var agentVerbs = []agentVerb{
 	{"gtm init", "create ~/.gtm and the ledger"},
 	{"gtm secret set KEY [VALUE]", "store a credential in ~/.gtm/secrets (VALUE omitted = prompt, no echo)"},
 	{"gtm plan pipeline.yaml", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend"},
-	{"gtm run pipeline.yaml [--resume RUN_ID] [--dry-run]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending"},
+	{"gtm run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending; --simulate executes everything offline from fixtures (no network, no spend, nothing persists)"},
 	{"gtm query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
 	{"gtm show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},
 	{"gtm show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},

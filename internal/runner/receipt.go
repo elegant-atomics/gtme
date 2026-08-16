@@ -13,7 +13,10 @@ import (
 // to stderr, because stdout is data.
 func PrintReceipt(w io.Writer, res *Result) {
 	title := res.Status
-	if res.DryRun {
+	switch {
+	case res.Simulated:
+		title += " (SIMULATED — fixtures only; nothing sent, nothing persisted)"
+	case res.DryRun:
 		title += " (dry run — nothing sent)"
 	}
 	fmt.Fprintf(w, "\nrun %s — %s\n", res.RunID, title)
@@ -48,6 +51,20 @@ func PrintReceipt(w io.Writer, res *Result) {
 			dash(s.Filtered), dash(s.Failed), money(s.CostUSD), avoided)
 	}
 	tw.Flush()
+
+	// Simulation gaps (SPEC §8): a binding without fixtures, or a credentialed
+	// process adapter with nothing to serve, is surfaced — never silently passed.
+	for _, s := range res.Steps {
+		if !s.SimGap {
+			continue
+		}
+		if s.SimGapRecords > 0 {
+			fmt.Fprintf(w, "simulation gap: %s (%s) — %d record(s) passed through untouched (no fixtures to serve)\n",
+				s.ID, s.Use, s.SimGapRecords)
+		} else {
+			fmt.Fprintf(w, "simulation gap: %s (%s) — no fixtures to serve\n", s.ID, s.Use)
+		}
+	}
 
 	// Deliver records held back by on_missing, each with its reason (SPEC §8).
 	for _, s := range res.Steps {
