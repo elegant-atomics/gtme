@@ -58,8 +58,8 @@ its shape.
 
 ## Groups, option C — rules living on the group
 
-DECISIONS.md ADR-021 (proposed) deliberately stops at "groups remember,
-pipelines decide": the group tables carry membership and history, and all
+DECISIONS.md ADR-021 (accepted; built as milestone M9, SPEC v0.7)
+deliberately stops at "groups remember, pipelines decide": the group tables carry membership and history, and all
 policy lives in plan-validatable pipeline YAML. The excluded half is
 groups that *own* behavior, parked here so it isn't built early:
 

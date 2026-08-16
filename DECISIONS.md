@@ -265,7 +265,10 @@ missing model layer between durable facts and per-run bookkeeping.
 conversation the same day: segments-redundancy, filter-orthogonality,
 nondeterminism, and after-the-fact-grouping objections each tested and
 absorbed; human-approved. Spec impact not yet applied — a separate
-reconciliation-plus-build pass, like ADR-017/018/019's.)
+reconciliation-plus-build pass, like ADR-017/018/019's. *Update, later
+the same day:* that pass ran as milestone M9 on the human's instruction —
+spec impact applied as SPEC v0.7 and built, `make check` green; see the
+M9 implementation-decision entry.)
 **Naming note:** `groups` is verified safe unquoted as a SQLite table name
 (the reserved word is `GROUP`; joins and `GROUP BY` against a `groups`
 table coexist cleanly, tested on 3.43). MySQL-class engines reserve

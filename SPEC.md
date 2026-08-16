@@ -1305,7 +1305,7 @@ decided contract, not shipped behavior.
   first net-new integration is a pure-YAML **Attio** binding (assert
   endpoint, idempotency: native) passing conformance; the campaign-zero
   pipeline simulates end-to-end with zero network calls.
-- **M9 — groups (ADR-021).** Spec impact applied (changelog v0.7: §3
+- **M9 — groups (ADR-021). Built 2026-08-16.** Spec impact applied (changelog v0.7: §3
   DDL, §7 gates and plan checks, §8 touch/suppress/terminus and
   `gtm groups`, §9 surface), then built. ✅ Unit: the membership view
   derives current membership from added/removed sequences (last event
