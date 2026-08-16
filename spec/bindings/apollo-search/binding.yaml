@@ -1,8 +1,7 @@
-# apollo/search — reference binding port of the Go apollo/search adapter
-# (SPEC §11 M8: acceptance is a receipt diff against the Go twin). Not
-# registered as a built-in — the id belongs to the Go twin; install it as an
-# external binding adapter, or let the conformance kit and the M8 diff load
-# it directly.
+# apollo/search — THE apollo/search adapter: a registered built-in binding.
+# Began as the reference port of the Go adapter; the M8 receipt diff proved
+# full field parity and the Go scaffolding was retired (SPEC v0.11), making
+# this the first vendor source shipped as pure YAML.
 #
 # Endpoint: POST https://api.apollo.io/api/v1/mixed_people/search
 # Auth:     X-Api-Key header

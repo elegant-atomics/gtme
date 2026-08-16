@@ -11,7 +11,6 @@ import (
 	"github.com/trevorfox/gtm/internal/binding"
 
 	_ "github.com/trevorfox/gtm/internal/adapters/aisteps"
-	_ "github.com/trevorfox/gtm/internal/adapters/apollo"
 	_ "github.com/trevorfox/gtm/internal/adapters/csvdeliver"
 	_ "github.com/trevorfox/gtm/internal/adapters/csvsource"
 	_ "github.com/trevorfox/gtm/internal/adapters/harvest"

@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/adapters/apollo"
 	"github.com/trevorfox/gtm/internal/adapters/harvest"
 	"github.com/trevorfox/gtm/internal/adapters/instantly"
 	"github.com/trevorfox/gtm/internal/ai"
+	"github.com/trevorfox/gtm/internal/binding"
 	"github.com/trevorfox/gtm/internal/protocol"
 )
 
@@ -81,7 +81,15 @@ func drive(t *testing.T, a adapters.Adapter, config map[string]any, env map[stri
 // TestApolloSearchLive spends Apollo credits: one small search.
 func TestApolloSearchLive(t *testing.T) {
 	key := requireEnv(t, "APOLLO_API_KEY")
-	msgs := drive(t, &apollo.Adapter{},
+	apolloFS, err := binding.ShippedFS("apollo-search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := binding.LoadFS(apolloFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := drive(t, &binding.Engine{B: b},
 		map[string]any{"titles": []any{"vp marketing"}, "limit": float64(2), "per_page": float64(2)},
 		map[string]string{"APOLLO_API_KEY": key})
 
@@ -93,7 +101,7 @@ func TestApolloSearchLive(t *testing.T) {
 		}
 	}
 	if people == 0 {
-		t.Error("expected at least one person; check the field mapping in apollo/http.go")
+		t.Error("expected at least one person; check the extraction in spec/bindings/apollo-search/binding.yaml")
 	}
 }
 

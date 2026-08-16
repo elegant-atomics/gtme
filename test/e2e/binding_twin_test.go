@@ -12,6 +12,7 @@ package e2e
 // on adapter id.
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -118,44 +119,68 @@ func fixtureServer(t *testing.T, routes map[string]string) *httptest.Server {
 	return srv
 }
 
-func TestBindingTwinApollo(t *testing.T) {
-	srv := fixtureServer(t, map[string]string{
-		"/api/v1/mixed_people/search": "internal/adapters/apollo/fixtures/search.json",
-	})
-	yaml := func(use string) string {
-		return fmt.Sprintf(`name: apollo-twin
+// bindingFixtureServer serves a shipped binding's conformance responses over
+// HTTP — the fixture source of truth now that the Go twins' fixture files
+// retire with them.
+func bindingFixtureServer(t *testing.T, name string) *httptest.Server {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "spec", "bindings", name, "fixtures", "conformance.json"))
+	if err != nil {
+		t.Fatalf("fixtures for %s: %v", name, err)
+	}
+	var set struct {
+		Responses []struct {
+			Match  string          `json:"match"`
+			Status int             `json:"status"`
+			Body   json.RawMessage `json:"body"`
+		} `json:"responses"`
+	}
+	if err := json.Unmarshal(raw, &set); err != nil {
+		t.Fatalf("fixtures for %s: %v", name, err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Method + " " + r.URL.Path
+		for _, res := range set.Responses {
+			if strings.Contains(key, res.Match) {
+				w.Header().Set("Content-Type", "application/json")
+				if res.Status != 0 {
+					w.WriteHeader(res.Status)
+				}
+				w.Write(res.Body)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestApolloBuiltinBinding: apollo/search is a registered built-in binding —
+// the Go scaffolding is retired, and the id resolves to pure YAML that
+// sources records end to end.
+func TestApolloBuiltinBinding(t *testing.T) {
+	srv := bindingFixtureServer(t, "apollo-search")
+	h := newHarness(t)
+	h.write("p.yaml", fmt.Sprintf(`name: apollo-binding
 source:
-  use: %s
+  use: apollo/search
   with:
     query: vp marketing
     base_url: %q
-`, use, srv.URL)
+`, srv.URL))
+	res := h.runWithEnv([]string{"APOLLO_API_KEY=k"}, "", "run", "p.yaml")
+	if res.code != 0 {
+		t.Fatalf("exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-
-	run := func(use string, install bool) *harness {
-		h := newHarness(t)
-		if install {
-			h.writeBinding(use, filepath.Join(repoRoot(), "spec", "bindings", "apollo-search", "binding.yaml"))
-		}
-		h.write("p.yaml", yaml(use))
-		res := h.runWithEnv([]string{"APOLLO_API_KEY=k"}, "", "run", "p.yaml")
-		if res.code != 0 {
-			t.Fatalf("%s exit = %d\nstderr:\n%s", use, res.code, res.stderr)
-		}
-		return h
+	fields := ledgerFields(h)
+	jane := fields["person:jane.doe@acme.com"]
+	if jane == nil || jane["seniority"] != `"vp"` || jane["company_domain"] != `"acme.com"` {
+		t.Errorf("jane = %v", jane)
 	}
-	goTwin := run("apollo/search", false)
-	bindTwin := run("apollox/search", true)
-
-	if g, b := identityKeys(goTwin), identityKeys(bindTwin); !reflect.DeepEqual(g, b) {
-		t.Errorf("identities differ:\n  go:      %v\n  binding: %v", g, b)
-	}
-	// Full field parity — every field, every value, both directions.
-	if g, b := ledgerFields(goTwin), ledgerFields(bindTwin); !reflect.DeepEqual(g, b) {
-		t.Errorf("fields differ:\n  go:      %v\n  binding: %v", g, b)
-	}
-	if g, b := costTotal(goTwin), costTotal(bindTwin); g != b {
-		t.Errorf("cost totals differ: go %v, binding %v", g, b)
+	// The engine attached payloads under the default ADR-030 declaration.
+	if n := h.queryInt(`SELECT count(*) FROM payloads WHERE adapter = 'apollo/search'`); n != 2 {
+		t.Errorf("payloads = %d, want 2", n)
 	}
 }
 

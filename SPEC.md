@@ -1064,9 +1064,11 @@ group: q3-qualified         # terminus: records completing the run are added
 
 ## 10. v0 adapters — DECIDED
 
-All built-in, Go, under `internal/adapters/<name>/`, each with embedded
-manifest + a `fixtures/` dir (sample request/response JSON) + unit tests
-that run offline against fixtures.
+All built-in: Go process adapters under `internal/adapters/<name>/`
+(embedded manifest + a `fixtures/` dir + unit tests that run offline
+against fixtures), except where an entry notes it now ships as a
+registered binding under `spec/bindings/` (§10a) — the same id, the same
+contract, pure YAML.
 
 1. **`csv/source`** — reads a CSV path from config; header row → field
    names; `email`/`linkedin_url`/`name`/`company_domain` columns feed
@@ -1086,7 +1088,11 @@ that run offline against fixtures.
    `api.apollo.io/api/v1/mixed_people/search` with `X-Api-Key`
    (`APOLLO_API_KEY`); config: `query`, `limit`; paginate; map
    name/title/email/linkedin/org fields; also emit the company as a related
-   identity: create `works_at` relation when org domain present.
+   identity: create `works_at` relation when org domain present. **Ships as
+   the registered built-in binding** `spec/bindings/apollo-search/` since
+   v0.11 — the M8 receipt diff proved full field parity and the Go
+   scaffolding was retired (works_at emission was always runner-owned and
+   is unaffected).
 3. **`ai/filter`** (filter) — batch records into the prompt with a strict
    JSON-array output schema `[{identity_key, pass, reason}]`; emit VERDICTs;
    config supports `uses:` (§9, ADR-004).
@@ -1585,6 +1591,14 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.11 — 2026-08-16 (apollo/search Go scaffolding retired)
+**Changed:** `apollo/search` is now the registered built-in binding
+(`spec/bindings/apollo-search/`); the Go adapter — never run live (no key
+was ever set) and proven redundant by M8's full-field-parity receipt diff
+— is removed. First vendor source shipped as pure YAML. The live smoke
+test drives the binding engine. harvest/instantly Go adapters remain (they
+carry tier-2 capabilities their bindings deliberately omit).
 
 ### v0.10 — 2026-08-16 (M12: the universal Out floor)
 **Added:** §10a `http/deliver` (anonymous deliver binding; step-level

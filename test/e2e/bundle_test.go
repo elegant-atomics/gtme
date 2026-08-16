@@ -15,9 +15,7 @@ import (
 )
 
 func TestBundleFreezeMoveSimulateDry(t *testing.T) {
-	srv := fixtureServer(t, map[string]string{
-		"/api/v1/mixed_people/search": "internal/adapters/apollo/fixtures/search.json",
-	})
+	srv := bindingFixtureServer(t, "apollo-search")
 	keys := []string{"APOLLO_API_KEY=k", "ATTIO_API_KEY=k"}
 
 	// Harness A: an external binding source feeding the built-in attio/assert
