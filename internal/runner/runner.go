@@ -212,6 +212,15 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		fmt.Fprintf(r.stderr, "run %s (%s)\n", run.ID, run.Pipeline)
 	}
 
+	// Opportunistic payload eviction (SPEC §8, ADR-030): every armed run keeps
+	// the cache tier bounded without a daemon. Simulated runs skip it — their
+	// ledger is a throwaway copy.
+	if !r.simulate {
+		if n, err := r.l.PurgeExpiredPayloads(ctx); err == nil && n > 0 {
+			fmt.Fprintf(r.stderr, "evicted %d expired payload(s) (ADR-030)\n", n)
+		}
+	}
+
 	runErr := r.execute(ctx)
 
 	status := ledger.StatusDone
@@ -254,11 +263,16 @@ func isAIStep(st *planner.Step) bool {
 // that is not an AI step. Stubbed steps are the simulation gaps the receipt
 // must surface (SPEC §8).
 func (r *runner) stubbed(st *planner.Step) bool {
-	if !r.simulate || isAIStep(st) || st.IsDeliver || st.IsGroupSource {
+	if !r.simulate || isAIStep(st) || st.IsDeliver || st.IsGroupSource || st.IsSQL {
 		return false
 	}
 	if st.Adapter != nil && st.Adapter.Binding {
 		return !st.Adapter.HasFixtures
+	}
+	if st.Manifest != nil && st.Manifest.ID == binding.HTTPEnrichID {
+		// Live fetching only; replaying retained payloads is the ROADMAP
+		// simulate-replay verb (SPEC §10a).
+		return true
 	}
 	return st.Manifest != nil && len(st.Manifest.Credentials) > 0
 }
@@ -558,6 +572,9 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 	if _, err := r.l.WriteFieldMap(ctx, ident.ID, r.source(st), r.prov(st.ID), m.Fields, m.Confidence); err != nil {
 		return err
 	}
+	if err := r.keepPayload(ctx, st, ident.ID, m); err != nil {
+		return err
+	}
 	if err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
 		return err
 	}
@@ -622,6 +639,21 @@ func (r *runner) emit(key protocol.Key, fields map[string]any) {
 	if err := r.out.Write(protocol.Record(key, fields, nil)); err != nil {
 		fmt.Fprintf(r.stderr, "warning: writing downstream: %v\n", err)
 	}
+}
+
+// keepPayload retains a RECORD's raw-response attachment when the adapter's
+// ADR-030 declaration says to (SPEC §5/§6). The runner is the authority —
+// adapters only offer.
+func (r *runner) keepPayload(ctx context.Context, st *planner.Step, identityID string, m protocol.Message) error {
+	if m.Payload == nil || m.Payload.Body == "" || st.Manifest == nil {
+		return nil
+	}
+	keep, ttlDays := st.Manifest.PayloadRetention(st.Config)
+	if !keep {
+		return nil
+	}
+	return r.l.WritePayload(ctx, identityID, st.Manifest.ID, r.runID,
+		m.Payload.ContentType, m.Payload.Body, ttlDays)
 }
 
 // source is the provenance string a step's writes carry. AI steps record the

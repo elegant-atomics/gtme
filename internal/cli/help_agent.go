@@ -51,6 +51,7 @@ var agentVerbs = []agentVerb{
 	{"gtm runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
 	{"gtm freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtm run` accepts wherever it accepts a pipeline path (ADR-029)"},
 	{"gtm groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021)"},
+	{"gtm vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
 	{"gtm help --agent", "print this document"},
 }
 

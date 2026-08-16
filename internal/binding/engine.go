@@ -17,6 +17,10 @@ import (
 	"github.com/trevorfox/gtm/internal/ulid"
 )
 
+// MaxPayloadBytes is the engine's payload size cap (SPEC §10a): an oversized
+// response is not retained (dropped with a warning), never truncated silently.
+const MaxPayloadBytes = 256 << 10
+
 // SimulateEnv is the environment key the runner injects to put a binding
 // engine into fixture-served mode (SPEC §8 simulation gate). It rides in
 // Ports.Env like a credential, so the protocol stays untouched.
@@ -164,7 +168,10 @@ func (e *Engine) runSource(ctx context.Context, w *protocol.Writer, p adapters.P
 			if len(fields) == 0 {
 				continue
 			}
-			if err := w.Write(protocol.Message{Type: protocol.TypeRecord, Fields: fields}); err != nil {
+			// The per-record slice rides along for ADR-030 retention (the runner
+			// decides whether it is kept).
+			if err := w.Write(protocol.Message{Type: protocol.TypeRecord, Fields: fields,
+				Payload: e.payloadFor(w, cfg, rec)}); err != nil {
 				return err
 			}
 			emitted++
@@ -232,7 +239,33 @@ func (e *Engine) enrichRecord(ctx context.Context, w *protocol.Writer, p adapter
 	if len(learned) == 0 {
 		return w.Write(protocol.Log("warn", e.B.ID+": nothing returned for "+key.IdentityKey))
 	}
-	return w.Write(protocol.Record(key, learned, nil))
+	msg := protocol.Record(key, learned, nil)
+	msg.Payload = e.payloadFor(w, cfg, doc)
+	return w.Write(msg)
+}
+
+// payloadFor renders the raw response as an ADR-030 attachment, or nil when
+// retention is off or the body exceeds the cap. httpx already decoded the
+// response, so the body is a canonical re-encoding of the same JSON —
+// recorded as such in DECISIONS.md.
+func (e *Engine) payloadFor(w *protocol.Writer, cfg map[string]any, doc any) *protocol.Payload {
+	keep := e.B.KeepPayloads == nil || *e.B.KeepPayloads
+	if v, ok := cfg["keep_payloads"].(bool); ok {
+		keep = v
+	}
+	if !keep || doc == nil {
+		return nil
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil
+	}
+	if len(raw) > MaxPayloadBytes {
+		_ = w.Write(protocol.Log("warn", fmt.Sprintf(
+			"%s: response is %d bytes, over the %d-byte payload cap — not retained", e.B.ID, len(raw), MaxPayloadBytes)))
+		return nil
+	}
+	return &protocol.Payload{ContentType: "application/json", Body: string(raw)}
 }
 
 // deliverRecord performs the per-record delivery request and acknowledges it.

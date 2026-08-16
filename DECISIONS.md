@@ -1172,3 +1172,46 @@ served from bundled fixtures), dry-run live against a local fixture
 server, tamper detection on a one-byte edit.
 **Spec impact:** Changelog v0.8; no new normative text — §8's bundle
 section was written in the v0.5 pass and this build implements it.
+
+### 2026-08-16 — M11 internals: the transform floor and the payload path
+
+**Question:** Where does payload capture live given adapters own HTTP and
+the runner owns the ledger, and how do the transform-floor steps execute
+without becoming adapters?
+**Choice:** (1) Payloads ride as an optional attachment on outbound
+RECORDs — the minimal §5 counterpart ADR-030's mechanism implied (flagged
+in changelog v0.9); the runner is the retention authority (adapters only
+offer), computing TTL from the manifest declaration. The binding engine
+re-encodes its decoded JSON canonically (httpx consumed the raw bytes;
+point-in-time truth here is semantic, not byte-exact — recorded, not
+hidden); `http/enrich` keeps the raw response bytes. In this build the
+engine and `http/enrich` attach; the Go vendor adapters do not yet
+(queued adoption, stated in §6). (2) `http/enrich` lives in the binding
+package — it IS the engine's acquisition surface, sharing the template
+and path language; markdown conversion uses `golang.org/x/net/html`,
+already a required module (publicsuffix), so no new dependency entry.
+Oversized responses fail the record — never truncated silently. Under
+`--simulate` the runner stubs it as a counted gap; payload replay is the
+ROADMAP verb. (3) §7 dynamic provides reuses the existing ProbeSchema
+seam (csv/source's config-known-schema mechanism) instead of inventing a
+parallel one; derived needs come from a `{{record.<field>}}` scan of the
+step config; config `freshness_days` doubles as the step's cache window
+via a generic planner rule. (4) SQL steps are runner-owned like the group
+source: one set-based query per step on the read-only connection,
+timeboxed 30s; `:run_id` is bound only when the query references it, and
+scope is guaranteed at APPLICATION — result rows for identities outside
+the run are dropped and counted — so a badly-scoped query cannot leak.
+The pass-column and membership-style verdict forms both apply verdicts
+through the same path as adapter VERDICTs. Query-hash provenance is the
+first 12 hex of sha256 over the trimmed text. Plan-time field-name
+validation is entity-type-blind for SQL steps (the pipeline's entity is
+not knowable at resolve time); the runtime registry check per record
+still enforces. (5) Eviction: `gtm vacuum` plus an opportunistic purge at
+armed-run start; simulated runs skip it (their ledger is a throwaway
+copy).
+**Why:** M11's acceptance runs the whole floor offline: markdown into a
+declared field with the payload retained and the second run cache-skipped
+(fetch-once economics observable in the receipt), sql/enrich with hash
+provenance, both sql/filter styles, the plan gates, and vacuum touching
+nothing unexpired.
+**Spec impact:** None beyond v0.9.

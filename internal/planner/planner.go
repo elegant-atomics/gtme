@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,12 @@ type Step struct {
 
 	IsSource  bool
 	IsDeliver bool
+
+	// IsSQL marks a runner-owned SQL step (SPEC §10a, ADR-027): no adapter,
+	// declared contracts (uses:/provides: in config), one read-only query per
+	// step. Query is its SQL.
+	IsSQL bool
+	Query string
 
 	// Group semantics (SPEC §7/§8/§9, ADR-021) — all runner-owned.
 	// IsGroupSource marks a `source: {group: ...}` step: members projected
@@ -283,6 +290,55 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		}
 	}
 
+	// SQL steps (SPEC §10a, ADR-027) resolve no adapter: the runner mediates
+	// their read-only ledger access, and their contracts are DECLARED —
+	// uses:/provides: in config — never parsed from the SQL.
+	if s.Use == "sql/enrich" || s.Use == "sql/filter" {
+		ps.IsSQL = true
+		if s.Use == "sql/enrich" {
+			ps.Role = adapters.RoleEnrich
+		} else {
+			ps.Role = adapters.RoleFilter
+		}
+		q, _ := ps.Config["query"].(string)
+		ps.Query = strings.TrimSpace(q)
+		if ps.Query == "" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: s.Use + " needs config.query"})
+		} else if err := ledger.ReadOnlyStatement(ps.Query); err != nil {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("%s: %v", s.Use, err)})
+		}
+		ps.Needs = configStrings(ps.Config["uses"])
+		ps.Required = append([]string(nil), ps.Needs...)
+		provides := configStrings(ps.Config["provides"])
+		if s.Use == "sql/enrich" && len(provides) == 0 {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: "sql/enrich needs config.provides — the declared output fields (SPEC §10a)"})
+		}
+		if s.Use == "sql/filter" && len(provides) > 0 {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: "sql/filter produces verdicts, not fields — drop config.provides"})
+		}
+		ps.Provides = provides
+		if reg, err := registry.Load(); err == nil {
+			for _, name := range append(append([]string{}, ps.Needs...), ps.Provides...) {
+				if err := reg.ValidateName(ps.EntityType, name); err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: err.Error()})
+				}
+			}
+		}
+		switch {
+		case isSource:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: s.Use + " cannot be the source"})
+		case isDeliver:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: s.Use + " cannot be the deliver step"})
+		}
+		return ps, problems
+	}
+
 	// A group source (SPEC §9, ADR-021) resolves no adapter: members are
 	// projected from the ledger by the runner, and its provides are open —
 	// each step's needs are enforced per record at run time, exactly like
@@ -336,6 +392,14 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	if dynamic && len(s.Uses) == 0 &&
 		(ps.Role == adapters.RoleFilter || ps.Role == adapters.RoleCompose) {
 		ps.NeedsAll = true
+	}
+	// A dynamic enrich step (http/enrich, SPEC §10a) derives its needs from
+	// the {{record.<field>}} placeholders its config templates reference.
+	if dynamic && ps.Role == adapters.RoleEnrich {
+		refs := recordRefs(ps.Config)
+		ps.Needs = refs
+		ps.Required = append([]string(nil), refs...)
+		ps.NeedsAll = false
 	}
 	if len(s.Variables) > 0 {
 		if !isDeliver {
@@ -438,13 +502,17 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		}
 	}
 
-	// Cache window: step override, else the manifest's freshness_days.
+	// Cache window: step override, else config freshness_days (http/enrich's
+	// mandatory content freshness doubles as its cache window, SPEC §10a),
+	// else the manifest's freshness_days.
 	if s.Cache != "" {
 		d, err := pipeline.ParseCache(s.Cache)
 		if err != nil {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 		}
 		ps.Cache = d
+	} else if days := intConfig(ps.Config, "freshness_days"); days > 0 {
+		ps.Cache = time.Duration(days) * 24 * time.Hour
 	} else if days := resolved.Manifest.FreshnessDays; days > 0 {
 		ps.Cache = time.Duration(days) * 24 * time.Hour
 	}
@@ -460,6 +528,15 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 	} else if len(probed) > 0 {
 		ps.ProvidesSchema = probed
+		// Dynamic provides (SPEC §7): config-declared output names get the
+		// same registry gate static provides do.
+		if reg != nil {
+			for _, name := range adapters.SchemaProperties(probed) {
+				if err := reg.ValidateName(ps.EntityType, name); err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: err.Error()})
+				}
+			}
+		}
 	}
 	ps.Provides = schemaProperties(ps.ProvidesSchema)
 	ps.Wildcard = adapters.Wildcard(ps.ProvidesSchema)
@@ -534,6 +611,67 @@ func (p *Plan) PrevState(i int) string {
 		return "sourced"
 	}
 	return p.Steps[i-1].ID
+}
+
+// intConfig reads a numeric config value (int after YAML decode, float64
+// after a JSON round trip).
+func intConfig(cfg map[string]any, key string) int {
+	switch v := cfg[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// configStrings reads a config list of strings ([]any after YAML decode).
+func configStrings(v any) []string {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, item := range list {
+		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, strings.TrimSpace(s))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+var recordRefPattern = regexp.MustCompile(`\{\{\s*record\.([A-Za-z0-9_.]+)`)
+
+// recordRefs finds every {{record.<field>}} placeholder in a step's config —
+// the derived dynamic needs of a templated enrich step (SPEC §10a).
+func recordRefs(v any) []string {
+	seen := map[string]bool{}
+	var walk func(any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case string:
+			for _, m := range recordRefPattern.FindAllStringSubmatch(t, -1) {
+				seen[m[1]] = true
+			}
+		case map[string]any:
+			for _, item := range t {
+				walk(item)
+			}
+		case []any:
+			for _, item := range t {
+				walk(item)
+			}
+		}
+	}
+	walk(v)
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // variableFields lists a variables: mapping's ledger fields (its values),

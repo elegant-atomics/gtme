@@ -52,6 +52,10 @@ type Message struct {
 	Key        *Key               `json:"key,omitempty"`
 	Fields     map[string]any     `json:"fields,omitempty"`
 	Confidence map[string]float64 `json:"confidence,omitempty"`
+	// Payload is the OPTIONAL raw vendor response (or per-record slice) an
+	// outbound RECORD was extracted from (SPEC §5, ADR-030). The runner owns
+	// retention; old readers ignore it.
+	Payload *Payload `json:"payload,omitempty"`
 
 	// SCHEMA
 	Provides json.RawMessage `json:"provides,omitempty"`
@@ -74,6 +78,12 @@ type Message struct {
 	// LOG
 	Level string `json:"level,omitempty"`
 	Msg   string `json:"msg,omitempty"`
+}
+
+// Payload is a RECORD's raw-response attachment (SPEC §5, ADR-030).
+type Payload struct {
+	ContentType string `json:"content_type,omitempty"`
+	Body        string `json:"body"`
 }
 
 // Passed reports a verdict's outcome; a VERDICT with no explicit pass is a fail,

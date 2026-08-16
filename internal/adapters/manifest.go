@@ -43,12 +43,35 @@ type Manifest struct {
 	// Batch marks adapters the runner must feed in batches (AI steps), one
 	// invocation per batch.
 	Batch bool `json:"batch,omitempty"`
+	// KeepPayloads / PayloadTTLDays declare ADR-030 retention for raw
+	// responses this adapter attaches to its RECORDs (SPEC §5, §6): keep
+	// defaults to true, TTL to 90 days; a step config may override keep.
+	KeepPayloads   *bool `json:"keep_payloads,omitempty"`
+	PayloadTTLDays *int  `json:"payload_ttl_days,omitempty"`
 
 	needs, provides, config *jsonschema.Schema
 }
 
 // Source is the provenance string written to field_values.source.
 func (m *Manifest) Source() string { return fmt.Sprintf("%s@%d", m.ID, m.Version) }
+
+// DefaultPayloadTTLDays is ADR-030's default retention window.
+const DefaultPayloadTTLDays = 90
+
+// PayloadRetention resolves the ADR-030 declaration against a step's config:
+// whether payloads this adapter attaches are kept, and for how many days
+// (0 = no expiry).
+func (m *Manifest) PayloadRetention(config map[string]any) (keep bool, ttlDays int) {
+	keep = m.KeepPayloads == nil || *m.KeepPayloads
+	if v, ok := config["keep_payloads"].(bool); ok {
+		keep = v
+	}
+	ttlDays = DefaultPayloadTTLDays
+	if m.PayloadTTLDays != nil {
+		ttlDays = *m.PayloadTTLDays
+	}
+	return keep, ttlDays
+}
 
 // ParseManifest decodes and validates a manifest document.
 func ParseManifest(raw []byte) (*Manifest, error) {

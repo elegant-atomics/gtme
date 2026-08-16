@@ -58,6 +58,7 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 
 	stub := r.stubbed(st)
 	var work []*item
+	var sqlWork []string
 	for _, rr := range records {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -99,6 +100,11 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			continue
 		}
 
+		if st.IsSQL {
+			sqlWork = append(sqlWork, rr.IdentityID)
+			continue
+		}
+
 		it, err := r.prepare(ctx, st, rr.IdentityID)
 		if err != nil {
 			return err
@@ -109,6 +115,13 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	}
 
 	if stub {
+		r.printStepLine(st)
+		return nil
+	}
+	if st.IsSQL {
+		if err := r.runSQLStep(ctx, st, sqlWork); err != nil {
+			return err
+		}
 		r.printStepLine(st)
 		return nil
 	}
@@ -631,6 +644,9 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 
 	n, err := r.l.WriteFieldMap(ctx, it.identityID, r.source(st), r.prov(st.ID), m.Fields, m.Confidence)
 	if err != nil {
+		return err
+	}
+	if err := r.keepPayload(ctx, st, it.identityID, m); err != nil {
 		return err
 	}
 	// A stronger key may have arrived with the enrichment.

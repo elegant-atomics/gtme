@@ -31,6 +31,8 @@ type Binding struct {
 	CostEstimate        *float64        `json:"cost_estimate_usd,omitempty"`
 	Credentials         []string        `json:"credentials,omitempty"`
 	CredentialsOptional []string        `json:"credentials_optional,omitempty"`
+	KeepPayloads        *bool           `json:"keep_payloads,omitempty"`
+	PayloadTTLDays      *int            `json:"payload_ttl_days,omitempty"`
 
 	Auth        *Auth                `json:"auth,omitempty"`
 	Request     Request              `json:"request"`
@@ -263,6 +265,12 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 	}
 	if len(b.CredentialsOptional) > 0 {
 		doc["credentials_optional"] = b.CredentialsOptional
+	}
+	if b.KeepPayloads != nil {
+		doc["keep_payloads"] = *b.KeepPayloads
+	}
+	if b.PayloadTTLDays != nil {
+		doc["payload_ttl_days"] = *b.PayloadTTLDays
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {

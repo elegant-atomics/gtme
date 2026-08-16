@@ -104,6 +104,8 @@ func Run(ctx context.Context, env Env) int {
 		err = cmdSecret(ctx, env, rest)
 	case "groups":
 		err = cmdGroups(ctx, env, rest)
+	case "vacuum":
+		err = cmdVacuum(ctx, env, rest)
 	default:
 		fmt.Fprintf(env.Stderr, "gtm: unknown command %q\n\n", verb)
 		usage(env.Stderr)
@@ -144,6 +146,7 @@ Usage:
   gtm groups show NAME              members and recent events
   gtm groups add NAME KEY... [--from-segment NAME | --query "SQL"]
   gtm groups remove NAME KEY...
+  gtm vacuum                        evict expired payloads (nothing else)
   gtm help --agent                  machine-readable CLI + adapter surface
   gtm version
 
