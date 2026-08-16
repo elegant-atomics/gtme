@@ -266,7 +266,15 @@ reconciliation-plus-build pass, like ADR-017/018/019's.)
 (the reserved word is `GROUP`; joins and `GROUP BY` against a `groups`
 table coexist cleanly, tested on 3.43). MySQL-class engines reserve
 `GROUPS`; irrelevant to v0's SQLite-only contract (§2) and an internal
-concern for any future hosted store.
+concern for any future hosted store. The *concept* name was also weighed
+against the `GROUP BY` homonym and kept: Unix/IAM groups —
+policy-bearing asserted membership, exactly this feature's shape — have
+coexisted with SQL aggregation in the same users' heads for decades, and
+the alternatives each import a worse wrong meaning (cohort:
+time-bucketed analytics; list: static, ESP-collides; audience:
+re-narrows to delivery; set: harder SQL collision). One docs discipline
+follows: never use bare "group" as a verb meaning aggregate; the word
+belongs to the feature.
 **Context:** The ledger models durable facts (identities/field_values) and
 execution receipts (runs/run_records) crisply, but everything in between —
 campaign membership, suppression lists, qualified pools, touch history —
