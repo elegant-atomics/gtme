@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/trevorfox/gtm/internal/httpx"
 )
@@ -53,11 +54,28 @@ type leadResponse struct {
 	Campaign string `json:"campaign"`
 }
 
+// campaignIDs caches resolved name → id for the life of the process, so one
+// `gtm run` resolves a campaign once (SPEC §10.6) even though the worker pool
+// opens several adapter sessions. Found by campaign zero's first armed run,
+// which logged one resolution per session.
+var campaignIDs sync.Map
+
+// ResetCampaignCache empties the process-level campaign-id cache. Tests that
+// assert on lookup counts call it; nothing else should.
+func ResetCampaignCache() { campaignIDs = sync.Map{} }
+
+func campaignCacheKey(cfg config) string {
+	return cfg.BaseURL + "\x00" + strings.ToLower(strings.TrimSpace(cfg.Campaign))
+}
+
 // resolveCampaign turns a campaign name into its id, once per run (SPEC §10.6).
 // A value that already looks like an id is passed through untouched.
 func (a *Adapter) resolveCampaign(ctx context.Context, cfg config, apiKey string) (string, error) {
 	if looksLikeID(cfg.Campaign) {
 		return cfg.Campaign, nil
+	}
+	if id, ok := campaignIDs.Load(campaignCacheKey(cfg)); ok {
+		return id.(string), nil
 	}
 
 	after := ""
@@ -75,6 +93,7 @@ func (a *Adapter) resolveCampaign(ctx context.Context, cfg config, apiKey string
 		}
 		for _, item := range list.Items {
 			if strings.EqualFold(strings.TrimSpace(item.Name), strings.TrimSpace(cfg.Campaign)) {
+				campaignIDs.Store(campaignCacheKey(cfg), item.ID)
 				return item.ID, nil
 			}
 		}

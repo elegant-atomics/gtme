@@ -26,6 +26,7 @@ func lead(key string, fields map[string]any) []protocol.Message {
 }
 
 func TestAddsLeadWithComposedLines(t *testing.T) {
+	ResetCampaignCache()
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	msgs, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
 		Config: map[string]any{
@@ -100,6 +101,7 @@ func TestAddsLeadWithComposedLines(t *testing.T) {
 }
 
 func TestResolvesCampaignOncePerInvocation(t *testing.T) {
+	ResetCampaignCache()
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	_, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
 		Config: map[string]any{"campaign": "Q3 VP Marketing", "base_url": "https://instantly.test"},
@@ -121,6 +123,27 @@ func TestResolvesCampaignOncePerInvocation(t *testing.T) {
 	}
 }
 
+// TestResolvesCampaignOncePerProcess: the worker pool opens several adapter
+// sessions per run, but the name resolves once (SPEC §10.6) — found by
+// campaign zero's first armed run, which resolved once per session.
+func TestResolvesCampaignOncePerProcess(t *testing.T) {
+	ResetCampaignCache()
+	stub := &adaptertest.Stub{Routes: routes(t)}
+	for i := 0; i < 3; i++ { // three sessions, as three worker chunks would be
+		_, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
+			Config:  map[string]any{"campaign": "Q3 VP Marketing", "base_url": "https://instantly.test"},
+			Env:     map[string]string{"INSTANTLY_API_KEY": "secret"},
+			Records: lead("a@x.com", map[string]any{"email": "a@x.com"}),
+		})
+		if err != nil {
+			t.Fatalf("Run %d: %v", i, err)
+		}
+	}
+	if n := stub.CallsTo("/api/v2/campaigns"); n != 1 {
+		t.Errorf("campaign lookups = %d across 3 sessions, want 1", n)
+	}
+}
+
 func TestCampaignIDPassesThroughWithoutALookup(t *testing.T) {
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	_, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
@@ -139,6 +162,7 @@ func TestCampaignIDPassesThroughWithoutALookup(t *testing.T) {
 // TestUnknownCampaignStopsBeforeDelivering is the important safety case: never
 // invent a campaign, never deliver into the wrong one.
 func TestUnknownCampaignStopsBeforeDelivering(t *testing.T) {
+	ResetCampaignCache()
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	_, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
 		Config:  map[string]any{"campaign": "Campaign That Does Not Exist", "base_url": "https://instantly.test"},
@@ -157,6 +181,7 @@ func TestUnknownCampaignStopsBeforeDelivering(t *testing.T) {
 }
 
 func TestCampaignMatchIsCaseInsensitive(t *testing.T) {
+	ResetCampaignCache()
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	_, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
 		Config:  map[string]any{"campaign": "q3 vp marketing", "base_url": "https://instantly.test"},
