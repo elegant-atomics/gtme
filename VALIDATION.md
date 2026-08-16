@@ -281,3 +281,53 @@ name→id cache in the instantly adapter, with a regression test
 field on each lead, derived server-side from the lead's email — visible in
 API reads, not something gtm sends. Noted so a future read of lead data
 doesn't get attributed to the pipeline's mapping.
+
+### 2026-08-15 — Increment: + ai/compose (campaign zero widened one step)
+
+Per the incremental plan (one adapter at a time from campaign zero's base),
+same dry→review→arm→re-run ritual, fresh operator-controlled aliases.
+
+- First live Anthropic call: 8 records composed in one batch, $0.0129
+  receipted from real token usage; `uses:` carried a vendor-namespaced
+  `csv.*` field into the prompt cleanly; dry-run receipt rendered all three
+  resolved merge fields per record. Armed 8/8; re-run delivered nothing
+  twice.
+- **Finding (code bug, fixed):** the API engine read `ANTHROPIC_API_KEY`
+  from the *process* env, but a built-in adapter's credentials arrive via
+  the runner-injected session env (SPEC §6) — a key stored with `gtm
+  secret set` never reached the engine. Every prior test had exported the
+  key or used the fixture engine, so only a live run could catch it. Fixed
+  (engine resolution now takes the adapter's env view) with a regression
+  test pinning the session-env path.
+- **Observation (spec-conformant, worth knowing):** compose steps are not
+  cache-skippable by design (§7), so a no-op re-run of a compose pipeline
+  re-spends the AI call (~$0.0122 for 8 records here) even when every
+  delivery skips. At scale, expensive compose + frequent re-runs is a cost
+  pattern to watch.
+
+### 2026-08-15 — Increment: + harvest/profile (first paid enrichment)
+
+One record (the operator's own profile), csv → harvest → compose → deliver.
+The richest finding-per-dollar run yet: four live-API shape divergences,
+all in HarvestAPI responses vs our fixture-era decoding, each degrading or
+failing per-record exactly as §5 requires (run continues, partial output
+kept):
+
+1. `startDate.month` arrives as a quoted string, not an int → decode
+   tolerant (`flexInt`), fixture updated to carry the live shape.
+2. `status` arrives as a number, not a string → decoded loosely (never
+   consumed).
+3. The posts endpoint's target param is `profile`/`profileId` — the
+   `profileUrl` param the adapter sent doesn't exist ("No valid target
+   provided"). Confirmed against HarvestAPI's current docs; the adapter
+   now prefers `profileId` (their fast path) from the already-fetched
+   profile.
+4. `postedAt` arrives as an object, not a string → decoded loosely (never
+   consumed).
+
+After the fixes: enrichment grounded compose in real data (the generated
+first_line referenced an actual recent post), and the armed run showed the
+cache economics live — harvest skipped (`$0.0120 avoided` on the receipt),
+compose $0.0068, one lead delivered. Total increment spend ≈ $0.07 across
+the debug retries; the receipt's "avoided" line is the enrichment-ledger
+story with real money for the first time.
