@@ -172,7 +172,7 @@ func TestAnthropicEngineLive(t *testing.T) {
 	requireEnv(t, "ANTHROPIC_API_KEY")
 	t.Setenv("GTM_AI_ENGINE", ai.EngineAPI)
 
-	engine, model, err := ai.Resolve(ai.EngineAPI, os.Getenv("GTM_AI_MODEL"))
+	engine, model, err := ai.Resolve(ai.EngineAPI, os.Getenv("GTM_AI_MODEL"), nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

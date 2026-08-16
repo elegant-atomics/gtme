@@ -37,7 +37,7 @@ func TestPriceKnownAndUnknownModels(t *testing.T) {
 
 func TestResolveRejectsUnknownEngine(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", "")
-	if _, _, err := Resolve("telepathy", ""); err == nil {
+	if _, _, err := Resolve("telepathy", "", nil); err == nil {
 		t.Fatal("want an error for an unknown engine")
 	}
 }
@@ -47,7 +47,7 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", EngineFixture)
 	t.Setenv("GTM_AI_FIXTURE", fixture)
 
-	engine, model, err := Resolve("api", "") // env overrides the configured engine
+	engine, model, err := Resolve("api", "", nil) // env overrides the configured engine
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -59,13 +59,13 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 	}
 
 	t.Setenv("GTM_AI_MODEL", "claude-haiku-4-5")
-	if _, model, err = Resolve("", ""); err != nil {
+	if _, model, err = Resolve("", "", nil); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if model != "claude-haiku-4-5" {
 		t.Errorf("model = %q, want the env override", model)
 	}
-	if _, model, err = Resolve("", "claude-opus-5"); err != nil {
+	if _, model, err = Resolve("", "claude-opus-5", nil); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if model != "claude-opus-5" {
@@ -76,7 +76,7 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 func TestAPIEngineNeedsAKey(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	_, _, err := Resolve(EngineAPI, "")
+	_, _, err := Resolve(EngineAPI, "", nil)
 	if err == nil {
 		t.Fatal("want an error when ANTHROPIC_API_KEY is unset")
 	}
@@ -90,7 +90,7 @@ func TestFixtureEngineReplaysScriptThenRepeatsLast(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", EngineFixture)
 	t.Setenv("GTM_AI_FIXTURE", fixture)
 
-	engine, _, err := Resolve("", "")
+	engine, _, err := Resolve("", "", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", EngineFixture)
 	t.Setenv("GTM_AI_FIXTURE", fixture)
 
-	engine, _, err := Resolve("", "")
+	engine, _, err := Resolve("", "", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -151,11 +151,11 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 func TestFixtureEngineNeedsAScript(t *testing.T) {
 	t.Setenv("GTM_AI_ENGINE", EngineFixture)
 	t.Setenv("GTM_AI_FIXTURE", "")
-	if _, _, err := Resolve("", ""); err == nil {
+	if _, _, err := Resolve("", "", nil); err == nil {
 		t.Fatal("want an error without GTM_AI_FIXTURE")
 	}
 	t.Setenv("GTM_AI_FIXTURE", writeFixture(t, `{"not":"an array"}`))
-	if _, _, err := Resolve("", ""); err == nil {
+	if _, _, err := Resolve("", "", nil); err == nil {
 		t.Fatal("want an error for a malformed script")
 	}
 }
@@ -177,4 +177,25 @@ func writeFixture(t *testing.T, body string) string {
 		t.Fatalf("write fixture: %v", err)
 	}
 	return path
+}
+
+// TestResolveUsesCallerEnvForAPIKey pins the credentials path a built-in
+// adapter actually has (SPEC §6): the runner injects ~/.gtm/secrets into the
+// session env, never the process env. Found by the first live compose run,
+// which failed with a key stored via `gtm secret set`.
+func TestResolveUsesCallerEnvForAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GTM_AI_ENGINE", "")
+	getenv := func(k string) string {
+		if k == "ANTHROPIC_API_KEY" {
+			return "session-injected"
+		}
+		return ""
+	}
+	if _, _, err := Resolve(EngineAPI, "", getenv); err != nil {
+		t.Fatalf("Resolve must see the session-injected key: %v", err)
+	}
+	if _, _, err := Resolve(EngineAPI, "", nil); err == nil {
+		t.Fatal("nil getenv with an empty process env should fail")
+	}
 }

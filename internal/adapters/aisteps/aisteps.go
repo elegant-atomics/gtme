@@ -138,7 +138,9 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	engine := a.Engine
 	model := cfg.Model
 	if engine == nil {
-		e, resolved, err := ai.Resolve(cfg.Engine, cfg.Model)
+		// p.Getenv, not os.Getenv: the runner injects credentials (including
+		// ~/.gtm/secrets) into the session env, never the process env.
+		e, resolved, err := ai.Resolve(cfg.Engine, cfg.Model, p.Getenv)
 		if err != nil {
 			return err
 		}

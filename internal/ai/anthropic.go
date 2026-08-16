@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -14,8 +13,13 @@ type apiEngine struct {
 	client anthropic.Client
 }
 
-func newAPIEngine() (Engine, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
+func newAPIEngine(getenv func(string) string) (Engine, error) {
+	// The key comes through the caller's env view — for a built-in adapter
+	// that is the runner-injected session env (SPEC §6: OS env first, then
+	// ~/.gtm/secrets), NOT the process env. Reading os.Getenv here silently
+	// ignored a key stored with `gtm secret set`; found by the first live
+	// compose run.
+	key := getenv("ANTHROPIC_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("ai: ANTHROPIC_API_KEY is not set (run `gtm secret set ANTHROPIC_API_KEY`)")
 	}

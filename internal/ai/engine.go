@@ -73,8 +73,14 @@ type Engine interface {
 
 // Resolve picks an engine. The step's config chooses between the engines the
 // spec defines; GTM_AI_ENGINE overrides it so tests (and an operator debugging a
-// pipeline) can swap in the fixture engine without editing the pipeline.
-func Resolve(engine, model string) (Engine, string, error) {
+// pipeline) can swap in the fixture engine without editing the pipeline. getenv
+// is the caller's env view — an adapter passes its Ports.Getenv so credentials
+// injected by the runner (including ~/.gtm/secrets) are seen; nil falls back to
+// the process env.
+func Resolve(engine, model string, getenv func(string) string) (Engine, string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
 	if v := os.Getenv("GTM_AI_ENGINE"); v != "" {
 		engine = v
 	}
@@ -87,7 +93,7 @@ func Resolve(engine, model string) (Engine, string, error) {
 
 	switch strings.TrimSpace(engine) {
 	case "", EngineAPI:
-		e, err := newAPIEngine()
+		e, err := newAPIEngine(getenv)
 		return e, model, err
 	case EngineClaudeCode:
 		e, err := newClaudeCodeEngine()
