@@ -742,7 +742,7 @@ other respect (its own run id, receipt, and `gtm runs` entry), and because
 it writes no deliveries, the armed run's idempotency behaves as if the dry
 run had never happened.
 
-### Simulation gate — `gtm run --simulate` (ADR-028; decided 2026-08-16, build queued — see §11)
+### Simulation gate — `gtm run --simulate` (ADR-028; built in M8)
 
 `gtm run --simulate` executes the ENTIRE pipeline offline: every binding
 (§10a) is served from its conformance fixtures, and every process/AI step
@@ -928,11 +928,13 @@ be behind an interface so fixture tests never touch the network.
 
 ---
 
-## 10a. The binding tier & universal steps — DECIDED (ADR-022..027; decided 2026-08-16, build queued — see §11)
+## 10a. The binding tier & universal steps — DECIDED (ADR-022..027)
 
-Everything in this section is decided contract; none of it is shipped
-behavior until its milestone builds (§11). Until then code/spec
-divergence here is queued work, not an AUDIT.md finding.
+The binding tier, the conformance-kit extension, the naming rule with its
+ai/* provenance format, and the OpenAPI rule below were built in milestone
+M8 (§11, changelog v0.6). `http/enrich` and `sql/enrich`/`sql/filter`
+remain decided contract with build queued; until their milestone builds,
+code/spec divergence there is queued work, not an AUDIT.md finding.
 
 ### Two-tier adapters (ADR-022)
 
@@ -1142,7 +1144,8 @@ campaign-zero data and the Go twins are current, and `--simulate` then
 de-risks the groups build). Until each builds, its sections above are
 decided contract, not shipped behavior.
 
-- **M8 — binding engine + simulation gate (ADR-022, ADR-028; §10a, §8).**
+- **M8 — binding engine + simulation gate (ADR-022, ADR-028; §10a, §8).
+  Built 2026-08-16 (changelog v0.6).**
   The generic HTTP engine interpreting `spec/binding-schema.json`;
   `apollo/search`, `harvest/profile`, and `instantly/add-to-campaign`
   ported to bindings; the conformance kit extended to bindings;
@@ -1300,6 +1303,20 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.6 — 2026-08-16 (M8 build: binding engine + simulation gate)
+**Changed:** `spec/binding-schema.json` hardened by the M8 build against the
+three real ports and the Attio binding (extraction `paths:` waterfalls,
+`absent:` sentinel values, `skip_if_input:`, the engine-owned `linkedin`
+classify-and-route transform, the `$variables` body splice, pagination
+`in: body|query`, config defaults from `config_schema`, `extract` required
+only for source/enrich, declared-but-unenforced retry windows refuse to
+load). No other normative text changed: §10a's binding tier, its
+conformance kit, binding discovery, ai/* model provenance, and §8's
+`--simulate` gate are now built and covered by M8's acceptance tests
+(receipt diffs against each Go twin; the campaign-zero shape simulating
+end-to-end with zero network calls); §10a's `http/enrich` and `sql/*`
+sections and §8's bundles remain decided-with-build-queued.
 
 ### v0.5 — 2026-08-16 (ADR-022..029 reconciliation — spec only, build queued)
 **Added:** §10a two-tier adapter model: declarative bindings interpreted

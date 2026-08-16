@@ -956,3 +956,76 @@ whitespace.
 internal seams that make it hold.
 **Spec impact:** None beyond v0.4 (the OPEN-config sentence was added to §9
 as part of that pass).
+
+### 2026-08-16 — M8 internals: the binding engine, reference bindings, and simulate
+
+**Question:** How does the binding tier (SPEC §10a) sit inside the existing
+runner without a second execution path, what did porting the three Go
+adapters actually reveal, and how does `--simulate` (§8) guarantee zero
+network and zero durability?
+**Choice:**
+1. **The engine is an ordinary built-in adapter.** `internal/binding.Engine`
+   implements `adapters.Adapter` behind the same Session/NDJSON boundary as
+   every other adapter — the runner cannot tell a binding from a process
+   adapter, which is what "same manifest surface, plan treats both tiers
+   identically" (§10a) demands. Discovery mirrors §6:
+   `~/.gtm/adapters/<name>/binding.yaml` resolves via a loader hook wired in
+   `internal/adapters/all` (no import cycle). Embedded bindings live under
+   `spec/bindings/` (embedded in `package spec` like the field registry).
+2. **The three reference ports are shipped data, not registered built-ins.**
+   Their ids belong to their Go twins until the twins' removal is decided;
+   the M8 receipt diff installs them under shifted vendor prefixes
+   (`apollox/`, `harvestx/`, `instantlyx/`) and compares ledgers, never ids.
+   `attio/assert` — the net-new pure-YAML integration — IS registered.
+3. **The graduation rule fired twice during the port, as designed.**
+   `harvest/profile`'s `recent_posts` (a second call per record) and
+   `role_history` (computed line formatting over structured positions) are
+   tier-2 judgment: the binding covers the single-call acquisition surface,
+   the diff asserts the Go twin's extras are exactly `{role_history}`, and
+   the process adapter keeps the computed fields. Likewise
+   `instantly/add-to-campaign`'s campaign-NAME resolution (second endpoint +
+   matching) stays tier-2; the binding takes the campaign id. This is the
+   two-tier taxonomy holding, not a porting failure — and the deterministic
+   halves of those extras are exactly the shape ADR-027's `sql/enrich` is
+   for, later.
+4. **Schema hardening from real ports** (spec/binding-schema.json, still the
+   canonical artifact): extraction gained `paths:` waterfalls (first
+   non-empty wins — Apollo's domain fallback), `absent:` sentinel values
+   (Apollo's locked-email placeholder, zero-valued counts),
+   `skip_if_input:` (emit the resolved public `linkedin_url` only when the
+   record arrived without one — ADR-020's recovery path), and the
+   engine-owned `linkedin` classify-and-route transform (§4's rule, executed
+   at the engine boundary); request bodies gained the `$variables` splice
+   (resolved variables minus any referenced individually — declarative
+   first-class-field routing); pagination declares `in: body|query`;
+   `extract` is required only for source/enrich; config defaults come from
+   `config_schema` `default`s. A declared retry `windows`/`rate_per_hour`
+   makes the binding refuse to load — the engine does not enforce them yet,
+   and a silently ignored policy is worse than a loud gap.
+5. **ai/\* provenance** is now `ai/<op> @ <model-id>` (§10a, ADR-026),
+   computed runner-side by `ai.ProvenanceModel` — an exact mirror of the
+   engine-resolution the adapter itself performs, so the runner (which owns
+   ledger writes) and the adapter (which owns the call) cannot disagree.
+   Under the fixture engine the identifier is `fixture`, which doubles as
+   the synthetic marker simulate needs.
+6. **Simulate is ephemerality plus injected env.** The CLI copies the ledger
+   with `VACUUM INTO` (a consistent snapshot under WAL) and runs against the
+   throwaway copy — the §8 durability exclusion implemented as ephemerality,
+   with no schema flag and nothing for projection/cache to filter. The
+   runner injects `GTM_SIMULATE=1` (bindings switch to fixture-served mode)
+   and, for AI steps, `GTM_AI_ENGINE=fixture` plus a synthesized `["$auto"]`
+   script — an operator-recorded `GTM_AI_FIXTURE` in the process env still
+   wins, which is §8's replay-when-present rule. Credentialed non-AI process
+   adapters (and bindings without fixtures) are stubbed: records pass
+   through untouched, counted and receipted as simulation gaps; a stubbed
+   filter judges nothing, so downstream `when:` gates hold records back —
+   the gap made visible rather than papered over with a fabricated verdict.
+   Missing credentials downgrade to warnings under `--simulate` only.
+**Why:** M8's acceptance was the receipt diff, and it did its job: full
+field parity for Apollo (sentinel drop, LinkedIn routing, domain fallback),
+identity-upgrade parity for Harvest on the shared surface, identical
+dry-run artifacts for Instantly — and two honest graduation findings that
+would otherwise have been silently absorbed into engine creep.
+**Spec impact:** `spec/binding-schema.json` hardened as above (changelog
+v0.6); no other normative text changed — §10a/§8 were written in the v0.5
+pass and this build implements them.
