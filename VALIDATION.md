@@ -331,3 +331,26 @@ cache economics live — harvest skipped (`$0.0120 avoided` on the receipt),
 compose $0.0068, one lead delivered. Total increment spend ≈ $0.07 across
 the debug retries; the receipt's "avoided" line is the enrichment-ledger
 story with real money for the first time.
+
+### 2026-08-16 — Increment: + ai/filter (dry-run-validated; arm skipped)
+
+Bare `ai/filter` on the per-step `model:` override (Haiku judging, Sonnet
+composing, one pipeline) against an 8-row CSV with a checkable rubric:
+keep warm favorite colors, fail cool ones.
+
+- Filter: 8 in → 3 pass / 5 filtered, $0.0024, one batch. The split
+  matched prediction exactly (burnt orange, goldenrod, crimson pass;
+  mauve judged cool — the one defensible coin-flip). Verdict *reasons*
+  reconstructed afterwards from `step_events` by SQL — the
+  reasons-in-the-ledger story working as designed.
+- Gating economics visible on the receipt: compose ran only on the 3
+  passers ($0.0048 vs $0.0129 for 8 in the compose increment).
+- Deliver held at the dry gate; arming was skipped deliberately — the
+  arm/re-run mechanics were already proven three times in prior
+  increments, and 3 more test leads add nothing.
+- No findings: first increment with zero divergences, consistent with the
+  AI path having been debugged in the compose increment.
+
+This increment also seeded ADR-021 (groups): the design conversation it
+triggered — filter nondeterminism, verdict scope, campaign as a concept —
+is recorded there.
