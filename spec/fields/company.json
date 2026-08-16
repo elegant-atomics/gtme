@@ -1,0 +1,57 @@
+{
+  "entity_type": "company",
+  "version": 1,
+  "description": "Canonical field registry for company records (SPEC.md §4a, ADR-017). Company fields keep the company_ prefix so the same fact has the same name whether it appears on a company record or embedded on a person record.",
+  "fields": [
+    {
+      "name": "company_domain",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "domain",
+      "description": "Registrable domain (eTLD+1). Identity tier 1 for companies (SPEC.md §4).",
+      "example": "acme.com"
+    },
+    {
+      "name": "company_name",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Company name. Feeds the name-hash fallback tier (SPEC.md §4).",
+      "example": "Acme Corp"
+    },
+    {
+      "name": "company_website",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "trim",
+      "description": "Website URL as provided. company_domain is the comparable form.",
+      "example": "https://www.acme.com"
+    },
+    {
+      "name": "company_linkedin_url",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "linkedin_url",
+      "description": "LinkedIn company page URL.",
+      "example": "https://www.linkedin.com/company/acme-corp"
+    },
+    {
+      "name": "company_employees",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Headcount as an integer — never a range string.",
+      "example": 120
+    },
+    {
+      "name": "company_industry",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Industry label. Value domain deferred until a second adapter forces comparability (rule of two).",
+      "example": "Computer Software"
+    }
+  ]
+}

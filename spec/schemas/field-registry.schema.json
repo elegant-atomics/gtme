@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/schemas/field-registry.schema.json",
+  "title": "Canonical field registry (spec/fields/<entity_type>.json)",
+  "description": "The shared vocabulary per entity type (SPEC.md §4a, ADR-017). A field name crossing an adapter boundary must appear here or be vendor-namespaced (<vendor>.<field>). Canonical names must not contain a dot; a dot marks a namespaced name.",
+  "type": "object",
+  "required": ["entity_type", "version", "fields"],
+  "additionalProperties": false,
+  "properties": {
+    "entity_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "'person' | 'company' (extensible, SPEC.md §3)."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Registry version. Additive changes do not bump it; renames (breaking) do."
+    },
+    "description": {"type": "string"},
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/field"}
+    }
+  },
+  "definitions": {
+    "field": {
+      "type": "object",
+      "required": ["name", "tier", "type", "normalization", "description", "example"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Canonical field name: lower_snake_case, no dots (dots mark vendor-namespaced names, which are never listed here)."
+        },
+        "tier": {
+          "enum": ["identity", "core"],
+          "description": "identity = backs key derivation (SPEC.md §4, mandatory set per ADR-017); core = canonical shared vocabulary. The third tier (vendor namespace) is everything not in this file."
+        },
+        "type": {
+          "enum": ["string", "integer", "number", "boolean", "array"],
+          "description": "JSON type of the stored value."
+        },
+        "format": {
+          "type": "string",
+          "description": "Optional format hint (email, uri)."
+        },
+        "items_type": {
+          "enum": ["string", "integer", "number", "boolean"],
+          "description": "Element type when type is array."
+        },
+        "normalization": {
+          "enum": ["none", "trim", "lower", "email", "domain", "linkedin_url", "handle"],
+          "description": "Named normalization rule (SPEC.md §4a); each id maps to exactly one implementation, shared with identity-key derivation. A stored canonical value must be a fixed point of its rule."
+        },
+        "enum": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Canonical value domain, where comparability matters (SPEC.md §4a tier 2)."
+        },
+        "reserved": {
+          "type": "boolean",
+          "description": "Declared for tier ordering but provided by no v0 adapter (the ADR-020 handle tiers)."
+        },
+        "description": {"type": "string", "minLength": 1},
+        "example": {
+          "description": "An example value in normalized form."
+        }
+      }
+    }
+  }
+}

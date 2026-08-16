@@ -272,12 +272,19 @@ exist.
 ## 4. Identity keys — DECIDED
 
 Canonicalization lives in the runner (`internal/identity/`), never in adapters.
+The normalization rules the tiers below depend on are defined once, in the
+canonical field registry (§4a), and MUST be implemented exactly once — key
+derivation here and ingress normalization (§10.1) share the same
+implementations.
 
 - `person`: first non-empty of
   1. lowercased, trimmed email
-  2. normalized LinkedIn slug (strip protocol, host, trailing slash, query;
-     lowercase; e.g. `in/jane-doe`)
-  3. `sha256(lower(full_name) + "|" + lower(company_domain))` prefixed `nh:`
+  2. normalized **public-form** LinkedIn slug (strip protocol, host, trailing
+     slash, query; lowercase; e.g. `in/jane-doe`) — internal-form URLs are
+     excluded; see below
+  3. normalized GitHub username, prefixed `gh:` (reserved tier — see below)
+  4. normalized Twitter/X handle, prefixed `tw:` (reserved tier — see below)
+  5. `sha256(lower(full_name) + "|" + lower(company_domain))` prefixed `nh:`
 - `company`: registrable domain (eTLD+1, lowercased; use
   `golang.org/x/net/publicsuffix`), else `sha256(lower(name))` prefixed `nh:`.
 
@@ -285,6 +292,131 @@ If an incoming record matches an existing identity on a *stronger* key than
 it was created with (e.g. name-hash identity later gains an email), the
 runner MUST update `identity_key` in place — it MUST NOT create a
 duplicate. It MUST log a `step_events` entry `event='identity_upgraded'`.
+
+**LinkedIn internal forms (ADR-020).** A LinkedIn URL in the wild is one of
+two incompatible shapes: the public vanity URL (`linkedin.com/in/jane-doe`)
+or an internal/member-ID form — an opaque member-id token in the path (e.g.
+`in/ACwAA…`), or a Sales-Navigator-style path (`sales/lead/…`). Applying
+the strip-and-lowercase rule to both would silently yield two different
+keys for the same real person, a dedup failure within a single tier that
+the §4 upgrade mechanism (which only handles weak→strong across tiers)
+cannot catch. The registry therefore separates the observable URL shapes
+into explicitly distinct fields, so they can never collide under one name —
+each stored as the URL it is, never reinterpreted as an extracted
+identifier (gtme distinguishes shapes; it does not claim to know LinkedIn's
+identifier semantics):
+
+- `linkedin_url` admits the **public vanity URL only**. Its normalization
+  rule MUST reject any other shape as invalid — rejected, not silently
+  reshaped — so key derivation only ever sees public-form slugs.
+- `linkedin_internal_url` holds an internal-form profile URL (an opaque
+  token in the `in/` path); `linkedin_sales_nav_url` holds a Sales
+  Navigator URL (`sales/…` path). Both trimmed, case preserved. Neither is
+  key material in v0: v0 never merges identities (DECISIONS.md, identity
+  aliases), so keying on an internal shape would permanently fork a person
+  who later arrives under the public form, whereas falling through to a
+  weaker tier converges via the upgrade path when an enrichment resolves
+  the profile and writes `linkedin_url`.
+
+An adapter whose provider hands it a LinkedIn-URL-shaped value MUST
+classify it at its own boundary (§4a: vendor dialect → canonical) and emit
+the matching field: a `sales/…` path is `linkedin_sales_nav_url`; an
+`in/` (or `pub/`) path whose slug begins with an opaque member token
+(case-insensitive `acwaa` / `acoaa` followed by a base64-like tail) — or a
+`profile`/`talent` first path segment — is `linkedin_internal_url`;
+everything else under `in/`/`pub/` is `linkedin_url`. The heuristic errs
+toward the non-key fields (recoverable by enrichment + upgrade) over
+keying on a non-public shape (not recoverable).
+
+**Reserved handle tiers (ADR-020).** `github_username` (key prefix `gh:`)
+and `twitter_handle` (key prefix `tw:`) are person identity tiers ranked
+below the LinkedIn slug (LinkedIn stays primary for B2B) and above the
+name-hash fallback, in that order. Both are globally unique, public,
+low-collision handles. No v0 adapter provides either field; the tiers are
+fixed now so the ordering does not get designed around later. Normalization
+is the registry's `handle` rule: trim, strip a leading `@`, strip a
+`github.com/` / `twitter.com/` / `x.com/` URL prefix, lowercase.
+
+---
+
+## 4a. Canonical field registry — DECIDED
+
+`needs`/`provides` matching is string equality; it is only meaningful if
+adapters agree on field names *and* value shapes (ADR-017). The registry is
+that agreement: a canonical field registry per entity type lives in
+`spec/fields/<entity_type>.json` (currently `person.json`, `company.json`) —
+machine-checkable artifacts, loaded directly by the implementation and the
+test suite, per ADR-010. `spec/schemas/field-registry.schema.json` is the
+schema for the registry files themselves.
+
+Each registry entry declares: `name`, `tier`, `type`, optional `format`,
+`normalization` (a named rule, see below), optional `enum` (the canonical
+value domain, where comparability matters), optional `items_type` (for
+arrays), optional `reserved` (declared but provided by no v0 adapter),
+`description`, and `example`.
+
+**Scope rule:** a field is canonical when it crosses an adapter boundary.
+Three tiers:
+
+1. **Identity fields** (`tier: identity`, mandatory): person = `email`,
+   `linkedin_url`, `first_name`, `last_name` (plus the reserved
+   `github_username`, `twitter_handle` — §4); company = `company_domain`,
+   `company_name`. These back identity-key derivation (§4); their
+   normalization rules are part of the registry, not implicit in the
+   key-derivation spec.
+2. **Canonical core** (`tier: core`): any field that (a) ≥2 adapters
+   provide, (b) is waterfall/dedupe-relevant, or (c) is commonly consumed
+   by compose/deliver steps. Canonical fields MAY declare a canonical
+   VALUE domain (`enum`) — without value normalization, waterfalls compare
+   incomparables — but a domain is declared only where real providers
+   demonstrably converge, never guessed at design time: a wrong guess is a
+   breaking change waiting to happen. The v0 seed declares none. The
+   milder, structural form of the same idea does apply from day one:
+   canonical types are exact (`company_employees` is an integer, never a
+   range string).
+3. **Vendor namespace**: everything else as `<vendor>.<field>` (e.g.
+   `apollo.id`). Stored with provenance, queryable, usable in `uses:` and
+   `variables:`. A canonical name MUST NOT contain a dot; a dot marks a
+   namespaced name. Namespaced fields in a pipeline's needs make vendor
+   coupling visible; `gtm plan` MUST note them.
+
+**Promotion:** namespaced → core when a second adapter provides the same
+fact (the rule of two). Additive registry changes are non-breaking (one
+ADR line). Renames are breaking: spec amendment + version bump.
+
+**Normalization rules** are named, and each name maps to exactly one
+implementation (`internal/identity` and nothing else — the same functions
+§4 key derivation uses). v0 rule ids: `none`, `trim`, `lower` (trim +
+lowercase), `email` (§4 tier 1), `domain` (registrable domain, eTLD+1),
+`linkedin_url` (public vanity URLs canonicalized to
+`https://www.linkedin.com/<slug>`; any other LinkedIn shape is an
+*invalid* value for this rule — it belongs in `linkedin_internal_url` or
+`linkedin_sales_nav_url`, §4), `handle` (§4 reserved tiers). A stored canonical value MUST be a
+fixed point of its field's rule.
+
+**Enforcement, three layers:**
+
+1. **Manifest validation:** every property name in a manifest's static
+   `needs`/`provides` schemas — and every field named in a step's `uses:`
+   or `variables:` values — MUST exist in the registry for the adapter's
+   `entity_type`, or be vendor-namespaced. A bare unknown name is a
+   validation error (`gtm plan` exit 2), which names the field and the
+   nearest registry match when one exists.
+2. **Runtime:** RECORD output validation (§5) additionally checks canonical
+   fields against the registry: declared `type`, `enum` domain, and
+   normalized form. A violating record fails per §5 (the run continues).
+3. **Adapter conformance kit:** every built-in adapter MUST ship golden
+   vendor-payload fixtures and a conformance test asserting fixtures in →
+   expected canonical records out, registry-valid. This is the
+   machine-checkable finish line adapter authoring (human or generated)
+   targets.
+
+Consequence: adapters map vendor dialect → canonical at their own boundary;
+nobody downstream thinks about mappings (see §9 and ADR-018: the only two
+mapping sites are the csv/source ingress `columns:` and the deliver egress
+`variables:`). The registry starts small (seeded from the fields the v0
+adapters touch plus the curated cross-provider overlap, ≤60 entries) and
+grows by demand, never by design session.
 
 ---
 
@@ -381,6 +513,26 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   For an adapter that can genuinely work more than one way — an AI step on
   the `claude-code` engine needs no API key at all (§2) — declaring the key
   as `credentials` would fail plans that are actually fine.
+- **Dynamic needs (ADR-019):** a manifest whose step contract is defined by
+  external user-authored content (an AI prompt, a campaign template) cannot
+  enumerate its needs statically. Such a manifest MAY declare its `needs`
+  as the string `"dynamic"`, or as an object `{"dynamic": true, ...}` where
+  the rest of the object is an ordinary JSON Schema acting as a **static
+  floor** (its `required` fields are always needed regardless of config —
+  e.g. a deliver adapter that cannot function without `email`). The step's
+  *effective* needs are then the floor (if any) plus the config-derived
+  list: `uses:` for `filter`/`compose` steps (ADR-004, mechanics
+  unchanged), the values of `variables:` for `deliver` steps (§9). The
+  planner validates the effective needs exactly as it validates
+  `needs.required` (§7), and the runner projects exactly those fields. A
+  dynamic filter/compose step declaring no `uses:` projects every field the
+  ledger holds for the record (the needs-all behavior, as before ADR-004);
+  a dynamic deliver step declaring no `variables:` needs only its floor.
+- **Registry validation (ADR-017, §4a):** every property name in a static
+  `needs` or `provides` schema MUST be canonical for the manifest's
+  `entity_type` or vendor-namespaced (`<vendor>.<field>`). Schemas that
+  name no properties (the needs-all wildcard, an open source schema) have
+  nothing to check.
 - `freshness_days`: default cache window for fields this adapter provides;
   overridable per step (`cache:` in YAML).
 - `batch`: marks an adapter the runner MUST feed in `batch_size`-sized
@@ -422,6 +574,39 @@ manifest `needs` is the needs-all wildcard (`additionalProperties: true`, no
 before ADR-004 — `uses` is how an AI step narrows that to what it actually
 needs, gaining plan-time validation in exchange.
 
+**Dynamic needs generalized (ADR-019):** `uses:` is one instance of a
+general mechanism. For any step whose manifest declares dynamic needs (§6),
+the planner MUST derive the step's effective needs from config — `uses:`
+for filter/compose, the *values* of `variables:` for deliver — union the
+manifest's static floor, and validate every derived field against the
+available set exactly as step 2 above: a referenced field nothing provides
+is a plan error naming the step and the field. Effective needs referencing
+vendor-namespaced fields (§4a) are valid, but `gtm plan` MUST note the
+vendor coupling in its output.
+
+**One-of needs (ADR-020 corollary):** a static `needs` schema whose top
+level is `anyOf` of object schemas declares *alternative* ways to satisfy
+the step — "at least one of these field sets." The planner MUST accept the
+step when at least one branch's `required` fields are all available, and a
+failure MUST name every branch and what each branch is missing. The
+projection is built from the union of all branches' declared properties
+(fields with no value are simply absent, as ever). At runtime, needs
+validation validates against the schema itself, where `anyOf` already
+carries the same meaning — the planner's walk is the only place needing
+the rule stated. The motivating case: `harvest/profile` needs at least one
+kind of LinkedIn URL (§10.4), which no flat `required` list can say.
+
+**Ingress mapping checks (ADR-018):** for a source with a `columns:`
+mapping (§10.1), the planner MUST additionally verify, still with no
+network calls and no spend: (a) every mapped header exists in the source's
+probed schema (a mapping to a column the file does not have is a plan
+error); (b) headers that already match canonical names auto-map with zero
+config, and a near-miss (an unmapped header a small edit away from a
+canonical name) is SUGGESTED in plan output, never silently guessed;
+(c) the mapped-plus-auto-mapped field set yields at least one identity-key
+tier (§4) — none at all is a plan error, and only the name-hash fallback
+tier is a plan warning.
+
 At execution time, per step, per record:
 - **Cache check (enrich/verify only):** if every field in the step's
   `provides` already has a current value within the freshness window,
@@ -441,7 +626,7 @@ At execution time, per step, per record:
 gtm init                          # create ledger + ~/.gtm
 gtm secret set KEY [VALUE]        # VALUE omitted → prompt, no echo
 gtm plan pipeline.yaml            # validate + print plan, no execution
-gtm run  pipeline.yaml [--resume RUN_ID]
+gtm run  pipeline.yaml [--resume RUN_ID] [--dry-run]
 gtm query "SQL"                   # read-only SQL against the ledger
 gtm query --save NAME "SQL"       # saved segment
 gtm show <identity-key>           # read-only projection inspector
@@ -509,6 +694,41 @@ runner MUST check `deliveries`; on hit, it MUST skip (`skipped_cache`
 semantics, reason `already_delivered`). On successful adapter RECORD/END
 for that record, the runner MUST insert into `deliveries`.
 
+### deliver completeness — `on_missing` (ADR-019)
+
+Per-record completeness at deliver time is a runtime contract: every
+`variables:` target (§9) MUST resolve to a non-empty value for a record
+before that record may deliver — blank merge fields MUST never send. The
+policy when one does not resolve is `on_missing: skip | fail` on the
+deliver step, default **skip**:
+
+- `skip`: the record does not deliver; the runner records a fail verdict
+  for the deliver step in `run_records.verdicts` with the missing field
+  names as the reason, and the terminal receipt lists every skipped record
+  with its reason.
+- `fail`: the record fails (`step_events.event='failed'`, naming the
+  missing fields); the run continues, per §5.
+
+A record missing a *floor* field (§6 dynamic needs) fails needs validation
+as any record would; `on_missing` governs the `variables:`-derived fields.
+
+### Dry-run and the armed gate (ADR-019)
+
+`gtm run --dry-run` executes the pipeline normally **except** deliver
+steps: for each record reaching a deliver step, the runner resolves the
+step's `variables:` per record, applies the `on_missing` policy, and
+records `step_events.event='dry_run'` with the fully RESOLVED variable
+values in `detail` — but MUST NOT invoke the deliver adapter and MUST NOT
+write to `deliveries`. The terminal receipt renders each record's resolved
+variables: this is the approval artifact a human reviews before arming.
+Non-deliver steps run normally under `--dry-run` — delivery is the gated
+destructive edge (§0 principle 9); everything upstream is replayable and
+cache-covered, and its spend is already visible in `gtm plan`. Arming is
+the same command without the flag; a dry run is an ordinary run in every
+other respect (its own run id, receipt, and `gtm runs` entry), and because
+it writes no deliveries, the armed run's idempotency behaves as if the dry
+run had never happened.
+
 ---
 
 ## 9. pipeline.yaml — DECIDED
@@ -549,13 +769,30 @@ deliver:
   use: instantly/add-to-campaign
   with:
     campaign: "Q3 VP Marketing"
+  variables:            # ADR-018/019: egress mapping, and the step's dynamic needs
+    first_line: first_line
+    ps_line: ps_line
   idempotency: email
 ```
 
 Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
-it exactly as `needs.required` (§7). Steps execute strictly in order; within
+it exactly as `needs.required` (§7). `variables:` (ADR-018/019) is valid
+only on the deliver step: a map of *target merge-field name* → *canonical
+or namespaced ledger field*; its values are the step's dynamic needs (§6,
+§7), and the mapping is the egress half of ADR-018 — the only place the
+target's foreign vocabulary appears. The runner hands the mapping to the
+deliver adapter as `variables` in OPEN `config` (§5) — the adapter owns
+applying it; the runner owns projecting and completeness-checking the
+fields it references (§8). `on_missing: skip | fail` (default
+`skip`) is valid only on the deliver step (§8). The ingress half is
+`columns:` inside `csv/source`'s `with:` (§10.1): a map of *canonical field
+name* → *CSV header as written*. Both mapping keys read
+destination-vocabulary → source-vocabulary. No interior step may carry a
+mapping block (ADR-018): declarative mappings at the two edges are
+plan-validatable; the interior speaks only canonical names. Steps execute
+strictly in order; within
 a step, records process with a worker pool (default concurrency 4,
 `GTM_CONCURRENCY` to override), except AI steps which process in batches of
 `batch_size` (default 25) — one adapter invocation per batch. `waterfall:`
@@ -575,6 +812,17 @@ that run offline against fixtures.
 1. **`csv/source`** — reads a CSV path from config; header row → field
    names; `email`/`linkedin_url`/`name`/`company_domain` columns feed
    identity keys. (Exists so everything is testable with zero API keys.)
+   Ingress mapping (ADR-018): config `columns:` maps canonical field names →
+   CSV headers as written. Headers already matching canonical names (after
+   header normalization: lowercase, separators → underscores) auto-map with
+   zero config; near-misses are SUGGESTED at plan time, never guessed (§7).
+   Unmapped, non-canonical headers are namespaced `csv.<normalized_header>`
+   (§4a tier 3) — kept, queryable, visibly non-canonical. Mapped canonical
+   values are normalized per the registry at ingress; a value that fails
+   its rule never crashes the run and never reaches the ledger — the field
+   is dropped from that record with the reason recorded in `step_events`,
+   and the record then fails only if what remains cannot satisfy identity
+   derivation or a downstream need.
 2. **`apollo/search`** (source, person) — POST
    `api.apollo.io/api/v1/mixed_people/search` with `X-Api-Key`
    (`APOLLO_API_KEY`); config: `query`, `limit`; paginate; map
@@ -584,16 +832,26 @@ that run offline against fixtures.
    JSON-array output schema `[{identity_key, pass, reason}]`; emit VERDICTs;
    config supports `uses:` (§9, ADR-004).
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
-   lookup by `linkedin_url` (`HARVEST_API_KEY`); provides `headline`,
-   `recent_posts`, `role_history`; emit COST from response metadata if
-   present, else config-estimated.
+   lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
+   one-of `linkedin_url` | `linkedin_internal_url` |
+   `linkedin_sales_nav_url` (§7 one-of needs), preferring the public form
+   when several are present. Provides `headline`, `recent_posts`,
+   `role_history` — and, when the lookup started from a non-public shape,
+   the resolved public `linkedin_url`, which is ADR-020's recovery path
+   (the key upgrade to the slug tier follows automatically, §4). Emit COST
+   from response metadata if present, else config-estimated.
 5. **`ai/compose`** (compose) — batch; provides `first_line`, `ps_line`
    (strings); output schema enforced; config supports `uses:`.
 6. **`instantly/add-to-campaign`** (deliver, person) — Instantly v2 API,
    `Authorization: Bearer $INSTANTLY_API_KEY`: create/attach lead to
    campaign by name (resolve campaign name → id via list endpoint once per
-   run; error if absent); needs `email`, `first_name`; optional
-   `first_line`, `ps_line` as custom variables.
+   run; error if absent). Declares dynamic needs (§6, ADR-019) with a
+   static floor of `email`; everything else it sends derives from the
+   step's `variables:` mapping (ADR-018) — a target name matching one of
+   Instantly's first-class lead fields (`first_name`, `last_name`,
+   `company_name`, `personalization`) maps into the lead body, and any
+   other target name becomes a custom variable of that name. No merge
+   field is hard-coded in the adapter.
 7. **`mock-enrich-py`** (external, Python 3 stdlib only) — reads protocol
    from stdin, adds field `mock_score` (random but seeded from identity
    key), emits COST 0. Proves the external adapter path.
@@ -660,13 +918,33 @@ offline.
   drains a fixture spool without re-sourcing consumed lines on a second run.
 - **M6 — polish.** `gtm runs`, README with 60-second quickstart,
   `brew`-style install script, `gtm secret set`.
+- **M7 — canonical vocabulary & edge contracts (ADR-017/018/019/020).**
+  The field registry (`spec/fields/`, §4a) with all three enforcement
+  layers; identity-tier amendments (§4: internal-form LinkedIn rule,
+  reserved handle tiers); `columns:` ingress mapping with auto-map,
+  suggestions, and the identity-path plan check (§7, §10.1); `needs:
+  dynamic` with `variables:` egress mapping (§6, §9, §10.6); `on_missing`
+  and `--dry-run` (§8). ✅ Unit: registry files validate against their
+  schema and every built-in manifest passes registry validation; internal-
+  form LinkedIn URLs fall through to the next tier (table-driven, with the
+  public/internal shapes §4 names); each rule id normalizes per §4a; a
+  one-of needs step plans when any one branch is available and fails
+  naming every branch otherwise (§7). ✅
+  E2E, offline: a `columns:`-mapped CSV plans and runs with values
+  normalized at ingress and unmapped headers namespaced; a plan against a
+  CSV with no identity-key path fails naming the rule, and a name-hash-only
+  CSV warns; a deliver step with `variables:` referencing an unprovided
+  field fails plan naming step and field; `--dry-run` against a fixture
+  deliver adapter renders resolved variables in the receipt, writes zero
+  `deliveries` rows, and applies `on_missing: skip` verdicts; the same
+  pipeline armed delivers, and re-run delivers nothing twice.
 
 Repo layout:
 ```
 cmd/gtm/            # main
 internal/{ledger,identity,protocol,runner,planner,cli,adapters/...}
 adapters/mock-enrich-py/
-spec/               # machine-checkable artifacts: schemas, ledger.sql, wire/, acceptance/
+spec/               # machine-checkable artifacts: schemas, fields/, ledger.sql, wire/, acceptance/
 test/e2e/
 SPEC.md  CLAUDE.md  DECISIONS.md  PROCESS.md  ROADMAP.md  VALIDATION.md  AUDIT.md  Makefile
 ```
@@ -800,6 +1078,26 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.4 — 2026-08-15 (ADR-017/018/019 reconciliation + ADR-020)
+**Added:** §4a canonical field registry with `spec/fields/person.json`,
+`spec/fields/company.json`, `spec/schemas/field-registry.schema.json`, and
+the three enforcement layers (ADR-017); §4 internal-form LinkedIn rule and
+reserved `github_username`/`twitter_handle` identity tiers (ADR-020,
+resolving the gap flagged under ADR-017); `needs: dynamic` manifest form
+with static floor (§6, ADR-019); `variables:` egress mapping and
+`on_missing: skip|fail` on deliver steps (§8, §9, ADR-018/019); `columns:`
+ingress mapping on `csv/source` with auto-map, plan-time suggestions, the
+identity-path check, and `csv.*` namespacing of unmapped headers (§7,
+§10.1, ADR-018); `gtm run --dry-run` and the armed gate (§8, ADR-019);
+one-of (`anyOf`) needs in the planner's contract walk, motivated by
+`harvest/profile` needing any one LinkedIn URL shape (§7, §10.4, ADR-020);
+milestone M7.
+**Changed:** §10.6 `instantly/add-to-campaign` re-contracted to dynamic
+needs with an `email` floor and `variables:`-driven merge fields — its
+hard-coded `first_name` need and default `first_line`/`ps_line` custom
+variables are removed; §9's example gained the deliver `variables:` block;
+§7 gained the ADR-019 generalization of ADR-004's `uses:` mechanics.
 
 ### v0.2 — 2026-08-15 (spec reconciliation)
 **Added:** §0 Design Principles; RFC 2119 declaration; `current_fields` SQL

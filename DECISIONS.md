@@ -126,13 +126,18 @@ not committed — same as the first). Numbering continues from ADR-016.
 **Scope note (2026-08-15):** on receiving this packet, the human scoped its
 application: ADR-017/018/019 are recorded below as decided, and VALIDATION.md
 was rewritten per ADR-019 (see "campaign zero" there). Their **Spec impact**
-is deliberately **NOT YET applied** to SPEC.md, and none of the mechanics
-they describe (a field registry, `columns:`/`variables:` edge mappings,
-`needs: dynamic`, the `on_missing` policy, the dry/armed gate) exist in code.
-That's a separate, larger reconciliation-plus-build pass, scoped explicitly
-as future work — not implied by these entries existing. Campaign zero in
-VALIDATION.md is written as the target shape and says so plainly; it is not
-runnable yet.
+was deliberately **not applied** in that docs-only pass, and none of the
+mechanics they describe (a field registry, `columns:`/`variables:` edge
+mappings, `needs: dynamic`, the `on_missing` policy, the dry/armed gate)
+existed in code — a separate, larger reconciliation-plus-build pass, scoped
+explicitly as future work. *Update (2026-08-15, later the same day):* that
+pass ran on the human's instruction. The Spec impact of all three ADRs was
+applied to SPEC.md (changelog v0.4, milestone M7), together with ADR-020
+below (Accepted after review) resolving the identity-normalization gap
+flagged under ADR-017; the M7 mechanics were then built — `make check`
+green, including offline e2e acceptance of the campaign-zero shape — and
+VALIDATION.md's campaign zero is now marked runnable, still human-gated as
+ever.
 
 ### ADR-017: Canonical field registry (the shared vocabulary)
 **Status:** Accepted (spec impact deferred — see scope note above)
@@ -191,7 +196,54 @@ unchanged; this generalizes the *concept* to a second instance (deliver's
 **Spec impact:** AMEND (not yet applied) — manifest schema (`needs: dynamic`); plan semantics; deliver runtime policy + receipt format; VALIDATION.md gains the CSV→send pipeline as campaign zero, run dry → review resolved-variables receipt → arm at ~10 records into a controlled campaign → re-run same CSV to prove zero duplicate deliveries. **This VALIDATION.md change was applied** (2026-08-15) even though the manifest/plan/runtime mechanics it depends on were not — campaign zero is documented as blocked on that follow-up work, not as runnable today.
 
 #### Registry seeding note (implementation guidance, not an ADR)
-Seed `spec/fields/person.json` and `spec/fields/company.json` from the fields the v0 adapters actually touch plus the curated cross-provider overlap; do not exceed ~60 entries in the first pass. Every entry must have a normalization rule and (where comparability matters) a value domain. When in doubt, leave a field namespaced — promotion is cheap, demotion is breaking. Not yet executed (no `spec/fields/` directory exists).
+Seed `spec/fields/person.json` and `spec/fields/company.json` from the fields the v0 adapters actually touch plus the curated cross-provider overlap; do not exceed ~60 entries in the first pass. Every entry must have a normalization rule and (where comparability matters) a value domain. When in doubt, leave a field namespaced — promotion is cheap, demotion is breaking. Executed 2026-08-15 (37 entries: 31 person, 6 company). Per the human's direction during the apply pass, the v0 seed declares **no value domains** — ADR-017's `seniority`-enum example notwithstanding — because no field yet shows real cross-provider convergence; the `enum` mechanism remains in the registry schema for when one does. Exact canonical *types* (integer-never-range) apply from day one.
+
+### ADR-020: Identity-tier amendments — internal-form LinkedIn URLs, reserved handle tiers
+**Status:** Accepted (2026-08-15 — proposed by this reconciliation pass to
+resolve the "known gap" flagged under ADR-017; human-approved same day
+after two revisions: the shape split into explicit URL fields, and the
+one-of needs corollary)
+**Context:** ADR-017's known-gap note: a provider's `linkedin_url` field can
+carry the public vanity URL or an internal/member-ID form (opaque member-id
+slug, Sales-Navigator path). §4's strip-and-lowercase normalization
+silently produces two different keys for the same real person — a dedup
+failure *within* one tier, which the weak→strong upgrade mechanism cannot
+catch. Separately, `github_username` and `twitter_handle` are plausible
+additional person identity tiers worth reserving now so the ordering isn't
+designed around later.
+**Decision:** (1) The observable URL shapes are explicitly distinct
+registry fields, so they can never collide under one name: `linkedin_url`
+admits the public vanity URL only (its normalization rule rejects any
+other shape as invalid), `linkedin_internal_url` holds an internal-form
+profile URL, `linkedin_sales_nav_url` a Sales Navigator URL — each stored
+as the URL it is, case preserved, never reinterpreted as an extracted
+"member ID" (gtme distinguishes shapes; it does not claim to know
+LinkedIn's identifier semantics). Adapters classify at their own boundary
+(`sales/…` path → sales-nav; opaque `acwaa`/`acoaa`-prefixed token after
+`in/`/`pub/`, or `profile`/`talent` paths → internal; otherwise public)
+and emit the matching field. Neither non-public field is key material in
+v0: v0 never merges identities, so keying on a non-public shape would
+permanently fork a person who later arrives under the public form, whereas
+falling through to a weaker tier converges via §4's existing upgrade path
+once an enrichment resolves the profile and writes `linkedin_url`.
+Resolution-by-enrichment (the other option the gap note named) is thus the
+recovery path, not a v0 build item. (2) Person identity tiers become:
+email > public LinkedIn slug > `gh:` github_username > `tw:` twitter_handle
+> name-hash. The handle tiers are implemented in key derivation and listed
+in the registry as `reserved: true` — no v0 adapter provides either field;
+normalization is the registry's `handle` rule.
+**Consequences:** An internal-form-only record keys on a weaker tier
+(possibly name-hash) until something resolves the public profile — correct
+but weaker dedupe, visible in the ledger rather than silently forked.
+Adapters providing github/twitter handles later slot into a fixed ordering.
+Splitting the shapes surfaced a needs-model gap: `harvest/profile` needs
+*at least one* LinkedIn URL shape, which a flat `required` list cannot say
+— hence one-of (`anyOf`) needs in the planner's contract walk (§7), with
+harvest re-contracted to accept any shape and provide the resolved public
+`linkedin_url` (the recovery path made concrete).
+**Spec impact:** AMEND (applied and approved in the v0.4 pass) — §4 tier
+list, shape-split rule, reserved-tier prose; §7 one-of needs; §10.4
+harvest re-contract; registry entries in `spec/fields/person.json`.
 
 ---
 
@@ -447,3 +499,28 @@ the ledger, gets backed up with it, and needs no new file format. `gtm query` is
 enforced read-only twice over: the statement must be a single SELECT/WITH/EXPLAIN,
 and it runs on a connection opened `mode=ro`.
 **Spec impact:** None (fills in the storage location `--save` left unspecified).
+
+### 2026-08-15 — M7 internals: embedded registry, injected variables, fixture upgrades
+
+**Q:** Where does the runtime read the field registry from, how does a deliver
+adapter receive the step-level `variables:` mapping, and what happens to the
+fixtures the old hard-coded contracts leaned on?
+**Choice:** (1) `spec/fields/*.json` is embedded via a tiny `package spec`
+(`spec/embed.go`) and parsed once per process (`internal/registry`, sync.Once);
+a conformance test asserts embedded == on-disk so the binary can never
+disagree with the artifacts it was built from. Rule ids resolve to the same
+`internal/identity` functions §4 key derivation uses — one implementation per
+rule, as §4a demands. (2) The runner injects `variables` into the OPEN
+`config` map (now stated in SPEC §9): the adapter owns the egress mapping,
+the runner owns projection and the `on_missing` completeness check, so
+neither reimplements the other. (3) `mock/deliver` upgraded to the dynamic
+contract (email floor + `variables`) so the campaign-zero shape is
+e2e-tested offline end to end; `mock-enrich-py`'s fields became
+`mock.score`/`mock.note` and `apollo_id` became `apollo.id` under §4a's
+namespacing rule. AI compose output is trimmed at the adapter boundary —
+canonical values must be fixed points of their rule, and models emit stray
+whitespace.
+**Why:** Everything observable landed in SPEC.md v0.4; these are the
+internal seams that make it hold.
+**Spec impact:** None beyond v0.4 (the OPEN-config sentence was added to §9
+as part of that pass).

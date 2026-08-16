@@ -11,7 +11,9 @@ artifact.
 | `ledger.sql`              | The canonical ledger DDL, including the `current_fields` view      | §3, ADR-003  |
 | `schemas/msg-*.json`      | Every wire-protocol message type, per direction                    | §5           |
 | `schemas/manifest.schema.json` | An adapter's `manifest.json`                                  | §6           |
-| `schemas/pipeline.schema.json` | `pipeline.yaml`, including `uses:`                            | §9, ADR-004  |
+| `schemas/pipeline.schema.json` | `pipeline.yaml`, including `uses:`/`variables:`/`on_missing:` | §9, ADR-004/018/019 |
+| `schemas/field-registry.schema.json` | The `fields/*.json` registry files themselves           | §4a, ADR-017 |
+| `fields/<entity_type>.json` | The canonical field registry: names, tiers, normalization rules, value domains | §4a, ADR-017 |
 | `wire/*.ndjson`           | Golden transcripts recorded from the real adapters                 | §5, §11 M2   |
 | `acceptance/*.yaml`       | The eight operator stories as structured given/when/then           | ADR-012      |
 

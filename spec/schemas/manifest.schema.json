@@ -27,12 +27,15 @@
       "description": "'person' | 'company' (extensible)."
     },
     "needs": {
-      "type": "object",
-      "description": "JSON Schema for the projection the runner builds and hands in. `needs.required` is what the planner checks (SPEC.md §7). An object with additionalProperties:true and no properties is the needs-all wildcard."
+      "oneOf": [
+        {"type": "object"},
+        {"const": "dynamic"}
+      ],
+      "description": "JSON Schema for the projection the runner builds and hands in. `needs.required` is what the planner checks (SPEC.md §7). An object with additionalProperties:true and no properties is the needs-all wildcard. Dynamic needs (SPEC.md §6, ADR-019): the string 'dynamic', or an object carrying 'dynamic': true whose remaining keys are an ordinary JSON Schema acting as the always-required static floor — effective needs are then floor ∪ config-derived (`uses:` for filter/compose, `variables:` values for deliver). Property names in a static schema must be registry-canonical for the entity_type or vendor-namespaced (SPEC.md §4a)."
     },
     "provides": {
       "type": "object",
-      "description": "JSON Schema for the fields the adapter produces. Output RECORD fields are validated against it before the ledger write (SPEC.md §5)."
+      "description": "JSON Schema for the fields the adapter produces. Output RECORD fields are validated against it before the ledger write (SPEC.md §5), and canonical fields additionally against the registry's type/enum/normalized form (SPEC.md §4a). Property names must be registry-canonical for the entity_type or vendor-namespaced."
     },
     "credentials": {
       "type": "array",

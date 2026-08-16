@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtm.spec/schemas/pipeline.schema.json",
   "title": "pipeline.yaml",
-  "description": "The only pipeline authoring surface in v0 (SPEC.md §9, ADR-005). Validate the YAML document after decoding it to JSON. Derived from internal/pipeline.Pipeline, which decodes with KnownFields(true) — hence additionalProperties: false — plus the `uses:` key mandated by ADR-004, which the planner does not consume yet.",
+  "description": "The only pipeline authoring surface in v0 (SPEC.md §9, ADR-005). Validate the YAML document after decoding it to JSON. Derived from internal/pipeline.Pipeline, which decodes with KnownFields(true) — hence additionalProperties: false.",
   "type": "object",
   "required": ["name", "source"],
   "additionalProperties": false,
@@ -80,6 +80,15 @@
         "idempotency": {
           "type": "string",
           "description": "Deliver steps: the field whose value keys a delivery. Defaults to the identity key (SPEC.md §8)."
+        },
+        "variables": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1},
+          "description": "Deliver steps only (ADR-018/019): egress mapping of target merge-field name → canonical or namespaced ledger field. Its values are the step's dynamic needs (SPEC.md §6, §7); the planner validates each against upstream provides and rejects the key on any other step."
+        },
+        "on_missing": {
+          "enum": ["skip", "fail"],
+          "description": "Deliver steps only (ADR-019, SPEC.md §8): per-record policy when a variables: target does not resolve to a non-empty value. Default skip (with a recorded verdict); blank merge fields never send."
         },
         "waterfall": {
           "description": "Reserved (SPEC.md §9); rejected in v0."

@@ -1,0 +1,273 @@
+{
+  "entity_type": "person",
+  "version": 1,
+  "description": "Canonical field registry for person records (SPEC.md §4a, ADR-017). Seeded from the fields the v0 adapters actually touch plus the curated cross-provider overlap. A field name not listed here must be vendor-namespaced (<vendor>.<field>).",
+  "fields": [
+    {
+      "name": "email",
+      "tier": "identity",
+      "type": "string",
+      "format": "email",
+      "normalization": "email",
+      "description": "Work or personal email. Identity tier 1 (SPEC.md §4).",
+      "example": "jane.doe@acme.com"
+    },
+    {
+      "name": "linkedin_url",
+      "tier": "identity",
+      "type": "string",
+      "format": "uri",
+      "normalization": "linkedin_url",
+      "description": "PUBLIC LinkedIn profile URL (vanity slug) only. Identity tier 2 via the derived slug. An internal-form or Sales-Navigator URL is an INVALID value for this field — those are linkedin_internal_url / linkedin_sales_nav_url (SPEC.md §4, ADR-020); the shapes are separate fields precisely so they can never collide under one name.",
+      "example": "https://www.linkedin.com/in/jane-doe"
+    },
+    {
+      "name": "linkedin_internal_url",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "trim",
+      "description": "Internal-form LinkedIn profile URL (opaque token in the /in/ path, e.g. linkedin.com/in/ACwAA…). Stored as the URL, case preserved — gtme distinguishes observable URL shapes and does not reinterpret them as identifiers. NOT key material in v0 (SPEC.md §4, ADR-020): an enrichment that resolves it to the public profile writes linkedin_url, and the ordinary key upgrade applies.",
+      "example": "https://www.linkedin.com/in/ACwAAAbQ2xKB9…"
+    },
+    {
+      "name": "linkedin_sales_nav_url",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "trim",
+      "description": "Sales Navigator URL form (linkedin.com/sales/lead/… or /sales/people/…). Stored as the URL, case preserved. NOT key material in v0 (SPEC.md §4, ADR-020); same recovery path as linkedin_internal_url.",
+      "example": "https://www.linkedin.com/sales/lead/ACwAAAbQ2xKB9…,NAME_SEARCH"
+    },
+    {
+      "name": "first_name",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Given name. Feeds the name-hash fallback tier with last_name (SPEC.md §4).",
+      "example": "Jane"
+    },
+    {
+      "name": "last_name",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Family name. Feeds the name-hash fallback tier with first_name (SPEC.md §4).",
+      "example": "Doe"
+    },
+    {
+      "name": "github_username",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "handle",
+      "reserved": true,
+      "description": "GitHub username. Reserved identity tier 3, key prefix gh: (SPEC.md §4, ADR-020); no v0 adapter provides it.",
+      "example": "janedoe"
+    },
+    {
+      "name": "twitter_handle",
+      "tier": "identity",
+      "type": "string",
+      "normalization": "handle",
+      "reserved": true,
+      "description": "Twitter/X handle without the @. Reserved identity tier 4, key prefix tw: (SPEC.md §4, ADR-020); no v0 adapter provides it.",
+      "example": "janedoe"
+    },
+    {
+      "name": "full_name",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Full display name. Feeds the name-hash fallback tier when first/last are absent.",
+      "example": "Jane Doe"
+    },
+    {
+      "name": "title",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Current job title, as stated.",
+      "example": "VP Marketing"
+    },
+    {
+      "name": "seniority",
+      "tier": "core",
+      "type": "string",
+      "normalization": "lower",
+      "description": "Seniority band, lowercased. No locked value domain in v0 — providers do not converge enough to pin one; a domain is declared only if real cross-provider evidence shows convergence (SPEC.md §4a).",
+      "example": "vp"
+    },
+    {
+      "name": "headline",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Profile headline/tagline.",
+      "example": "Building outbound that people actually read"
+    },
+    {
+      "name": "about",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Profile summary / about section.",
+      "example": "20 years of B2B marketing…"
+    },
+    {
+      "name": "city",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "City of residence/work.",
+      "example": "Portland"
+    },
+    {
+      "name": "state",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "State/region.",
+      "example": "Oregon"
+    },
+    {
+      "name": "country",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Country.",
+      "example": "United States"
+    },
+    {
+      "name": "location",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Free-form location string when a provider does not split city/state/country.",
+      "example": "Portland, Oregon, United States"
+    },
+    {
+      "name": "company_name",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Current employer's name.",
+      "example": "Acme Corp"
+    },
+    {
+      "name": "company_domain",
+      "tier": "core",
+      "type": "string",
+      "normalization": "domain",
+      "description": "Current employer's registrable domain (eTLD+1). The comparable, dedupe-safe form — never a full URL.",
+      "example": "acme.com"
+    },
+    {
+      "name": "company_website",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "trim",
+      "description": "Current employer's website URL as provided. company_domain is the comparable form.",
+      "example": "https://www.acme.com"
+    },
+    {
+      "name": "company_linkedin_url",
+      "tier": "core",
+      "type": "string",
+      "format": "uri",
+      "normalization": "linkedin_url",
+      "description": "Current employer's LinkedIn company page URL.",
+      "example": "https://www.linkedin.com/company/acme-corp"
+    },
+    {
+      "name": "company_employees",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Current employer's headcount as an integer — never a range string. An adapter whose provider reports a range maps it to a point estimate or omits the field.",
+      "example": 120
+    },
+    {
+      "name": "company_industry",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Current employer's industry label. Value domain deferred until a second adapter forces comparability (rule of two).",
+      "example": "Computer Software"
+    },
+    {
+      "name": "current_role",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Current role as an enrichment provider states it (may differ from a source's title).",
+      "example": "VP Marketing at Acme Corp"
+    },
+    {
+      "name": "current_company",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Current employer as an enrichment provider states it.",
+      "example": "Acme Corp"
+    },
+    {
+      "name": "role_history",
+      "tier": "core",
+      "type": "array",
+      "items_type": "string",
+      "normalization": "none",
+      "description": "Past roles, most recent first, one string per role.",
+      "example": ["VP Marketing, Acme Corp (2022–)", "Director of Growth, Beta Inc (2018–2022)"]
+    },
+    {
+      "name": "recent_posts",
+      "tier": "core",
+      "type": "array",
+      "items_type": "string",
+      "normalization": "none",
+      "description": "Recent public post texts, most recent first.",
+      "example": ["Shipped our new onboarding flow today…"]
+    },
+    {
+      "name": "follower_count",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Social follower count.",
+      "example": 4821
+    },
+    {
+      "name": "open_to_work",
+      "tier": "core",
+      "type": "boolean",
+      "normalization": "none",
+      "description": "Whether the profile advertises being open to work.",
+      "example": false
+    },
+    {
+      "name": "email_status",
+      "tier": "core",
+      "type": "string",
+      "normalization": "lower",
+      "description": "Email verification status as the providing adapter reports it. Waterfall-relevant; canonical value domain deferred until a second adapter forces comparability (rule of two).",
+      "example": "verified"
+    },
+    {
+      "name": "first_line",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Composed personalized opening line, consumed by deliver steps.",
+      "example": "Loved your post on onboarding flows —"
+    },
+    {
+      "name": "ps_line",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "Composed personalized P.S. line, consumed by deliver steps.",
+      "example": "P.S. congrats on the Series B."
+    }
+  ]
+}
