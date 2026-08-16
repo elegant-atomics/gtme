@@ -1,0 +1,13 @@
+{
+  "responses": [
+    {
+      "match": "POST /api/v2/leads",
+      "status": 200,
+      "body": {
+        "id": "99999999-8888-7777-6666-555555555555",
+        "email": "jane.doe@acme.com",
+        "campaign": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      }
+    }
+  ]
+}

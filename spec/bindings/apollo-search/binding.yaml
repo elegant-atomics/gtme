@@ -1,0 +1,151 @@
+# apollo/search — reference binding port of the Go apollo/search adapter
+# (SPEC §11 M8: acceptance is a receipt diff against the Go twin). Not
+# registered as a built-in — the id belongs to the Go twin; install it as an
+# external binding adapter, or let the conformance kit and the M8 diff load
+# it directly.
+#
+# Endpoint: POST https://api.apollo.io/api/v1/mixed_people/search
+# Auth:     X-Api-Key header
+# Docs:     https://docs.apollo.io/ (People Search)
+
+id: apollo/search
+version: 1
+role: source
+entity_type: person
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    email: { type: string }
+    first_name: { type: string }
+    last_name: { type: string }
+    full_name: { type: string }
+    title: { type: string }
+    seniority: { type: string }
+    linkedin_url: { type: string }
+    linkedin_internal_url: { type: string }
+    linkedin_sales_nav_url: { type: string }
+    city: { type: string }
+    state: { type: string }
+    country: { type: string }
+    company_name: { type: string }
+    company_domain: { type: string }
+    company_website: { type: string }
+    company_linkedin_url: { type: string }
+    company_employees: { type: integer }
+    company_industry: { type: string }
+    apollo.id: { type: string }
+    email_status: { type: string }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  anyOf:
+    - required: [query]
+    - required: [titles]
+    - required: [seniorities]
+    - required: [locations]
+    - required: [domains]
+  properties:
+    query:
+      type: string
+      description: Free-text search, e.g. "vp marketing, saas, 50-200 employees"
+    limit:
+      type: integer
+      minimum: 1
+      description: Stop after this many people
+    titles:
+      type: array
+      items: { type: string }
+      description: person_titles
+    seniorities:
+      type: array
+      items: { type: string }
+      description: person_seniorities
+    locations:
+      type: array
+      items: { type: string }
+      description: organization_locations
+    employee_ranges:
+      type: array
+      items: { type: string }
+      description: organization_num_employees_ranges, e.g. "50,200"
+    domains:
+      type: array
+      items: { type: string }
+      description: q_organization_domains
+    per_page:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 25
+    base_url:
+      type: string
+      default: "https://api.apollo.io"
+      description: Override the API host (testing)
+
+credentials: [APOLLO_API_KEY]
+cost_estimate_usd: 0
+
+auth:
+  type: header
+  name: X-Api-Key
+  env: APOLLO_API_KEY
+
+request:
+  method: POST
+  url: "{{config.base_url}}/api/v1/mixed_people/search"
+  headers:
+    Cache-Control: no-cache
+  body:
+    q_keywords: "{{config.query}}"
+    person_titles: "{{config.titles}}"
+    person_seniorities: "{{config.seniorities}}"
+    organization_locations: "{{config.locations}}"
+    organization_num_employees_ranges: "{{config.employee_ranges}}"
+    q_organization_domains_list: "{{config.domains}}"
+
+pagination:
+  strategy: page
+  param: page
+  in: body
+  size_param: per_page
+  page_size: "{{config.per_page}}"
+  termination:
+    empty_records: true
+    short_page: true
+    total_pages_path: "pagination.total_pages|total_pages"
+
+extract:
+  records: [people, contacts]
+  fields:
+    apollo.id: id
+    first_name: first_name
+    last_name: last_name
+    full_name: name
+    title: title
+    seniority: { path: seniority, transform: lower }
+    email:
+      path: email
+      transform: email
+      absent: ["email_not_unlocked@domain.com"]
+    email_status: { path: email_status, transform: lower }
+    linkedin_url: { path: linkedin_url, transform: linkedin }
+    city: city
+    state: state
+    country: country
+    company_name: organization.name
+    company_website: organization.website_url
+    company_linkedin_url: { path: organization.linkedin_url, transform: linkedin_url }
+    company_industry: organization.industry
+    company_domain:
+      paths: [organization.primary_domain, organization.website_url]
+      transform: domain
+    company_employees:
+      path: organization.estimated_num_employees
+      absent: [0]
+
+cost:
+  per: record
+  amount_usd: 0

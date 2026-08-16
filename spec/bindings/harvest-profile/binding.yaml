@@ -1,0 +1,100 @@
+# harvest/profile — reference binding port of the Go harvest/profile adapter
+# (SPEC §11 M8: acceptance is a receipt diff against the Go twin on the
+# shared surface). Not registered as a built-in — the id belongs to the Go
+# twin.
+#
+# Deliberately narrower than the Go twin, per the graduation rule (SPEC
+# §10a): recent_posts needs a second call per record (a multi-call workflow)
+# and role_history is computed line formatting over structured positions —
+# both are tier-2 judgment, so they stay in the process adapter. The binding
+# covers the single-call acquisition surface.
+#
+# Endpoint: GET https://api.harvestapi.io/linkedin/profile?url=...
+# Auth:     X-API-Key header
+# Docs:     https://docs.harvestapi.io/linkedin-api-reference/profile/get
+
+id: harvest/profile
+version: 1
+role: enrich
+entity_type: person
+
+needs:
+  type: object
+  properties:
+    linkedin_url: { type: string }
+    linkedin_internal_url: { type: string }
+    linkedin_sales_nav_url: { type: string }
+  anyOf:
+    - required: [linkedin_url]
+    - required: [linkedin_internal_url]
+    - required: [linkedin_sales_nav_url]
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    linkedin_url: { type: string }
+    headline: { type: string }
+    about: { type: string }
+    location: { type: string }
+    current_role: { type: string }
+    current_company: { type: string }
+    follower_count: { type: integer }
+    open_to_work: { type: boolean }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    main_only:
+      type: boolean
+      description: Ask for the cheaper main profile version
+    base_url:
+      type: string
+      default: "https://api.harvestapi.io"
+      description: Override the API host (testing)
+
+credentials: [HARVEST_API_KEY]
+freshness_days: 30
+cost_estimate_usd: 0.012
+
+auth:
+  type: header
+  name: X-API-Key
+  env: HARVEST_API_KEY
+
+request:
+  method: GET
+  url: "{{config.base_url}}/linkedin/profile"
+  query:
+    url: "{{record.linkedin_url|record.linkedin_internal_url|record.linkedin_sales_nav_url}}"
+    main: "{{config.main_only}}"
+
+extract:
+  records: element
+  fields:
+    linkedin_url: { path: linkedinUrl, transform: linkedin, skip_if_input: true }
+    headline: headline
+    about: about
+    location: { paths: ["location.linkedinText", "location.parsed.text"] }
+    current_role:
+      paths:
+        - currentPosition.0.position
+        - currentPosition.0.title
+        - experience.0.position
+        - experience.0.title
+    current_company:
+      paths:
+        - currentPosition.0.companyName
+        - experience.0.companyName
+    follower_count: { path: followerCount, absent: [0] }
+    open_to_work: { path: openToWork, absent: [false] }
+
+errors:
+  "404":
+    verdict: skip
+    reason: profile not found
+
+cost:
+  per: record
+  amount_usd: 0.012

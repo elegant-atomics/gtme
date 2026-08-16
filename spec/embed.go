@@ -11,3 +11,16 @@ import "embed"
 //
 //go:embed fields/*.json
 var Fields embed.FS
+
+// BindingSchema is the schema every declarative binding validates against
+// (SPEC §10a, ADR-022).
+//
+//go:embed binding-schema.json
+var BindingSchema []byte
+
+// Bindings holds the shipped binding documents and their conformance fixtures
+// (SPEC §10a): the reference ports of the Go vendor adapters, and the
+// built-in attio/assert binding.
+//
+//go:embed bindings
+var Bindings embed.FS

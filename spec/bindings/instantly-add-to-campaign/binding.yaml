@@ -1,0 +1,77 @@
+# instantly/add-to-campaign — reference binding port of the Go adapter
+# (SPEC §11 M8: acceptance is a dry-run receipt diff against the Go twin —
+# delivery is the gated edge, so the diff proves the contract surface; the
+# conformance fixtures prove the constructed request). Not registered as a
+# built-in — the id belongs to the Go twin.
+#
+# Narrower than the Go twin, per the graduation rule (SPEC §10a): campaign
+# NAME resolution is a second endpoint plus matching logic (tier-2), so the
+# binding takes the campaign id. First-class-field routing is declarative
+# here: the four targets the body names individually are consumed, and the
+# $variables splice carries the rest as custom variables.
+#
+# Endpoint: POST https://api.instantly.ai/api/v2/leads
+# Auth:     Authorization: Bearer $INSTANTLY_API_KEY
+# Docs:     https://developer.instantly.ai/api/v2/lead/createlead
+
+id: instantly/add-to-campaign
+version: 1
+role: deliver
+entity_type: person
+
+needs:
+  dynamic: true
+  type: object
+  required: [email]
+  properties:
+    email: { type: string }
+
+config_schema:
+  type: object
+  required: [campaign]
+  additionalProperties: false
+  properties:
+    campaign:
+      type: string
+      description: Campaign id (UUID). Name resolution is the process adapter's tier-2 extra.
+    skip_if_in_campaign:
+      type: boolean
+      default: true
+      description: Ask Instantly to ignore leads already in the campaign
+    variables:
+      type: object
+      additionalProperties: { type: string, minLength: 1 }
+      description: >-
+        Egress mapping, target merge-field name → ledger field (ADR-018).
+        Injected by the runner from the step-level variables: key — never
+        authored inside with:.
+    base_url:
+      type: string
+      default: "https://api.instantly.ai"
+      description: Override the API host (testing)
+
+credentials: [INSTANTLY_API_KEY]
+cost_estimate_usd: 0
+
+auth:
+  type: bearer
+  env: INSTANTLY_API_KEY
+
+request:
+  method: POST
+  url: "{{config.base_url}}/api/v2/leads"
+  body:
+    campaign: "{{config.campaign}}"
+    email: "{{record.email}}"
+    skip_if_in_campaign: "{{config.skip_if_in_campaign}}"
+    first_name: "{{variables.first_name}}"
+    last_name: "{{variables.last_name}}"
+    company_name: "{{variables.company_name}}"
+    personalization: "{{variables.personalization}}"
+    custom_variables:
+      "$variables": true
+
+idempotency: ledger
+cost:
+  per: record
+  amount_usd: 0

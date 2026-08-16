@@ -1,0 +1,67 @@
+# attio/assert — the first net-new integration shipped as pure YAML
+# (SPEC §11 M8): assert (upsert) a person record in Attio by email.
+# Idempotency is native: Attio's assert endpoint matches on
+# matching_attribute, so re-delivering the same record cannot duplicate it.
+#
+# Endpoint: PUT https://api.attio.com/v2/objects/{object}/records
+# Auth:     Authorization: Bearer $ATTIO_API_KEY
+# Docs:     https://docs.attio.com/ (Assert a Record)
+
+id: attio/assert
+version: 1
+role: deliver
+entity_type: person
+
+needs:
+  dynamic: true
+  type: object
+  required: [email]
+  properties:
+    email: { type: string }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    object:
+      type: string
+      default: people
+      description: Attio object slug to assert into
+    matching_attribute:
+      type: string
+      default: email_addresses
+      description: Attribute Attio matches existing records on
+    base_url:
+      type: string
+      default: "https://api.attio.com"
+      description: Override the API host (testing)
+    variables:
+      type: object
+      additionalProperties: { type: string, minLength: 1 }
+      description: >-
+        Egress mapping, target attribute slug → ledger field (ADR-018).
+        Injected by the runner from the step-level variables: key — never
+        authored inside with:. Each resolved variable becomes an attribute
+        value on the asserted record.
+
+credentials: [ATTIO_API_KEY]
+
+auth:
+  type: bearer
+  env: ATTIO_API_KEY
+
+request:
+  method: PUT
+  url: "{{config.base_url}}/v2/objects/{{config.object}}/records"
+  query:
+    matching_attribute: "{{config.matching_attribute}}"
+  body:
+    data:
+      values:
+        email_addresses: ["{{record.email}}"]
+        "$variables": true
+
+idempotency: native
+cost:
+  per: record
+  amount_usd: 0

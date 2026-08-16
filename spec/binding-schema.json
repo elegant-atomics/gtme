@@ -2,20 +2,20 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtm.spec/binding-schema.json",
   "title": "Declarative binding",
-  "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md §10a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter — no expression language may ever grow in here. DRAFT: authored in the ADR-022..029 reconciliation pass ahead of the binding-engine build; conformance tests will harden it.",
+  "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md §10a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter — no expression language may ever grow in here. Templating: '{{config.x}}', '{{record.field}}', '{{variables.name}}', '{{session}}'. A leaf that is exactly one placeholder substitutes the typed value; placeholders may list alternatives separated by '|' (first non-empty wins); leaves resolving to empty/null are omitted from the request (omitempty). In a deliver body, an object may carry the key '$variables': true — the resolved variables: mapping (minus any variable referenced individually elsewhere in the body) is spliced into that object. The engine pre-fills config defaults declared in config_schema.",
   "type": "object",
-  "required": ["id", "version", "role", "entity_type", "request", "extract"],
+  "required": ["id", "version", "role", "entity_type", "request"],
   "additionalProperties": false,
   "properties": {
     "id": {
       "type": "string",
       "minLength": 1,
-      "description": "Adapter id, e.g. 'attio/assert'. Named by the contract owner (ADR-026)."
+      "description": "Adapter id, e.g. 'attio/assert'. Named by the contract owner (ADR-026). The id's vendor prefix is the COST provider name."
     },
     "version": { "type": "integer", "minimum": 1 },
     "role": {
       "enum": ["source", "enrich", "deliver"],
-      "description": "source: pagination + cursor/STATE; enrich: per-record request; deliver: idempotency + dry-run receipts."
+      "description": "source: pagination + cursor/STATE, config 'limit' caps emitted records; enrich: per-record request; deliver: idempotency + dry-run receipts."
     },
     "entity_type": { "type": "string", "minLength": 1 },
     "needs": {
@@ -26,6 +26,7 @@
     },
     "config_schema": { "type": "object" },
     "freshness_days": { "type": "integer", "minimum": 0 },
+    "cost_estimate_usd": { "type": "number", "minimum": 0 },
     "credentials": { "type": "array", "items": { "type": "string" } },
     "credentials_optional": { "type": "array", "items": { "type": "string" } },
     "auth": {
@@ -52,21 +53,21 @@
       "type": "object",
       "required": ["method", "url"],
       "additionalProperties": false,
-      "description": "Templating draws only from step config and the record's canonical fields — no expressions, no computation.",
+      "description": "Templating draws only from step config, the record's canonical fields, resolved variables, and the session id — no expressions, no computation.",
       "properties": {
         "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
         "url": { "type": "string", "minLength": 1 },
         "query": {
           "type": "object",
           "additionalProperties": { "type": "string" },
-          "description": "Query-param templates."
+          "description": "Query-param templates; empty resolutions are omitted."
         },
         "headers": {
           "type": "object",
           "additionalProperties": { "type": "string" }
         },
         "body": {
-          "description": "Body template (JSON shape with templated string leaves)."
+          "description": "Body template: a JSON shape whose string leaves are templates. Empty resolutions are omitted. '$variables': true in an object splices the resolved variables map."
         }
       }
     },
@@ -76,16 +77,21 @@
       "additionalProperties": false,
       "properties": {
         "strategy": { "enum": ["page", "cursor", "offset"] },
-        "param": { "type": "string", "description": "Request param carrying page/cursor/offset." },
-        "cursor_path": { "type": "string", "description": "JSONPath to the next cursor in the response (cursor strategy)." },
-        "page_size": { "type": "integer", "minimum": 1 },
-        "size_param": { "type": "string" },
+        "param": { "type": "string", "description": "Request param carrying the page number / cursor / offset." },
+        "in": { "enum": ["query", "body"], "description": "Where pagination params ride (default query)." },
+        "cursor_path": { "type": "string", "description": "Dotted path to the next cursor in the response (cursor strategy)." },
+        "page_size": {
+          "description": "Records per page: an integer or a template (e.g. '{{config.per_page}}').",
+          "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string" }]
+        },
+        "size_param": { "type": "string", "description": "Request param carrying the page size." },
         "termination": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "empty_records": { "type": "boolean", "description": "Stop when a page yields zero records." },
-            "path": { "type": "string", "description": "JSONPath whose falsy/absent value stops pagination." }
+            "empty_records": { "type": "boolean", "description": "Stop when a page yields zero records (engine default: always on)." },
+            "short_page": { "type": "boolean", "description": "Stop when a page yields fewer records than page_size." },
+            "total_pages_path": { "type": "string", "description": "Dotted path to a total-page count; alternatives via '|'." }
           }
         },
         "max": { "type": "integer", "minimum": 1, "description": "Hard cap on pages fetched." }
@@ -97,8 +103,11 @@
       "additionalProperties": false,
       "properties": {
         "records": {
-          "type": "string",
-          "description": "JSONPath to the record array (or single record) in the response."
+          "description": "Dotted path to the record array (or single record) in the response; a list means first non-empty wins.",
+          "anyOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
         },
         "fields": {
           "type": "object",
@@ -106,16 +115,30 @@
           "description": "canonical (or vendor-namespaced) field name -> extraction rule.",
           "additionalProperties": {
             "oneOf": [
-              { "type": "string", "description": "JSONPath within a record." },
+              { "type": "string", "description": "Dotted path within a record." },
               {
                 "type": "object",
-                "required": ["path"],
                 "additionalProperties": false,
                 "properties": {
                   "path": { "type": "string" },
+                  "paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "minItems": 1,
+                    "description": "Alternatives; first non-empty wins."
+                  },
                   "transform": {
                     "type": "string",
-                    "description": "A registry normalization rule id (SPEC.md §4a) — never arbitrary logic."
+                    "description": "A registry normalization rule id (SPEC.md §4a) — or 'linkedin', the engine-owned §4 classify-and-route rule that stores a LinkedIn-URL-shaped value under the field matching its shape. Never arbitrary logic."
+                  },
+                  "absent": {
+                    "type": "array",
+                    "items": {},
+                    "description": "Sentinel values the vendor uses to mean 'no value' (e.g. a locked-email placeholder, 0 for an unknown count); matched exactly, treated as absent."
+                  },
+                  "skip_if_input": {
+                    "type": "boolean",
+                    "description": "Omit this output field when the projected input already carried a non-empty value for it (e.g. only emit a resolved public linkedin_url when the record arrived without one)."
                   }
                 }
               }
@@ -126,7 +149,7 @@
     },
     "errors": {
       "type": "object",
-      "description": "HTTP status (or status class like '4xx') -> verdict mapping.",
+      "description": "HTTP status (or status class like '4xx') -> verdict mapping; statuses the map does not name follow the engine's default classification (SPEC.md §8 exit-code classes).",
       "additionalProperties": {
         "type": "object",
         "required": ["verdict"],
@@ -147,7 +170,7 @@
       "properties": {
         "per": { "enum": ["record", "request", "unit"] },
         "amount_usd": { "type": "number", "minimum": 0 },
-        "unit_path": { "type": "string", "description": "JSONPath to a units-consumed count in the response (per: unit)." }
+        "unit_path": { "type": "string", "description": "Dotted path to a units-consumed count in the response (per: unit)." }
       }
     },
     "retry": {

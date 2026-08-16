@@ -1,0 +1,57 @@
+{
+  "responses": [
+    {
+      "match": "GET /linkedin/profile",
+      "status": 200,
+      "body": {
+        "element": {
+          "id": "ACoAAA",
+          "publicIdentifier": "jane-doe",
+          "linkedinUrl": "https://www.linkedin.com/in/jane-doe",
+          "firstName": "Jane",
+          "lastName": "Doe",
+          "headline": "VP Marketing at Acme \u2014 demand gen, lifecycle, and the occasional spreadsheet",
+          "about": "I run marketing at Acme.",
+          "followerCount": 4210,
+          "openToWork": false,
+          "location": {
+            "linkedinText": "Austin, Texas, United States"
+          },
+          "currentPosition": [
+            {
+              "companyName": "Acme Inc",
+              "position": "VP Marketing"
+            }
+          ],
+          "experience": [
+            {
+              "companyName": "Acme Inc",
+              "position": "VP Marketing",
+              "startDate": {
+                "year": 2022,
+                "month": 3,
+                "text": "Mar 2022"
+              },
+              "endDate": {
+                "text": ""
+              },
+              "duration": "2 yrs"
+            },
+            {
+              "companyName": "Initech",
+              "position": "Director of Demand Gen",
+              "startDate": {
+                "year": "2019",
+                "month": "6"
+              },
+              "endDate": {
+                "year": 2022
+              }
+            }
+          ]
+        },
+        "status": "ok"
+      }
+    }
+  ]
+}

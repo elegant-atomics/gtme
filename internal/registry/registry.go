@@ -254,6 +254,18 @@ func normalize(f Field, v any) (any, error) {
 	}
 }
 
+// ApplyRule runs one named normalization rule on a string value — the binding
+// engine's extraction `transform:` hook (SPEC §10a), which is restricted to
+// exactly these registry rules. An empty result means the value was invalid
+// for the rule (dropped by the caller, mirroring §10.1 ingress semantics).
+func ApplyRule(id, value string) (string, error) {
+	fn, err := ruleFunc(id)
+	if err != nil {
+		return "", err
+	}
+	return fn(value), nil
+}
+
 // ruleFunc maps a rule id to its single implementation (SPEC §4a: each rule
 // exists exactly once, shared with identity-key derivation).
 func ruleFunc(id string) (func(string) string, error) {

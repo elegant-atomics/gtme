@@ -19,7 +19,18 @@ var (
 type builtin struct {
 	manifest *Manifest
 	newFunc  func() Adapter
+	// binding marks a built-in registered from a binding document (SPEC §10a);
+	// hasFixtures says whether it ships conformance fixtures, which is what
+	// --simulate serves (SPEC §8).
+	binding     bool
+	hasFixtures bool
 }
+
+// BindingLoader turns a binding.yaml document (and its directory, where
+// conformance fixtures live) into a manifest and an engine factory. Set by
+// internal/adapters/all (the binding package cannot be imported from here
+// without a cycle); nil means binding discovery is off.
+var BindingLoader func(dir string, raw []byte) (*Manifest, func() Adapter, bool, error)
 
 // Register adds a built-in adapter. rawManifest is the adapter's embedded
 // manifest.json. Called from adapter package init(); panics on a bad manifest
@@ -35,6 +46,18 @@ func Register(rawManifest []byte, newFunc func() Adapter) {
 		panic(fmt.Sprintf("adapters: %s registered twice", m.ID))
 	}
 	builtins[m.ID] = &builtin{manifest: m, newFunc: newFunc}
+}
+
+// RegisterBinding adds a built-in adapter whose implementation is a binding
+// interpreted by the generic engine (SPEC §10a). The manifest is the binding's
+// §6 bridge; newFunc returns the engine loaded with the binding document.
+func RegisterBinding(m *Manifest, hasFixtures bool, newFunc func() Adapter) {
+	builtinsMu.Lock()
+	defer builtinsMu.Unlock()
+	if _, dup := builtins[m.ID]; dup {
+		panic(fmt.Sprintf("adapters: %s registered twice", m.ID))
+	}
+	builtins[m.ID] = &builtin{manifest: m, newFunc: newFunc, binding: true, hasFixtures: hasFixtures}
 }
 
 // Builtins lists the ids of compiled-in adapters, sorted.
@@ -56,6 +79,11 @@ type Resolved struct {
 	External bool
 	// Dir is the adapter directory for external adapters.
 	Dir string
+	// Binding reports whether this adapter is a binding interpreted by the
+	// generic engine (SPEC §10a); HasFixtures whether it ships conformance
+	// fixtures (what --simulate serves, SPEC §8).
+	Binding     bool
+	HasFixtures bool
 
 	newFunc    func() Adapter
 	executable string
@@ -96,7 +124,8 @@ func Resolve(id string) (*Resolved, error) {
 	b, ok := builtins[id]
 	builtinsMu.RUnlock()
 	if ok {
-		return &Resolved{Manifest: b.manifest, newFunc: b.newFunc}, nil
+		return &Resolved{Manifest: b.manifest, newFunc: b.newFunc,
+			Binding: b.binding, HasFixtures: b.hasFixtures}, nil
 	}
 
 	var tried []string
@@ -106,6 +135,22 @@ func Resolve(id string) (*Resolved, error) {
 			manifestPath := filepath.Join(dir, "manifest.json")
 			raw, err := os.ReadFile(manifestPath)
 			if err != nil {
+				// A directory holding a binding.yaml instead of an executable is a
+				// binding adapter (SPEC §10a discovery, mirror of §6).
+				if BindingLoader != nil {
+					if rawB, berr := os.ReadFile(filepath.Join(dir, "binding.yaml")); berr == nil {
+						m, newFunc, hasFixtures, lerr := BindingLoader(dir, rawB)
+						if lerr != nil {
+							return nil, fmt.Errorf("adapters: %s: %w", filepath.Join(dir, "binding.yaml"), lerr)
+						}
+						if m.ID != id {
+							return nil, fmt.Errorf("adapters: %s declares id %q, expected %q",
+								filepath.Join(dir, "binding.yaml"), m.ID, id)
+						}
+						return &Resolved{Manifest: m, Dir: dir, newFunc: newFunc,
+							Binding: true, HasFixtures: hasFixtures}, nil
+					}
+				}
 				tried = append(tried, manifestPath)
 				continue
 			}
