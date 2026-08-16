@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/trevorfox/gtm/internal/adapters"
 	"github.com/trevorfox/gtm/internal/identity"
 	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/trevorfox/gtm/internal/pipeline"
 	"github.com/trevorfox/gtm/internal/planner"
 	"github.com/trevorfox/gtm/internal/protocol"
 )
@@ -49,6 +51,11 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		return err
 	}
 
+	gate, err := r.membershipGate(ctx, st)
+	if err != nil {
+		return err
+	}
+
 	stub := r.stubbed(st)
 	var work []*item
 	for _, rr := range records {
@@ -65,6 +72,13 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			continue
 		}
 		if st.WhenStep != "" && !rr.Passed(st.WhenStep) {
+			r.bump(st, func(s *StepStat) { s.Gated++ })
+			continue
+		}
+		// Membership gates (SPEC §7, ADR-021): require = member of every group,
+		// exclude = member of none. Exclusion is the judgment-memory mechanism —
+		// a gated record is not dispatched, so nothing re-judges it.
+		if gate != nil && !gate(rr.IdentityID) {
 			r.bump(st, func(s *StepStat) { s.Gated++ })
 			continue
 		}
@@ -99,6 +113,50 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		return nil
 	}
 	return r.dispatch(ctx, st, work)
+}
+
+// membershipGate loads the step's require/exclude membership sets once and
+// returns a per-record predicate, or nil when the step declares no gates.
+func (r *runner) membershipGate(ctx context.Context, st *planner.Step) (func(string) bool, error) {
+	if len(st.Require) == 0 && len(st.Exclude) == 0 {
+		return nil, nil
+	}
+	load := func(names []string) ([]map[string]bool, error) {
+		sets := make([]map[string]bool, 0, len(names))
+		for _, name := range names {
+			g, err := r.l.GetGroup(ctx, name)
+			if err != nil {
+				return nil, fmt.Errorf("runner: %s: %w", st.ID, err)
+			}
+			set, err := r.l.GroupMembership(ctx, g.ID)
+			if err != nil {
+				return nil, err
+			}
+			sets = append(sets, set)
+		}
+		return sets, nil
+	}
+	required, err := load(st.Require)
+	if err != nil {
+		return nil, err
+	}
+	excluded, err := load(st.Exclude)
+	if err != nil {
+		return nil, err
+	}
+	return func(identityID string) bool {
+		for _, set := range required {
+			if !set[identityID] {
+				return false
+			}
+		}
+		for _, set := range excluded {
+			if set[identityID] {
+				return false
+			}
+		}
+		return true
+	}, nil
 }
 
 // prepare turns one run record into a unit of work for a step, or handles it
@@ -155,6 +213,18 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 			return nil, nil
 		}
 
+		// Suppression (SPEC §8, ADR-021): a chosen contact policy layered above
+		// the idempotency floor — skip records touched in the group within the
+		// window, receipted with reasons. Applies dry and armed alike (a
+		// rehearsal that ignored the policy would rehearse the wrong send).
+		held, err := r.suppress(ctx, st, it)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			return nil, nil
+		}
+
 		// Deliver completeness (SPEC §8, ADR-019): every variables: target must
 		// resolve to a non-empty value before the record may send — blank merge
 		// fields never do. The policy applies armed and dry alike.
@@ -189,6 +259,41 @@ func resolveVariables(vars map[string]string, it *item) RecordVariables {
 	}
 	sort.Strings(rv.Missing)
 	return rv
+}
+
+// suppress checks the deliver step's suppression window (SPEC §8, ADR-021).
+func (r *runner) suppress(ctx context.Context, st *planner.Step, it *item) (bool, error) {
+	if st.SuppressGroup == "" {
+		return false, nil
+	}
+	g, err := r.l.GetGroup(ctx, st.SuppressGroup)
+	if err != nil {
+		return false, fmt.Errorf("runner: %s: %w", st.ID, err)
+	}
+	last, ok, err := r.l.LastTouched(ctx, g.ID, it.identityID)
+	if err != nil {
+		return false, err
+	}
+	age := r.now().Sub(last)
+	if !ok || age > st.SuppressWithin {
+		return false, nil
+	}
+	reason := fmt.Sprintf("suppressed: touched in %q %s ago (window %s)",
+		g.Name, age.Round(time.Second), pipeline.FormatCache(st.SuppressWithin))
+	if err := r.l.SetVerdict(ctx, r.runID, it.identityID, st.ID, false); err != nil {
+		return false, err
+	}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done",
+		map[string]any{"pass": false, "reason": reason}); err != nil {
+		return false, err
+	}
+	r.bump(st, func(s *StepStat) {
+		s.Skipped++
+		s.Suppressed = append(s.Suppressed, SuppressedRecord{
+			IdentityKey: it.key.IdentityKey, Group: g.Name, Age: age.Round(time.Second).String(),
+		})
+	})
+	return true, nil
 }
 
 // holdMissing applies on_missing to a record whose variables did not resolve
@@ -576,6 +681,20 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 	if st.IsDeliver {
 		if err := r.l.RecordDelivery(ctx, it.identityID, st.Manifest.ID, it.idem, r.runID); err != nil {
 			return err
+		}
+		// Touch scoping (SPEC §8, ADR-021): a successful delivery appends a
+		// `touched` event to the step's record: group (pipeline name by
+		// default), created on demand. Only armed runs reach this path — dry
+		// and simulated deliveries never invoke the adapter.
+		if st.RecordGroup != "" {
+			g, err := r.l.EnsureGroup(ctx, st.RecordGroup)
+			if err != nil {
+				return err
+			}
+			if err := r.l.AddGroupEvent(ctx, g.ID, it.identityID, ledger.GroupTouched,
+				map[string]any{"target": st.Manifest.ID, "step": st.ID}, r.runID); err != nil {
+				return err
+			}
 		}
 	}
 	it.advanced = true

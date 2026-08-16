@@ -74,9 +74,19 @@ type StepStat struct {
 	// MissingSkips lists every record on_missing held back, with its reason —
 	// the receipt shows them (SPEC §8).
 	MissingSkips []RecordVariables
+	// Suppressed lists every record the suppression window held back
+	// (SPEC §8, ADR-021).
+	Suppressed []SuppressedRecord
 	// DryRun lists each record's RESOLVED variables when the run was dry —
 	// the approval artifact a human reviews before arming (SPEC §8).
 	DryRun []RecordVariables
+}
+
+// SuppressedRecord is one record a suppression window held back (SPEC §8).
+type SuppressedRecord struct {
+	IdentityKey string
+	Group       string
+	Age         string
 }
 
 // RecordVariables is one record's resolved (or unresolvable) deliver variables.
@@ -93,6 +103,12 @@ type Result struct {
 	DryRun    bool
 	Simulated bool
 	Steps     []StepStat
+
+	// TerminusGroup/TerminusAdded report the membership terminus (SPEC §8);
+	// TerminusWould counts what a dry/simulated run held back.
+	TerminusGroup string
+	TerminusAdded int
+	TerminusWould int
 }
 
 // Concurrency resolves the worker pool size: the option, else GTM_CONCURRENCY,
@@ -128,6 +144,12 @@ type runner struct {
 	mu    sync.Mutex
 	stats map[string]*StepStat
 	order []string
+
+	// Terminus outcome (SPEC §8, ADR-021): the group completers were added to,
+	// how many were, or how many WOULD have been on a dry/simulated run.
+	terminusGroup string
+	terminusAdded int
+	terminusWould int
 }
 
 // Execute runs a plan to completion. A fatal adapter error fails the run but
@@ -201,7 +223,9 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 	}
 
 	return &Result{RunID: r.runID, Status: status, DryRun: r.dry && !r.simulate,
-		Simulated: r.simulate, Steps: r.collect()}, runErr
+		Simulated: r.simulate, Steps: r.collect(),
+		TerminusGroup: r.terminusGroup, TerminusAdded: r.terminusAdded,
+		TerminusWould: r.terminusWould}, runErr
 }
 
 // writeAutoFixture synthesizes the fixture-engine script simulated AI steps
@@ -222,7 +246,7 @@ func writeAutoFixture() (string, error) {
 
 // isAIStep reports an operation-named AI step (ADR-026).
 func isAIStep(st *planner.Step) bool {
-	return strings.HasPrefix(st.Manifest.ID, "ai/")
+	return st.Manifest != nil && strings.HasPrefix(st.Manifest.ID, "ai/")
 }
 
 // stubbed reports whether a step is served nothing under --simulate: a binding
@@ -230,13 +254,13 @@ func isAIStep(st *planner.Step) bool {
 // that is not an AI step. Stubbed steps are the simulation gaps the receipt
 // must surface (SPEC §8).
 func (r *runner) stubbed(st *planner.Step) bool {
-	if !r.simulate || isAIStep(st) || st.IsDeliver {
+	if !r.simulate || isAIStep(st) || st.IsDeliver || st.IsGroupSource {
 		return false
 	}
 	if st.Adapter != nil && st.Adapter.Binding {
 		return !st.Adapter.HasFixtures
 	}
-	return len(st.Manifest.Credentials) > 0
+	return st.Manifest != nil && len(st.Manifest.Credentials) > 0
 }
 
 func (r *runner) execute(ctx context.Context) error {
@@ -247,6 +271,54 @@ func (r *runner) execute(ctx context.Context) error {
 		if err := r.runStep(ctx, i); err != nil {
 			return err
 		}
+	}
+	return r.assertTerminus(ctx)
+}
+
+// assertTerminus adds every record that completed the run's final step to the
+// pipeline's terminus group (SPEC §8, ADR-021). A dry or simulated run asserts
+// nothing durable — the receipt reports what an armed run would have recorded.
+func (r *runner) assertTerminus(ctx context.Context) error {
+	name := strings.TrimSpace(r.plan.Pipeline.Group)
+	if name == "" {
+		return nil
+	}
+	final := ledger.StateSourced
+	if n := len(r.plan.Steps); n > 1 {
+		final = r.plan.Steps[n-1].ID
+	}
+	records, err := r.l.RunRecords(ctx, r.runID)
+	if err != nil {
+		return err
+	}
+	var completers []string
+	for _, rr := range records {
+		if rr.State == final && !rr.AnyFailed() {
+			completers = append(completers, rr.IdentityID)
+		}
+	}
+	r.terminusGroup = name
+	if r.dry {
+		r.terminusWould = len(completers)
+		return nil
+	}
+	g, err := r.l.EnsureGroup(ctx, name)
+	if err != nil {
+		return err
+	}
+	members, err := r.l.GroupMembership(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	for _, id := range completers {
+		if members[id] {
+			continue // already a member; re-asserting would only add noise
+		}
+		if err := r.l.AddGroupEvent(ctx, g.ID, id, ledger.GroupAdded,
+			map[string]any{"pipeline": r.plan.Pipeline.Name}, r.runID); err != nil {
+			return err
+		}
+		r.terminusAdded++
 	}
 	return nil
 }
@@ -351,6 +423,10 @@ func (r *runner) runSource(ctx context.Context) error {
 		return nil
 	}
 
+	if st.IsGroupSource {
+		return r.runGroupSource(ctx, st, stat)
+	}
+
 	if r.stubbed(st) {
 		// A stubbed source under --simulate sources nothing: a visible gap, not a
 		// silent pass (SPEC §8).
@@ -418,6 +494,36 @@ func (r *runner) runSource(ctx context.Context) error {
 		return err
 	}
 	fmt.Fprintf(r.stderr, "%s: sourced %d records\n", st.ID, count)
+	return nil
+}
+
+// runGroupSource sources a run from a group's current membership (SPEC §9,
+// ADR-021): members are projected from the ledger like any record —
+// runner-owned, no adapter, no spend.
+func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *StepStat) error {
+	g, err := r.l.GetGroup(ctx, st.SourceGroup)
+	if err != nil {
+		return fmt.Errorf("runner: %s: %w", st.ID, err)
+	}
+	members, err := r.l.GroupMembers(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	for _, ident := range members {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
+			return err
+		}
+		r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, nil)
+	}
+	stat.Out = len(members)
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done",
+		map[string]any{"records": len(members), "group": g.Name}); err != nil {
+		return err
+	}
+	fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
 	return nil
 }
 
@@ -522,6 +628,9 @@ func (r *runner) emit(key protocol.Key, fields map[string]any) {
 // engine's model identifier (SPEC §10a, ADR-026): the id says what kind of
 // fact, provenance says who produced it.
 func (r *runner) source(st *planner.Step) string {
+	if st.Manifest == nil {
+		return st.Use // a group source writes no fields; this labels events only
+	}
 	if isAIStep(st) {
 		engine, _ := st.Config["engine"].(string)
 		model, _ := st.Config["model"].(string)

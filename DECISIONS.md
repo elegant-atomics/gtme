@@ -1100,3 +1100,38 @@ would otherwise have been silently absorbed into engine creep.
 **Spec impact:** `spec/binding-schema.json` hardened as above (changelog
 v0.6); no other normative text changed — §10a/§8 were written in the v0.5
 pass and this build implements them.
+
+### 2026-08-16 — M9 internals: groups
+
+**Question:** Where do ADR-021's runner-owned semantics live so that
+adapters stay ledger-blind, plan stays offline, and dry runs stay
+rehearsals?
+**Choice:** (1) A group source resolves no adapter: the planner marks the
+step (`IsGroupSource`, displayed as `group:<name>`) with open provides —
+the needs-all wildcard path — and the runner projects members directly;
+nothing crosses the wire protocol. (2) Plan-time group checks live on the
+Plan (`CheckGroups`), called by the CLI with the ledger opened lazily —
+only when the plan references groups — so planner.Build stays ledger-free
+and a group-free pipeline still plans without `gtm init`; the check is
+enforced under `--simulate` too (a missing group is a contract error, not
+a credential). (3) The terminus adds only completers who are not already
+members — re-asserting membership would put noise in the event trail the
+whole feature exists to keep readable — and under dry/simulate it reports
+would-adds without creating the group at all. (4) Suppression is checked
+after the idempotency floor (idempotency answers "did this exact delivery
+happen"; suppression answers "does policy allow another"), and it applies
+to dry runs too: a rehearsal that ignored the contact policy would
+rehearse the wrong send. (5) Membership gates load each referenced
+group's set once per step and share the `when:` Gated counter — a gated
+record is simply not dispatched, which is the whole judgment-memory
+mechanism. (6) `gtm groups add/remove` edits are idempotent (no-op events
+are skipped); snapshots require an `identity_id` column and run on the
+read-only connection; bare keys resolve via FindByKey with `--type` for
+the ambiguous case. (7) The v0 answer to grouping a filter's failers is a
+snapshot over the run layer (`--query` on run_records.verdicts), per the
+ADR's after-the-fact-grouping position — exercised in the acceptance
+tests rather than given a verb.
+**Why:** The qualify → judgment-memory → send → suppress loop runs
+end-to-end offline in the acceptance tests, with zero AI calls on the
+top-up — the determinism claim made checkable.
+**Spec impact:** None beyond v0.7 — this entry records the internal seams.

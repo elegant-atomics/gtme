@@ -102,6 +102,8 @@ func Run(ctx context.Context, env Env) int {
 		err = cmdRuns(ctx, env, rest)
 	case "secret":
 		err = cmdSecret(ctx, env, rest)
+	case "groups":
+		err = cmdGroups(ctx, env, rest)
 	default:
 		fmt.Fprintf(env.Stderr, "gtm: unknown command %q\n\n", verb)
 		usage(env.Stderr)
@@ -137,6 +139,10 @@ Usage:
   gtm runs [RUN_ID|last]            list runs / show one run's receipt
   gtm freeze [RUN_ID|last]          rebuild a pipeline.yaml from a run
   gtm secret set KEY [VALUE]        store a credential in ~/.gtm/secrets
+  gtm groups                        list groups with their derived character
+  gtm groups show NAME              members and recent events
+  gtm groups add NAME KEY... [--from-segment NAME | --query "SQL"]
+  gtm groups remove NAME KEY...
   gtm help --agent                  machine-readable CLI + adapter surface
   gtm version
 

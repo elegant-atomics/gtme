@@ -22,6 +22,11 @@ type Pipeline struct {
 	Steps   []Step `yaml:"steps,omitempty" json:"steps,omitempty"`
 	Deliver *Step  `yaml:"deliver,omitempty" json:"deliver,omitempty"`
 
+	// Group is the membership terminus (SPEC §8/§9, ADR-021): records that
+	// complete the run's final step are `added` to this group, created on
+	// demand. Valid with or without deliver:.
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
+
 	// Waterfall is reserved syntax: accepted by the parser and rejected with
 	// "not implemented in v0" so v1 can add it without a format break (SPEC §9).
 	// It is omitted when writing YAML back out, so a frozen pipeline does not
@@ -55,7 +60,30 @@ type Step struct {
 	// skip (default) or fail when a variables: target does not resolve.
 	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
+	// Group is group-as-source (SPEC §9, ADR-021): valid only on the source
+	// step, mutually exclusive with use:. Members are projected from the
+	// ledger like any record.
+	Group string `yaml:"group,omitempty" json:"group,omitempty"`
+	// Require / Exclude are membership gates (SPEC §7, ADR-021): process only
+	// current members of every Require group; skip current members of any
+	// Exclude group. Valid on interior steps and deliver, not the source.
+	Require []string `yaml:"require,omitempty" json:"require,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	// Record is the deliver step's touch scope (SPEC §8, ADR-021): successful
+	// deliveries append `touched` events to this group. Defaults to the
+	// pipeline name; created on demand.
+	Record string `yaml:"record,omitempty" json:"record,omitempty"`
+	// Suppress skips records touched in a group within a window (SPEC §8,
+	// ADR-021). Deliver only.
+	Suppress *Suppress `yaml:"suppress,omitempty" json:"suppress,omitempty"`
+
 	Waterfall any `yaml:"waterfall,omitempty" json:"-"`
+}
+
+// Suppress is a deliver step's contact-policy window (SPEC §8, ADR-021).
+type Suppress struct {
+	Group  string `yaml:"group" json:"group"`
+	Within string `yaml:"within" json:"within"`
 }
 
 // DefaultSourceID and DefaultDeliverID name the implicit steps.
@@ -129,7 +157,11 @@ func (p *Pipeline) normalize() error {
 		if s.Waterfall != nil {
 			return fmt.Errorf("pipeline: %s: waterfall: not implemented in v0", fallback)
 		}
-		if strings.TrimSpace(s.Use) == "" {
+		isGroupSource := s == p.Source && strings.TrimSpace(s.Group) != ""
+		if isGroupSource && strings.TrimSpace(s.Use) != "" {
+			return fmt.Errorf("pipeline: %s: group: and use: are mutually exclusive on the source (SPEC §9)", fallback)
+		}
+		if strings.TrimSpace(s.Use) == "" && !isGroupSource {
 			return fmt.Errorf("pipeline: %s: use is required", fallback)
 		}
 		if s.ID == "" {
@@ -195,6 +227,56 @@ func (p *Pipeline) normalize() error {
 		for target, field := range p.Deliver.Variables {
 			if strings.TrimSpace(target) == "" || strings.TrimSpace(field) == "" {
 				return fmt.Errorf("pipeline: %s: variables: entries need a non-empty target and field", p.Deliver.ID)
+			}
+		}
+	}
+
+	// Group keys (SPEC §9, ADR-021): group: only on the source (as a source)
+	// or top-level (as the terminus); require:/exclude: never on the source;
+	// record:/suppress: deliver-only.
+	for i := range p.Steps {
+		if strings.TrimSpace(p.Steps[i].Group) != "" {
+			return fmt.Errorf("pipeline: %s: group: is only valid on the source step (as a source) or at the top level (as the terminus)", p.Steps[i].ID)
+		}
+	}
+	if p.Deliver != nil && strings.TrimSpace(p.Deliver.Group) != "" {
+		return fmt.Errorf("pipeline: %s: group: is only valid on the source step or at the top level", p.Deliver.ID)
+	}
+	if len(p.Source.Require) > 0 || len(p.Source.Exclude) > 0 {
+		return fmt.Errorf("pipeline: %s: require:/exclude: are not valid on the source step (SPEC §9)", p.Source.ID)
+	}
+	deliverGroupOnly := func(s *Step, where string) error {
+		if s == p.Deliver {
+			return nil
+		}
+		if strings.TrimSpace(s.Record) != "" {
+			return fmt.Errorf("pipeline: %s: record: is only valid on the deliver step", where)
+		}
+		if s.Suppress != nil {
+			return fmt.Errorf("pipeline: %s: suppress: is only valid on the deliver step", where)
+		}
+		return nil
+	}
+	if err := deliverGroupOnly(p.Source, p.Source.ID); err != nil {
+		return err
+	}
+	for i := range p.Steps {
+		if err := deliverGroupOnly(&p.Steps[i], p.Steps[i].ID); err != nil {
+			return err
+		}
+	}
+	if p.Deliver != nil && p.Deliver.Suppress != nil {
+		if strings.TrimSpace(p.Deliver.Suppress.Group) == "" {
+			return fmt.Errorf("pipeline: %s: suppress: needs a group", p.Deliver.ID)
+		}
+		if _, err := ParseCache(p.Deliver.Suppress.Within); err != nil {
+			return fmt.Errorf("pipeline: %s: suppress.within: %w", p.Deliver.ID, err)
+		}
+	}
+	for _, s := range p.AllSteps() {
+		for _, g := range append(append([]string{}, s.Require...), s.Exclude...) {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("pipeline: %s: require:/exclude: entries must be non-empty group names", s.ID)
 			}
 		}
 	}

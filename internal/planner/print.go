@@ -37,6 +37,19 @@ func Print(w io.Writer, p *Plan) {
 		if s.When != "" {
 			fmt.Fprintf(w, "     when:      %s\n", s.When)
 		}
+		if len(s.Require) > 0 {
+			fmt.Fprintf(w, "     require:   members of %s\n", list(s.Require))
+		}
+		if len(s.Exclude) > 0 {
+			fmt.Fprintf(w, "     exclude:   members of %s\n", list(s.Exclude))
+		}
+		if s.IsDeliver && s.RecordGroup != "" {
+			fmt.Fprintf(w, "     record:    touched → %s\n", s.RecordGroup)
+		}
+		if s.SuppressGroup != "" {
+			fmt.Fprintf(w, "     suppress:  touched in %s within %s\n",
+				s.SuppressGroup, pipeline.FormatCache(s.SuppressWithin))
+		}
 		fmt.Fprintf(w, "     entity:    %s\n", s.EntityType)
 		if !s.IsSource {
 			projects := list(s.Needs)
@@ -97,7 +110,7 @@ func Print(w io.Writer, p *Plan) {
 		for _, note := range s.Notes {
 			fmt.Fprintf(w, "     note:      %s\n", note)
 		}
-		if len(s.Manifest.Credentials) > 0 {
+		if s.Manifest != nil && len(s.Manifest.Credentials) > 0 {
 			fmt.Fprintf(w, "     creds:     %s (resolved)\n", list(s.Manifest.Credentials))
 		}
 		for _, name := range s.MissingOptional {
@@ -110,6 +123,9 @@ func Print(w io.Writer, p *Plan) {
 		fmt.Fprintf(w, "     est/record: %s\n", est)
 	}
 
+	if p.Pipeline.Group != "" {
+		fmt.Fprintf(w, "\nterminus: records completing the run are added to group %q (ADR-021)\n", p.Pipeline.Group)
+	}
 	fmt.Fprintf(w, "\navailable fields after the last step: %s\n", list(p.Available))
 	if p.Wildcard {
 		fmt.Fprintln(w, "note: a step provides open-ended fields, so per-record needs are re-checked at run time")

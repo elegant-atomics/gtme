@@ -57,6 +57,15 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	}
 	defer l.Close()
 
+	// Group references resolve against the ledger before anything runs
+	// (SPEC §7, ADR-021) — enforced under --simulate too: a missing group is
+	// a contract error, not a credential.
+	if len(plan.ReferencedGroups()) > 0 {
+		if err := plan.CheckGroups(ctx, l); err != nil {
+			return planFailure(err)
+		}
+	}
+
 	if *simulate {
 		// Ephemerality is the durability exclusion (SPEC §8): the simulated run
 		// executes against a throwaway copy of the ledger, so its writes cannot
@@ -118,7 +127,28 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return planFailure(err)
 	}
+	if err := checkGroups(ctx, plan); err != nil {
+		return err
+	}
 	planner.Print(env.Stderr, plan)
+	return nil
+}
+
+// checkGroups resolves a plan's group references against the ledger (SPEC §7,
+// ADR-021) — opened only when the plan references any, so a group-free
+// pipeline still plans without a ledger.
+func checkGroups(ctx context.Context, plan *planner.Plan) error {
+	if len(plan.ReferencedGroups()) == 0 {
+		return nil
+	}
+	l, err := openLedger(ctx)
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+	if err := plan.CheckGroups(ctx, l); err != nil {
+		return planFailure(err)
+	}
 	return nil
 }
 

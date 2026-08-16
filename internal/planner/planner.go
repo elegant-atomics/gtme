@@ -3,13 +3,16 @@
 package planner
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/trevorfox/gtm/internal/adapters"
+	"github.com/trevorfox/gtm/internal/ledger"
 	"github.com/trevorfox/gtm/internal/pipeline"
 	"github.com/trevorfox/gtm/internal/registry"
 	"github.com/trevorfox/gtm/internal/secrets"
@@ -71,6 +74,20 @@ type Step struct {
 
 	IsSource  bool
 	IsDeliver bool
+
+	// Group semantics (SPEC §7/§8/§9, ADR-021) — all runner-owned.
+	// IsGroupSource marks a `source: {group: ...}` step: members projected
+	// from the ledger, no adapter, provides open.
+	IsGroupSource bool
+	SourceGroup   string
+	// Require/Exclude are membership gates checked per record.
+	Require []string
+	Exclude []string
+	// RecordGroup is the deliver step's touch scope (defaults to the
+	// pipeline name); SuppressGroup/SuppressWithin the contact-policy window.
+	RecordGroup    string
+	SuppressGroup  string
+	SuppressWithin time.Duration
 }
 
 // Plan is a validated, executable pipeline.
@@ -159,6 +176,11 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 
 		ps, stepProblems := ResolveStep(s, isSource, isDeliver)
 		problems = append(problems, stepProblems...)
+		// The deliver step's touch scope defaults to the pipeline name
+		// (SPEC §8): every pipeline is safely scoped unless it opts to share.
+		if isDeliver && ps.RecordGroup == "" {
+			ps.RecordGroup = p.Name
+		}
 
 		// Contract walk: every required need must already be available.
 		if ps.Manifest != nil && !isSource {
@@ -246,6 +268,32 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	}
 	if ps.Config == nil {
 		ps.Config = map[string]any{}
+	}
+	ps.Require = append([]string(nil), s.Require...)
+	ps.Exclude = append([]string(nil), s.Exclude...)
+	if isDeliver {
+		ps.RecordGroup = strings.TrimSpace(s.Record)
+		if s.Suppress != nil {
+			ps.SuppressGroup = strings.TrimSpace(s.Suppress.Group)
+			d, err := pipeline.ParseCache(s.Suppress.Within)
+			if err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "suppress.within: " + err.Error()})
+			}
+			ps.SuppressWithin = d
+		}
+	}
+
+	// A group source (SPEC §9, ADR-021) resolves no adapter: members are
+	// projected from the ledger by the runner, and its provides are open —
+	// each step's needs are enforced per record at run time, exactly like
+	// the needs-all wildcard.
+	if isSource && strings.TrimSpace(s.Group) != "" {
+		ps.IsGroupSource = true
+		ps.SourceGroup = strings.TrimSpace(s.Group)
+		ps.Use = "group:" + ps.SourceGroup
+		ps.Role = adapters.RoleSource
+		ps.Wildcard = true
+		return ps, problems
 	}
 
 	resolved, err := adapters.Resolve(s.Use)
@@ -433,6 +481,50 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		ps.Idempotency = s.Idempotency
 	}
 	return ps, problems
+}
+
+// ReferencedGroups lists every group the plan requires to EXIST at plan time
+// (SPEC §7): require:/exclude:/suppress: references and the source group.
+// record: targets and the terminus create on demand and are not listed.
+func (p *Plan) ReferencedGroups() []string {
+	seen := map[string]bool{}
+	for i := range p.Steps {
+		s := &p.Steps[i]
+		for _, g := range s.Require {
+			seen[g] = true
+		}
+		for _, g := range s.Exclude {
+			seen[g] = true
+		}
+		if s.SuppressGroup != "" {
+			seen[s.SuppressGroup] = true
+		}
+		if s.IsGroupSource {
+			seen[s.SourceGroup] = true
+		}
+	}
+	return keys(seen)
+}
+
+// CheckGroups resolves the plan's group references against the ledger —
+// read-only, zero network calls, zero spend (SPEC §7). A missing group is a
+// contract error naming the fix.
+func (p *Plan) CheckGroups(ctx context.Context, l *ledger.Ledger) error {
+	var problems []Problem
+	for _, name := range p.ReferencedGroups() {
+		if _, err := l.GetGroup(ctx, name); err != nil {
+			if errors.Is(err, ledger.ErrNotFound) {
+				problems = append(problems, Problem{Kind: KindContract,
+					Msg: fmt.Sprintf("group %q does not exist — create it with `gtm groups add %s <identity-key>...` or snapshot a segment with `gtm groups add %s --from-segment <name>`", name, name, name)})
+				continue
+			}
+			return err
+		}
+	}
+	if len(problems) > 0 {
+		return &Errors{Problems: problems}
+	}
+	return nil
 }
 
 // PrevState is the run_records state a record must be in to be eligible for

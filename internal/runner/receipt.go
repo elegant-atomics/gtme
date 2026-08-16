@@ -66,6 +66,26 @@ func PrintReceipt(w io.Writer, res *Result) {
 		}
 	}
 
+	// Suppression holds (SPEC §8, ADR-021): a chosen contact policy, receipted.
+	for _, s := range res.Steps {
+		if len(s.Suppressed) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "%s: %d record(s) suppressed:\n", s.ID, len(s.Suppressed))
+		for _, sr := range s.Suppressed {
+			fmt.Fprintf(w, "  %s: touched in %q %s ago\n", sr.IdentityKey, sr.Group, sr.Age)
+		}
+	}
+	// The membership terminus (SPEC §8, ADR-021).
+	switch {
+	case res.TerminusGroup == "":
+	case res.DryRun || res.Simulated:
+		fmt.Fprintf(w, "group %q: %d record(s) would be added (held back — %s)\n",
+			res.TerminusGroup, res.TerminusWould, holdReason(res))
+	default:
+		fmt.Fprintf(w, "group %q: %d record(s) added\n", res.TerminusGroup, res.TerminusAdded)
+	}
+
 	// Deliver records held back by on_missing, each with its reason (SPEC §8).
 	for _, s := range res.Steps {
 		if len(s.MissingSkips) == 0 {
@@ -107,6 +127,13 @@ func PrintReceipt(w io.Writer, res *Result) {
 		total += fmt.Sprintf(", %s avoided via cache (%d records skipped)", amount, totalSkips)
 	}
 	fmt.Fprintln(w, total)
+}
+
+func holdReason(res *Result) string {
+	if res.Simulated {
+		return "simulated run"
+	}
+	return "dry run"
 }
 
 func money(v float64) string {
