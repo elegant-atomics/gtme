@@ -354,3 +354,38 @@ keep warm favorite colors, fail cool ones.
 This increment also seeded ADR-021 (groups): the design conversation it
 triggered — filter nondeterminism, verdict scope, campaign as a concept —
 is recorded there.
+
+### 2026-08-16 — Increment: stack-proof (the M8–M12 infrastructure, live)
+
+Every piece of the binding-era stack in one pipeline against the real
+ledger and the live Instantly test shell: csv/source → http/enrich
+(markdown mode) → sql/enrich → ai/compose → the instantly deliver
+BINDING, installed the operator way (`~/.gtm/adapters/instantly-add-lead/
+binding.yaml`, id rewritten, fixtures alongside). Run up the full ladder:
+simulate → plan → dry → arm → re-run.
+
+- **Simulate ($0):** sql/enrich ran for real (offline by construction),
+  AI answered synthetically-marked, http/enrich surfaced as a counted
+  gap, delivery held with all four variables resolved. The agent-rung
+  works: behavior validated before any key was exercised.
+- **Plan ($0):** the external YAML binding resolved with credentials
+  from ~/.gtm/secrets; the M9 touch scope printed
+  (`record: touched → stack-proof`); vendor-coupling notes flagged
+  `web.homepage` and `sql.shout`.
+- **Dry ($0.0053):** the grounding loop proved itself — ai/compose's
+  lines cite the actually-fetched page ("classic IANA documentation
+  example domain", the "Learn more" link): http/enrich → ledger →
+  `uses:` → model, live. Three text/html payloads retained (ADR-030,
+  90d TTL).
+- **Armed ($0.0054):** 3 leads landed in the never-activated campaign
+  shell via the YAML binding — first_name first-class, first_line/
+  ps_line/shout as custom variables (the `$variables` splice against the
+  live API). fetch: 3 cached — the armed run reused the dry run's
+  fetches inside the 7d window; fetch-once economics on a receipt with
+  real money. `stack-proof` group: 3 touched events, created on demand.
+- **Re-run ($0.0050):** deliver 0 in, 3 cached (already_delivered) —
+  idempotency held. Note, not a finding: ai/compose re-ran (composes are
+  cheap-to-rerun by design, uncached); the qualify/send decomposition or
+  an `exclude:` gate is the pattern when even that re-spend matters.
+
+Zero divergences. Total spend for proving five milestones live: $0.016.
