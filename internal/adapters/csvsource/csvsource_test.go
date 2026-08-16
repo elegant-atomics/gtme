@@ -105,11 +105,20 @@ func TestRunEmitsSchemaThenRecords(t *testing.T) {
 	}
 
 	first := records[0].Fields
-	if first["email"] != "Jane.Doe@Acme.com" {
-		t.Errorf("email = %#v (the runner canonicalizes, the adapter does not)", first["email"])
+	// ADR-018: normalization per the registry happens at ingress, at this
+	// adapter's own boundary — the mixed-case email is canonical by the time
+	// it leaves the adapter (SPEC §10.1).
+	if first["email"] != "jane.doe@acme.com" {
+		t.Errorf("email = %#v, want registry-normalized (ADR-018)", first["email"])
 	}
 	if first["full_name"] != "Jane Doe" {
 		t.Errorf("full_name = %#v", first["full_name"])
+	}
+	if got := records[1].Fields["company_domain"]; got != "globex.io" {
+		t.Errorf("company_domain = %#v, want eTLD+1 per the registry", got)
+	}
+	if got := records[1].Fields["linkedin_url"]; got != "https://www.linkedin.com/in/bob-stone" {
+		t.Errorf("linkedin_url = %#v, want the canonical public URL form", got)
 	}
 	if records[0].Key != nil {
 		t.Error("a source must not invent identity keys; that is the runner's job")
@@ -171,6 +180,125 @@ func TestProbeSchemaReadsHeaderOnly(t *testing.T) {
 		if !strings.Contains(string(raw), `"`+want+`"`) {
 			t.Errorf("probed schema is missing %q: %s", want, raw)
 		}
+	}
+}
+
+// The ingress mapping (SPEC §10.1, ADR-018): explicit columns:, auto-map for
+// canonical headers, csv.* namespacing for the rest, registry normalization of
+// values, and per-record drops (never crashes) for invalid values.
+func TestColumnsMapping(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "contacts.csv")
+	csv := "Work Email,Contact,Company Website,title,Notes\n" +
+		"Jane.Doe@Acme.com,Jane Doe,https://www.Acme.com/about,VP Marketing,loves dogs\n"
+	if err := os.WriteFile(path, []byte(csv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]any{"path": path, "columns": map[string]any{
+		"email":          "Work Email",
+		"full_name":      "Contact",
+		"company_domain": "Company Website",
+	}}
+
+	msgs, err := drive(t, cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var rec *protocol.Message
+	for i := range msgs {
+		if msgs[i].Type == protocol.TypeRecord {
+			rec = &msgs[i]
+			break
+		}
+	}
+	if rec == nil {
+		t.Fatal("no record emitted")
+	}
+	want := map[string]any{
+		"email":          "jane.doe@acme.com", // mapped + normalized
+		"full_name":      "Jane Doe",
+		"company_domain": "acme.com",     // full URL reduced to eTLD+1
+		"title":          "VP Marketing", // auto-mapped: header already canonical
+		"csv.notes":      "loves dogs",   // leftover: kept, namespaced
+	}
+	for k, v := range want {
+		if rec.Fields[k] != v {
+			t.Errorf("%s = %#v, want %#v", k, rec.Fields[k], v)
+		}
+	}
+	if _, ok := rec.Fields["notes"]; ok {
+		t.Error("unmapped non-canonical header leaked in under its bare name")
+	}
+
+	// The probed schema sees the same names, so the planner plans against them.
+	raw, err := (&Adapter{}).ProbeSchema(cfg)
+	if err != nil {
+		t.Fatalf("ProbeSchema: %v", err)
+	}
+	for _, wantName := range []string{`"email"`, `"csv.notes"`, `"title"`} {
+		if !strings.Contains(string(raw), wantName) {
+			t.Errorf("probed schema missing %s: %s", wantName, raw)
+		}
+	}
+}
+
+func TestColumnsMappingErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.csv")
+	if err := os.WriteFile(path, []byte("Email\njane@acme.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A mapping to a column the file does not have fails at probe time — this
+	// is what makes it a plan error, not a runtime surprise (SPEC §7).
+	if _, err := (&Adapter{}).ProbeSchema(map[string]any{"path": path,
+		"columns": map[string]any{"full_name": "Contact"}}); err == nil {
+		t.Error("want an error for a columns: entry naming a missing header")
+	}
+	// A columns: target must be canonical or namespaced (SPEC §4a layer 1).
+	_, err := (&Adapter{}).ProbeSchema(map[string]any{"path": path,
+		"columns": map[string]any{"shoe_size": "Email"}})
+	if err == nil || !strings.Contains(err.Error(), "not a canonical") {
+		t.Errorf("want a registry validation error, got %v", err)
+	}
+}
+
+func TestInvalidValueIsDroppedNotFatal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.csv")
+	csv := "Email,LinkedIn URL,Company Employees\n" +
+		"jane@acme.com,https://www.linkedin.com/sales/lead/ACwAAAbQ2xKB9abc,not-a-number\n"
+	if err := os.WriteFile(path, []byte(csv), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := drive(t, map[string]any{"path": path})
+	if err != nil {
+		t.Fatalf("Run: %v (invalid values must never crash the run, SPEC §10.1)", err)
+	}
+	var rec *protocol.Message
+	warns := 0
+	for i := range msgs {
+		switch msgs[i].Type {
+		case protocol.TypeRecord:
+			rec = &msgs[i]
+		case protocol.TypeLog:
+			if msgs[i].Level == "warn" {
+				warns++
+			}
+		}
+	}
+	if rec == nil {
+		t.Fatal("record with a valid email should still be emitted")
+	}
+	if rec.Fields["email"] != "jane@acme.com" {
+		t.Errorf("email = %#v", rec.Fields["email"])
+	}
+	// A Sales Navigator URL is an invalid value for linkedin_url (ADR-020) and
+	// a range/garbage string is invalid for an integer field — both dropped.
+	if _, ok := rec.Fields["linkedin_url"]; ok {
+		t.Error("non-public URL must not survive under linkedin_url")
+	}
+	if _, ok := rec.Fields["company_employees"]; ok {
+		t.Error("non-integer must not survive under company_employees")
+	}
+	if warns != 2 {
+		t.Errorf("want 2 dropped-field warnings, got %d", warns)
 	}
 }
 

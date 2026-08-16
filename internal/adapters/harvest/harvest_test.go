@@ -165,8 +165,55 @@ func TestRecordWithoutLinkedInIsSkipped(t *testing.T) {
 	if len(stub.Calls) != 0 {
 		t.Error("no HTTP call should be made without a linkedin_url — that would spend a credit for nothing")
 	}
-	if !strings.Contains(adaptertest.Logs(msgs), "no linkedin_url") {
+	if !strings.Contains(adaptertest.Logs(msgs), "no LinkedIn URL of any shape") {
 		t.Errorf("logs = %s", adaptertest.Logs(msgs))
+	}
+}
+
+// One-of needs (SPEC §7, §10.4): any single LinkedIn URL shape satisfies the
+// lookup, and a non-public starting shape resolves the public URL back into the
+// ledger — ADR-020's recovery path.
+func TestNonPublicShapeResolvesPublicURL(t *testing.T) {
+	stub := &adaptertest.Stub{Routes: routes(t)}
+	msgs, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
+		Config: map[string]any{"base_url": "https://harvest.test", "posts_limit": 0},
+		Env:    map[string]string{"HARVEST_API_KEY": "secret"},
+		Records: one("nh:abc123", map[string]any{
+			"linkedin_internal_url": "https://www.linkedin.com/in/ACwAAAbQ2xKB9abcDEF",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	records := adaptertest.Records(msgs)
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	// The fixture profile carries linkedinUrl jane-doe; the adapter hands it
+	// back in canonical form so the runner can upgrade the identity key.
+	if got := records[0].Fields["linkedin_url"]; got != "https://www.linkedin.com/in/jane-doe" {
+		t.Errorf("resolved linkedin_url = %#v", got)
+	}
+}
+
+func TestPublicShapeDoesNotEchoLinkedInURL(t *testing.T) {
+	stub := &adaptertest.Stub{Routes: routes(t)}
+	msgs, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
+		Config: map[string]any{"base_url": "https://harvest.test", "posts_limit": 0},
+		Env:    map[string]string{"HARVEST_API_KEY": "secret"},
+		Records: one("jane@acme.com", map[string]any{
+			"linkedin_url": "https://www.linkedin.com/in/jane-doe",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	records := adaptertest.Records(msgs)
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	if _, ok := records[0].Fields["linkedin_url"]; ok {
+		t.Error("a lookup that started from the public URL has nothing to resolve back")
 	}
 }
 
@@ -222,8 +269,19 @@ func TestManifestContract(t *testing.T) {
 	if resolved.Manifest.Role != adapters.RoleEnrich {
 		t.Errorf("role = %q", resolved.Manifest.Role)
 	}
-	if got := resolved.Manifest.RequiredNeeds(); len(got) != 1 || got[0] != "linkedin_url" {
-		t.Errorf("required needs = %v", got)
+	// One-of needs (SPEC §10.4): no flat floor; three single-field branches.
+	if got := resolved.Manifest.RequiredNeeds(); len(got) != 0 {
+		t.Errorf("required needs (floor) = %v, want none — the alternatives live in branches", got)
+	}
+	branches := resolved.Manifest.NeedsBranches()
+	if len(branches) != 3 {
+		t.Fatalf("needs branches = %v, want 3", branches)
+	}
+	want := []string{"linkedin_url", "linkedin_internal_url", "linkedin_sales_nav_url"}
+	for i, b := range branches {
+		if len(b) != 1 || b[0] != want[i] {
+			t.Errorf("branch %d = %v, want [%s]", i, b, want[i])
+		}
 	}
 	if resolved.Manifest.FreshnessDays != 30 {
 		t.Errorf("freshness_days = %d, want 30", resolved.Manifest.FreshnessDays)

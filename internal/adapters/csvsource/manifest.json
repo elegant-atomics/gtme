@@ -14,7 +14,12 @@
     "properties": {
       "path": {"type": "string", "description": "CSV file to read; header row names the fields"},
       "entity_type": {"type": "string", "enum": ["person", "company"]},
-      "limit": {"type": "integer", "minimum": 1}
+      "limit": {"type": "integer", "minimum": 1},
+      "columns": {
+        "type": "object",
+        "additionalProperties": {"type": "string", "minLength": 1},
+        "description": "Ingress mapping (ADR-018): canonical field name → CSV header as written. Headers already matching canonical names auto-map; unmapped non-canonical headers become csv.<normalized_header>."
+      }
     }
   }
 }

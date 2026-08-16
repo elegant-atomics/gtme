@@ -3,10 +3,7 @@
   "version": 1,
   "role": "compose",
   "entity_type": "person",
-  "needs": {
-    "type": "object",
-    "additionalProperties": true
-  },
+  "needs": "dynamic",
   "provides": {
     "type": "object",
     "additionalProperties": false,

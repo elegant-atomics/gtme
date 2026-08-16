@@ -38,12 +38,14 @@ func TestSearchMapsPeopleAndCompanies(t *testing.T) {
 	}
 	jane := records[0].Fields
 	for field, want := range map[string]any{
-		"email":             "jane.doe@acme.com",
-		"first_name":        "Jane",
-		"full_name":         "Jane Doe",
-		"title":             "VP Marketing",
-		"seniority":         "vp",
-		"linkedin_url":      "http://www.linkedin.com/in/jane-doe",
+		"email":      "jane.doe@acme.com",
+		"first_name": "Jane",
+		"full_name":  "Jane Doe",
+		"title":      "VP Marketing",
+		"seniority":  "vp",
+		// Normalized at the adapter's own boundary (SPEC §4a): canonical
+		// public-URL form, whatever scheme/host variant Apollo returned.
+		"linkedin_url":      "https://www.linkedin.com/in/jane-doe",
 		"company_name":      "Acme Inc",
 		"company_domain":    "acme.com",
 		"company_employees": float64(120),

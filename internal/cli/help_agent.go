@@ -44,7 +44,7 @@ var agentVerbs = []agentVerb{
 	{"gtm init", "create ~/.gtm and the ledger"},
 	{"gtm secret set KEY [VALUE]", "store a credential in ~/.gtm/secrets (VALUE omitted = prompt, no echo)"},
 	{"gtm plan pipeline.yaml", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend"},
-	{"gtm run pipeline.yaml [--resume RUN_ID]", "execute a pipeline; --resume continues a run that stopped partway"},
+	{"gtm run pipeline.yaml [--resume RUN_ID] [--dry-run]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending"},
 	{"gtm query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
 	{"gtm show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},
 	{"gtm show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
@@ -154,6 +154,10 @@ deliver:
   use: instantly/add-to-campaign
   with:
     campaign: "Q3 VP Marketing"
+  variables:
+    first_name: first_name
+    personalization: first_line
+    ps_line: ps_line
   idempotency: email
 `,
 	},
@@ -181,6 +185,11 @@ deliver:
   use: instantly/add-to-campaign
   with:
     campaign: "CSV import"
+  variables:
+    first_name: first_name
+    personalization: first_line
+    ps_line: ps_line
+  on_missing: skip
   idempotency: email
 `,
 	},

@@ -5,15 +5,22 @@
   "entity_type": "person",
   "needs": {
     "type": "object",
-    "required": ["linkedin_url"],
     "properties": {
-      "linkedin_url": {"type": "string"}
-    }
+      "linkedin_url": {"type": "string"},
+      "linkedin_internal_url": {"type": "string"},
+      "linkedin_sales_nav_url": {"type": "string"}
+    },
+    "anyOf": [
+      {"required": ["linkedin_url"]},
+      {"required": ["linkedin_internal_url"]},
+      {"required": ["linkedin_sales_nav_url"]}
+    ]
   },
   "provides": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "linkedin_url": {"type": "string"},
       "headline": {"type": "string"},
       "about": {"type": "string"},
       "location": {"type": "string"},

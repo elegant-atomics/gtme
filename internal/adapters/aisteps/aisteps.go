@@ -332,9 +332,16 @@ func (a *Adapter) emit(w *protocol.Writer, records []record, answers map[string]
 	for _, rec := range records {
 		item := answers[rec.key.IdentityKey]
 		if a.Mode == modeCompose {
+			// Trimmed at this adapter's boundary: canonical values must be fixed
+			// points of their registry rule (SPEC §4a), and a model legitimately
+			// emits stray whitespace.
+			trim := func(v any) string {
+				s, _ := v.(string)
+				return strings.TrimSpace(s)
+			}
 			fields := map[string]any{
-				"first_line": item["first_line"],
-				"ps_line":    item["ps_line"],
+				"first_line": trim(item["first_line"]),
+				"ps_line":    trim(item["ps_line"]),
 			}
 			if err := w.Write(protocol.Record(rec.key, fields, nil)); err != nil {
 				return err

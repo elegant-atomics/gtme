@@ -28,8 +28,21 @@ func lead(key string, fields map[string]any) []protocol.Message {
 func TestAddsLeadWithComposedLines(t *testing.T) {
 	stub := &adaptertest.Stub{Routes: routes(t)}
 	msgs, err := adaptertest.Run(t, &Adapter{HTTP: stub}, adaptertest.Input{
-		Config: map[string]any{"campaign": "Q3 VP Marketing", "base_url": "https://instantly.test"},
-		Env:    map[string]string{"INSTANTLY_API_KEY": "secret"},
+		Config: map[string]any{
+			"campaign": "Q3 VP Marketing", "base_url": "https://instantly.test",
+			// The egress mapping (ADR-018): first-class targets map into the
+			// lead body, everything else becomes a custom variable. Injected
+			// by the runner from the step-level variables: key.
+			"variables": map[string]any{
+				"first_name":      "first_name",
+				"last_name":       "last_name",
+				"company_name":    "company_name",
+				"personalization": "first_line",
+				"ps_line":         "ps_line",
+				"title":           "title",
+			},
+		},
+		Env: map[string]string{"INSTANTLY_API_KEY": "secret"},
 		Records: lead("jane.doe@acme.com", map[string]any{
 			"email":        "Jane.Doe@Acme.com",
 			"first_name":   "Jane",
@@ -189,15 +202,20 @@ func TestConfigRequiresACampaign(t *testing.T) {
 	if _, err := parseConfig(map[string]any{}); err == nil {
 		t.Fatal("want an error without a campaign")
 	}
-	cfg, err := parseConfig(map[string]any{"campaign": "x", "variables": []any{"ps_line"}})
+	cfg, err := parseConfig(map[string]any{"campaign": "x",
+		"variables": map[string]any{"ps_line": "ps_line", "personalization": "first_line"}})
 	if err != nil {
 		t.Fatalf("parseConfig: %v", err)
 	}
-	if len(cfg.Variables) != 1 || cfg.Variables[0] != "ps_line" {
+	if len(cfg.Variables) != 2 || cfg.Variables["personalization"] != "first_line" {
 		t.Errorf("variables = %v", cfg.Variables)
 	}
 	if !cfg.SkipIfInCampaign {
 		t.Error("skip_if_in_campaign should default to true")
+	}
+	if _, err := parseConfig(map[string]any{"campaign": "x",
+		"variables": map[string]any{"ps_line": ""}}); err == nil {
+		t.Error("want an error for a variables: entry with no field name")
 	}
 }
 
@@ -225,7 +243,12 @@ func TestManifestContract(t *testing.T) {
 	if resolved.Manifest.Role != adapters.RoleDeliver {
 		t.Errorf("role = %q", resolved.Manifest.Role)
 	}
-	if got := resolved.Manifest.RequiredNeeds(); strings.Join(got, ",") != "email,first_name" {
-		t.Errorf("required needs = %v", got)
+	// Dynamic needs with an email floor (SPEC §6, §10.6): everything else the
+	// adapter sends derives from the step's variables: mapping.
+	if !resolved.Manifest.NeedsDynamic() {
+		t.Error("instantly must declare dynamic needs (ADR-019)")
+	}
+	if got := resolved.Manifest.RequiredNeeds(); strings.Join(got, ",") != "email" {
+		t.Errorf("required needs (the static floor) = %v, want just email", got)
 	}
 }

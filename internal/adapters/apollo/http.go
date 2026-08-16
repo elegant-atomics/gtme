@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/trevorfox/gtm/internal/httpx"
+	"github.com/trevorfox/gtm/internal/identity"
 )
 
 // DefaultBaseURL is Apollo's API host.
@@ -88,9 +89,10 @@ type person struct {
 	} `json:"organization"`
 }
 
-// fields maps one Apollo person onto gtm field names. Values Apollo withholds
-// (notably locked emails on the search endpoint) are omitted rather than stored
-// as placeholders.
+// fields maps one Apollo person onto canonical field names, normalized at this
+// adapter's own boundary (SPEC §4a: vendor dialect → canonical). Values Apollo
+// withholds (notably locked emails on the search endpoint) are omitted rather
+// than stored as placeholders.
 func (p person) fields() map[string]any {
 	out := map[string]any{}
 	set := func(k, v string) {
@@ -99,33 +101,46 @@ func (p person) fields() map[string]any {
 		}
 	}
 
-	set("apollo_id", p.ID)
+	set("apollo.id", p.ID) // vendor-namespaced: no second provider has this fact
 	set("first_name", p.FirstName)
 	set("last_name", p.LastName)
 	set("full_name", p.Name)
 	set("title", p.Title)
-	set("seniority", p.Seniority)
-	set("linkedin_url", p.LinkedinURL)
+	set("seniority", strings.ToLower(p.Seniority))
 	set("city", p.City)
 	set("state", p.State)
 	set("country", p.Country)
-	set("email_status", p.EmailStatus)
+	set("email_status", strings.ToLower(p.EmailStatus))
+
+	// A LinkedIn-URL-shaped value is classified and routed to the field for its
+	// shape (SPEC §4, ADR-020) — the shapes are distinct vocabulary, never one
+	// field holding both.
+	switch identity.ClassifyLinkedIn(p.LinkedinURL) {
+	case identity.LinkedInPublic:
+		out["linkedin_url"] = identity.NormalizeLinkedInURL(p.LinkedinURL)
+	case identity.LinkedInInternal:
+		set("linkedin_internal_url", p.LinkedinURL)
+	case identity.LinkedInSalesNav:
+		set("linkedin_sales_nav_url", p.LinkedinURL)
+	}
 
 	// Apollo returns a placeholder like "email_not_unlocked@domain.com" for
 	// contacts whose email you have not paid to reveal. Storing that would poison
 	// the identity key, so it is dropped.
-	if email := strings.ToLower(strings.TrimSpace(p.Email)); email != "" && !strings.Contains(email, "email_not_unlocked") {
+	if email := identity.NormalizeEmail(p.Email); email != "" && !strings.Contains(email, "email_not_unlocked") {
 		out["email"] = email
 	}
 
 	set("company_name", p.Organization.Name)
 	set("company_website", p.Organization.WebsiteURL)
-	set("company_linkedin_url", p.Organization.LinkedinURL)
+	if u := identity.NormalizeLinkedInURL(p.Organization.LinkedinURL); u != "" {
+		out["company_linkedin_url"] = u
+	}
 	set("company_industry", p.Organization.Industry)
-	if domain := p.Organization.PrimaryDomain; strings.TrimSpace(domain) != "" {
-		out["company_domain"] = strings.ToLower(strings.TrimSpace(domain))
-	} else if p.Organization.WebsiteURL != "" {
-		out["company_domain"] = p.Organization.WebsiteURL // the runner canonicalizes
+	if domain := identity.NormalizeDomain(p.Organization.PrimaryDomain); domain != "" {
+		out["company_domain"] = domain
+	} else if domain := identity.NormalizeDomain(p.Organization.WebsiteURL); domain != "" {
+		out["company_domain"] = domain
 	}
 	if p.Organization.EmployeeCount > 0 {
 		out["company_employees"] = p.Organization.EmployeeCount

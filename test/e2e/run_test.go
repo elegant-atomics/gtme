@@ -60,8 +60,8 @@ func TestRunSourceThroughExternalAdapter(t *testing.T) {
 
 	// Enriched fields carry provenance: the external adapter's id and the run.
 	if n := h.queryInt(
-		`SELECT count(*) FROM field_values WHERE field = 'mock_score' AND source = 'mock-enrich-py@1' AND run_id IS NOT NULL`); n != 3 {
-		t.Errorf("mock_score values with provenance = %d, want 3", n)
+		`SELECT count(*) FROM field_values WHERE field = 'mock.score' AND source = 'mock-enrich-py@1' AND run_id IS NOT NULL`); n != 3 {
+		t.Errorf("mock.score values with provenance = %d, want 3", n)
 	}
 	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE source = 'csv/source@1' AND field = 'title'`); n != 3 {
 		t.Errorf("sourced title values = %d, want 3", n)
@@ -86,8 +86,8 @@ func TestRunSourceThroughExternalAdapter(t *testing.T) {
 	contains(t, second.stderr, "mock: 0 in, 0 out, 3 cached", "second run stderr")
 	contains(t, second.stderr, "avoided via cache", "second run receipt")
 
-	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock_score'`); n != 3 {
-		t.Errorf("mock_score rows after second run = %d, want 3 (no adapter call)", n)
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock.score'`); n != 3 {
+		t.Errorf("mock.score rows after second run = %d, want 3 (no adapter call)", n)
 	}
 	if n := h.queryInt(`SELECT count(*) FROM step_events WHERE event = 'skipped_cache' AND step_id = 'mock'`); n != 3 {
 		t.Errorf("skipped_cache events = %d, want 3", n)
@@ -101,8 +101,8 @@ func TestRunSourceThroughExternalAdapter(t *testing.T) {
 	h.write("pipeline-nocache.yaml", strings.Replace(csvToMockYAML, "    cache: 30d\n", "    cache: 0d\n", 1))
 	third := h.mustRun("run", "pipeline-nocache.yaml")
 	contains(t, third.stderr, "mock: 3 in, 3 out", "third run stderr")
-	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock_score'`); n != 6 {
-		t.Errorf("mock_score rows after cache-off run = %d, want 6 (append-only)", n)
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock.score'`); n != 6 {
+		t.Errorf("mock.score rows after cache-off run = %d, want 6 (append-only)", n)
 	}
 }
 
@@ -152,9 +152,10 @@ source:
 	}
 }
 
-// TestRunFailsWhenRecordCannotBeKeyed proves a record with nothing identifying
-// is dropped without taking the run down.
-func TestRunFailsWhenRecordCannotBeKeyed(t *testing.T) {
+// TestPlanFailsWhenSourceHasNoIdentityPath: a source whose columns can derive
+// no §4 identity at all is caught at plan time (SPEC §7, ADR-018), before a
+// single row is read — the run never starts.
+func TestPlanFailsWhenSourceHasNoIdentityPath(t *testing.T) {
 	h := newHarness(t)
 	h.write("people.csv", "title,city\nVP Marketing,Austin\nHead of Growth,Boston\n")
 	h.write("pipeline.yaml", `name: unkeyable
@@ -163,9 +164,35 @@ source:
   with:
     path: people.csv
 `)
-	res := h.mustRun("run", "pipeline.yaml")
-	contains(t, res.stderr, "dropped a record", "stderr")
+	res := h.run("plan", "pipeline.yaml")
+	if res.code != 2 {
+		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "no identity-key path", "stderr")
+	res = h.run("run", "pipeline.yaml")
+	if res.code != 2 {
+		t.Errorf("run exit = %d, want 2 (same plan gate)", res.code)
+	}
 	if n := h.queryInt(`SELECT count(*) FROM identities`); n != 0 {
 		t.Errorf("identities = %d, want 0", n)
+	}
+}
+
+// TestRunDropsRecordThatCannotBeKeyed proves a single record with nothing
+// identifying is dropped without taking the run down — the plan passed (an
+// email column exists), but this row's cell is empty.
+func TestRunDropsRecordThatCannotBeKeyed(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", "email,title\njane@acme.com,VP Marketing\n,Head of Growth\n")
+	h.write("pipeline.yaml", `name: half-keyable
+source:
+  use: csv/source
+  with:
+    path: people.csv
+`)
+	res := h.mustRun("run", "pipeline.yaml")
+	contains(t, res.stderr, "dropped a record", "stderr")
+	if n := h.queryInt(`SELECT count(*) FROM identities WHERE entity_type = 'person'`); n != 1 {
+		t.Errorf("person identities = %d, want 1 (the keyable row)", n)
 	}
 }

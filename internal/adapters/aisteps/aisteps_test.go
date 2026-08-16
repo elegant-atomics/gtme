@@ -297,8 +297,10 @@ func TestManifestsAreRegistered(t *testing.T) {
 		if !resolved.Manifest.Batch {
 			t.Errorf("%s must be a batch adapter", id)
 		}
-		if !adapters.Wildcard(resolved.Manifest.Needs) || len(resolved.Manifest.NeedsFields()) != 0 {
-			t.Errorf("%s should accept every field the ledger knows", id)
+		// ADR-019: AI steps declare dynamic needs — uses: narrows them, and
+		// without uses: they fall back to every field the ledger knows.
+		if !resolved.Manifest.NeedsDynamic() || len(resolved.Manifest.NeedsFields()) != 0 {
+			t.Errorf("%s should declare dynamic needs with no static fields", id)
 		}
 	}
 	compose, err := adapters.Resolve(ComposeID)

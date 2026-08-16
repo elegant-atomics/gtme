@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -131,8 +133,94 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 			}
 			return nil, nil
 		}
+
+		// Deliver completeness (SPEC §8, ADR-019): every variables: target must
+		// resolve to a non-empty value before the record may send — blank merge
+		// fields never do. The policy applies armed and dry alike.
+		rv := resolveVariables(st.Variables, it)
+		if len(rv.Missing) > 0 {
+			return nil, r.holdMissing(ctx, st, it, rv)
+		}
+		// A dry run resolves and receipts, but never calls the adapter and
+		// never writes a delivery (SPEC §8).
+		if r.dry {
+			return nil, r.dryDeliver(ctx, st, it, rv)
+		}
 	}
 	return it, nil
+}
+
+// resolveVariables renders a record's deliver variables: each target merge
+// field with its resolved value, and the ledger fields that had none.
+func resolveVariables(vars map[string]string, it *item) RecordVariables {
+	rv := RecordVariables{IdentityKey: it.key.IdentityKey, Resolved: map[string]string{}}
+	missing := map[string]bool{}
+	for target, field := range vars {
+		s := stringify(it.fields[field])
+		if s == "" {
+			missing[field] = true
+			continue
+		}
+		rv.Resolved[target] = s
+	}
+	for f := range missing {
+		rv.Missing = append(rv.Missing, f)
+	}
+	sort.Strings(rv.Missing)
+	return rv
+}
+
+// holdMissing applies on_missing to a record whose variables did not resolve
+// (SPEC §8): fail marks it failed; skip (the default) records a fail verdict
+// with the missing fields as the reason and lists it in the receipt.
+func (r *runner) holdMissing(ctx context.Context, st *planner.Step, it *item, rv RecordVariables) error {
+	reason := "missing " + strings.Join(rv.Missing, ", ")
+	if st.OnMissing == "fail" {
+		return r.failItem(ctx, st, it, reason)
+	}
+	if err := r.l.SetVerdict(ctx, r.runID, it.identityID, st.ID, false); err != nil {
+		return err
+	}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done",
+		map[string]any{"pass": false, "reason": reason}); err != nil {
+		return err
+	}
+	r.bump(st, func(s *StepStat) {
+		s.Skipped++
+		s.MissingSkips = append(s.MissingSkips, rv)
+	})
+	return nil
+}
+
+// dryDeliver records what WOULD have been sent — the resolved variables land in
+// step_events (event='dry_run') and the receipt; deliveries stays untouched, so
+// the armed run behaves as if the dry run never happened (SPEC §8).
+func (r *runner) dryDeliver(ctx context.Context, st *planner.Step, it *item, rv RecordVariables) error {
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "dry_run",
+		map[string]any{"variables": rv.Resolved}); err != nil {
+		return err
+	}
+	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
+		return err
+	}
+	r.bump(st, func(s *StepStat) { s.DryRun = append(s.DryRun, rv) })
+	return nil
+}
+
+// stringify renders a projected value for a merge field; empty means missing.
+func stringify(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(t)
+	default:
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return fmt.Sprint(t)
+		}
+		return string(raw)
+	}
 }
 
 // dispatch runs a step's eligible records through adapter sessions with a worker
@@ -405,8 +493,13 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 	it.output = true
 
 	// Output is validated against the manifest before it reaches the ledger
-	// (SPEC §5): an invalid record fails, the run continues.
+	// (SPEC §5): an invalid record fails, the run continues. Canonical fields
+	// are additionally held to the registry's type, domain and normalized form
+	// (SPEC §4a, enforcement layer 2).
 	if err := st.Manifest.ValidateProvides(m.Fields); err != nil {
+		return r.failItem(ctx, st, it, err.Error())
+	}
+	if err := r.checkRegistry(it.key.EntityType, m.Fields); err != nil {
 		return r.failItem(ctx, st, it, err.Error())
 	}
 

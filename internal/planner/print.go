@@ -3,6 +3,7 @@ package planner
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/trevorfox/gtm/internal/pipeline"
@@ -46,6 +47,13 @@ func Print(w io.Writer, p *Plan) {
 			if len(s.Required) > 0 {
 				fmt.Fprintf(w, "     requires:  %s\n", list(s.Required))
 			}
+			if len(s.NeedsBranches) > 0 {
+				parts := make([]string, 0, len(s.NeedsBranches))
+				for _, b := range s.NeedsBranches {
+					parts = append(parts, strings.Join(b, "+"))
+				}
+				fmt.Fprintf(w, "     requires:  any of %s\n", strings.Join(parts, " | "))
+			}
 		}
 		provides := list(s.Provides)
 		if s.Wildcard {
@@ -72,6 +80,22 @@ func Print(w io.Writer, p *Plan) {
 				idem = "(identity key)"
 			}
 			fmt.Fprintf(w, "     idempotency: %s\n", idem)
+			if len(s.Variables) > 0 {
+				targets := make([]string, 0, len(s.Variables))
+				for t := range s.Variables {
+					targets = append(targets, t)
+				}
+				sort.Strings(targets)
+				pairs := make([]string, 0, len(targets))
+				for _, t := range targets {
+					pairs = append(pairs, fmt.Sprintf("%s ← %s", t, s.Variables[t]))
+				}
+				fmt.Fprintf(w, "     variables: %s\n", strings.Join(pairs, ", "))
+				fmt.Fprintf(w, "     on_missing: %s\n", s.OnMissing)
+			}
+		}
+		for _, note := range s.Notes {
+			fmt.Fprintf(w, "     note:      %s\n", note)
 		}
 		if len(s.Manifest.Credentials) > 0 {
 			fmt.Fprintf(w, "     creds:     %s (resolved)\n", list(s.Manifest.Credentials))

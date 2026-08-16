@@ -53,4 +53,7 @@ deliver:
   use: instantly/add-to-campaign
   with:
     campaign: "Q3 VP Marketing"
+  variables:            # ADR-018/019: egress mapping, and the step's dynamic needs
+    first_line: first_line
+    ps_line: ps_line
   idempotency: email

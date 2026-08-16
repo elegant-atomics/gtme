@@ -80,8 +80,13 @@ func (m *Manifest) compile() error {
 		return fmt.Errorf("adapters: %s: entity_type is required", m.ID)
 	}
 	var err error
-	if m.needs, err = compileSchema(m.ID+"/needs", m.Needs); err != nil {
-		return err
+	// The bare string "dynamic" declares fully config-derived needs (SPEC §6,
+	// ADR-019) and is not a schema; the object form {"dynamic": true, ...}
+	// compiles as an ordinary schema (its floor), the extra keyword ignored.
+	if !m.needsIsBareDynamic() {
+		if m.needs, err = compileSchema(m.ID+"/needs", m.Needs); err != nil {
+			return err
+		}
 	}
 	if m.provides, err = compileSchema(m.ID+"/provides", m.Provides); err != nil {
 		return err
@@ -107,11 +112,85 @@ func compileSchema(name string, raw json.RawMessage) (*jsonschema.Schema, error)
 	return s, nil
 }
 
-// NeedsFields lists every field the adapter can consume, sorted.
-func (m *Manifest) NeedsFields() []string { return schemaProperties(m.Needs) }
+// NeedsFields lists every field the adapter can consume, sorted — the union of
+// the top-level schema's properties and every anyOf branch's (SPEC §7 one-of
+// needs project the union of their branches).
+func (m *Manifest) NeedsFields() []string {
+	seen := map[string]bool{}
+	for _, f := range schemaProperties(m.needsObject()) {
+		seen[f] = true
+	}
+	for _, branch := range m.NeedsAnyOf() {
+		for _, f := range schemaProperties(branch) {
+			seen[f] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
 
-// RequiredNeeds lists the fields that must be present for the adapter to run.
-func (m *Manifest) RequiredNeeds() []string { return schemaRequired(m.Needs) }
+// RequiredNeeds lists the fields that must always be present for the adapter
+// to run: the top-level required list (for a dynamic manifest, its static
+// floor). One-of alternatives live in NeedsBranches, not here.
+func (m *Manifest) RequiredNeeds() []string { return schemaRequired(m.needsObject()) }
+
+// NeedsDynamic reports whether the manifest declares dynamic needs (SPEC §6,
+// ADR-019): the bare string "dynamic", or an object with "dynamic": true.
+func (m *Manifest) NeedsDynamic() bool {
+	if m.needsIsBareDynamic() {
+		return true
+	}
+	var doc struct {
+		Dynamic bool `json:"dynamic"`
+	}
+	if len(m.Needs) == 0 || json.Unmarshal(m.Needs, &doc) != nil {
+		return false
+	}
+	return doc.Dynamic
+}
+
+// NeedsBranches returns the one-of alternatives (SPEC §7): the required list
+// of each top-level anyOf branch. Empty when the needs schema has no anyOf.
+func (m *Manifest) NeedsBranches() [][]string {
+	branches := m.NeedsAnyOf()
+	if len(branches) == 0 {
+		return nil
+	}
+	out := make([][]string, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, schemaRequired(b))
+	}
+	return out
+}
+
+// NeedsAnyOf returns the raw top-level anyOf branches of the needs schema.
+func (m *Manifest) NeedsAnyOf() []json.RawMessage {
+	var doc struct {
+		AnyOf []json.RawMessage `json:"anyOf"`
+	}
+	raw := m.needsObject()
+	if len(raw) == 0 || json.Unmarshal(raw, &doc) != nil {
+		return nil
+	}
+	return doc.AnyOf
+}
+
+// needsObject returns the needs schema when it is an object, nil for the bare
+// "dynamic" string form.
+func (m *Manifest) needsObject() json.RawMessage {
+	if m.needsIsBareDynamic() {
+		return nil
+	}
+	return m.Needs
+}
+
+func (m *Manifest) needsIsBareDynamic() bool {
+	return strings.TrimSpace(string(m.Needs)) == `"dynamic"`
+}
 
 // ProvidesFields lists every field the adapter can produce, sorted.
 func (m *Manifest) ProvidesFields() []string { return schemaProperties(m.Provides) }

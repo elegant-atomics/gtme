@@ -37,8 +37,8 @@ steps:
 		t.Errorf("failed runs = %d, want 1", n)
 	}
 	// The record answered before the crash is kept: the ledger is append-only.
-	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock_score'`); n != 1 {
-		t.Fatalf("mock_score rows = %d, want 1 (partial output survives)", n)
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock.score'`); n != 1 {
+		t.Fatalf("mock.score rows = %d, want 1 (partial output survives)", n)
 	}
 	done := h.queryStrings(`SELECT identity_key FROM identities i
 	  JOIN run_records rr ON rr.identity_id = i.id WHERE rr.state = 'mock'`)
@@ -74,8 +74,8 @@ steps:
 
 	// Exactly the two unfinished records were processed: no duplicate work for the
 	// one that was already done.
-	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock_score'`); n != 3 {
-		t.Errorf("mock_score rows = %d, want 3 (2 new, 1 untouched)", n)
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock.score'`); n != 3 {
+		t.Errorf("mock.score rows = %d, want 3 (2 new, 1 untouched)", n)
 	}
 	if n := h.queryInt(`SELECT count(*) FROM run_records WHERE state = 'mock'`); n != 3 {
 		t.Errorf("records past the step = %d, want 3", n)

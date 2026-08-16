@@ -18,12 +18,13 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	fs.SetOutput(env.Stderr)
 	resume := fs.String("resume", "", "resume an existing run by id (or 'last')")
 	concurrency := fs.Int("concurrency", 0, "worker pool size per step (default 4 or $GTM_CONCURRENCY)")
+	dryRun := fs.Bool("dry-run", false, "hold deliver steps back: resolve and receipt their variables, send nothing (SPEC §8)")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtm run pipeline.yaml [--resume RUN_ID]")
+		return fail(ExitValidation, "usage: gtm run pipeline.yaml [--resume RUN_ID] [--dry-run]")
 	}
 
 	p, err := pipeline.Load(positional[0])
@@ -52,6 +53,7 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		Stderr:      env.Stderr,
 		Concurrency: *concurrency,
 		ResumeRunID: runID,
+		DryRun:      *dryRun,
 	})
 	if res != nil {
 		runner.PrintReceipt(env.Stderr, res)

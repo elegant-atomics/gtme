@@ -11,6 +11,7 @@ import (
 
 	"github.com/trevorfox/gtm/internal/adapters"
 	"github.com/trevorfox/gtm/internal/pipeline"
+	"github.com/trevorfox/gtm/internal/registry"
 	"github.com/trevorfox/gtm/internal/secrets"
 )
 
@@ -48,6 +49,19 @@ type Step struct {
 	Batch       bool
 	BatchSize   int
 	Idempotency string
+
+	// Variables is a deliver step's egress mapping (SPEC §9, ADR-018/019):
+	// target merge-field name → ledger field. Its values joined Needs/Required
+	// (the dynamic-needs derivation, SPEC §6).
+	Variables map[string]string
+	// OnMissing is the deliver completeness policy (SPEC §8): "skip" | "fail".
+	OnMissing string
+	// NeedsBranches are the one-of alternatives (SPEC §7): the step is
+	// satisfiable when any single branch's fields are all available.
+	NeedsBranches [][]string
+	// Notes are non-blocking plan observations (namespaced needs, near-miss
+	// column suggestions, a weak identity path) printed with the plan.
+	Notes []string
 
 	Credentials map[string]string
 	// MissingOptional are declared-optional credentials that did not resolve;
@@ -159,6 +173,45 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 					Msg: fmt.Sprintf("needs %s, which no earlier step provides (available: %s)",
 						strings.Join(missing, ", "), describe(available))})
 			}
+			// One-of needs (SPEC §7): at least one branch must be fully
+			// available; a failure names every branch and what it is missing.
+			if len(ps.NeedsBranches) > 0 && !plan.Wildcard {
+				if !anyBranchAvailable(ps.NeedsBranches, available) {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+						Msg: fmt.Sprintf("needs at least one of %s; no earlier step provides a complete alternative (available: %s)",
+							describeBranches(ps.NeedsBranches, available), describe(available))})
+				}
+			}
+		}
+		// A source with an exact (probed, closed) schema is checked for an
+		// identity-key path (SPEC §7, ADR-018): no derivable tier is an error,
+		// only the name-hash fallback is a note. Judged here and only here —
+		// downstream sufficiency is each following step's own needs check.
+		if isSource && ps.Manifest != nil && !ps.Wildcard && len(ps.Provides) > 0 {
+			strong, weak := identityPath(ps.EntityType, ps.Provides)
+			switch {
+			case !strong && !weak:
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("no identity-key path: none of the source's fields (%s) can derive a %s identity (SPEC §4) — map a column to an identity field with columns:",
+						strings.Join(ps.Provides, ", "), ps.EntityType)})
+			case !strong:
+				ps.Notes = append(ps.Notes,
+					"only the name-hash fallback identity tier is derivable from this source; dedupe will be weak until something provides an email or public profile URL")
+			}
+			// Near-miss columns (SPEC §7): a csv.* leftover a small edit away
+			// from a canonical name is SUGGESTED, never silently mapped.
+			if reg, err := registry.Load(); err == nil {
+				for _, f := range ps.Provides {
+					bare, ok := strings.CutPrefix(f, "csv.")
+					if !ok {
+						continue
+					}
+					if s := reg.Suggest(ps.EntityType, bare); s != "" {
+						ps.Notes = append(ps.Notes,
+							fmt.Sprintf("column %q looks like canonical %q — map it explicitly with columns: {%s: <your header>}", bare, s, s))
+					}
+				}
+			}
 		}
 		if ps.Wildcard {
 			plan.Wildcard = true
@@ -209,6 +262,11 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	ps.Batch = resolved.Manifest.Batch
 	ps.NeedsAll = len(ps.Needs) == 0 && adapters.Wildcard(resolved.Manifest.Needs)
 
+	reg, regErr := registry.Load()
+	if regErr != nil {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter, Msg: regErr.Error()})
+	}
+
 	// uses: (ADR-004) narrows an AI-backed step's needs-all wildcard to an
 	// explicit, plan-time-checkable list. It overrides the manifest's static
 	// needs entirely for projection and validation — see planner.Step.Needs's
@@ -221,6 +279,81 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		ps.Needs = append([]string(nil), s.Uses...)
 		ps.Required = append([]string(nil), s.Uses...)
 		ps.NeedsAll = false
+	}
+
+	// Dynamic needs (SPEC §6, ADR-019): a dynamic filter/compose step with no
+	// uses: falls back to needs-all; a dynamic deliver step derives its needs
+	// from variables: on top of its static floor.
+	dynamic := resolved.Manifest.NeedsDynamic()
+	if dynamic && len(s.Uses) == 0 &&
+		(ps.Role == adapters.RoleFilter || ps.Role == adapters.RoleCompose) {
+		ps.NeedsAll = true
+	}
+	if len(s.Variables) > 0 {
+		if !isDeliver {
+			// pipeline.Parse already rejects this; belt and braces for callers
+			// constructing pipelines programmatically.
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: "variables: is only valid on the deliver step (ADR-018)"})
+		} else if !dynamic {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("%s does not declare dynamic needs, so variables: has nothing to derive (SPEC §6)", s.Use)})
+		} else {
+			ps.Variables = s.Variables
+			for _, field := range variableFields(s.Variables) {
+				if !containsStr(ps.Needs, field) {
+					ps.Needs = append(ps.Needs, field)
+				}
+				if !containsStr(ps.Required, field) {
+					ps.Required = append(ps.Required, field)
+				}
+			}
+			sort.Strings(ps.Needs)
+			sort.Strings(ps.Required)
+		}
+	}
+	if isDeliver {
+		ps.OnMissing = s.OnMissing
+		if ps.OnMissing == "" {
+			ps.OnMissing = "skip"
+		}
+	}
+	ps.NeedsBranches = resolved.Manifest.NeedsBranches()
+
+	// Registry enforcement, layer 1 (SPEC §4a): every field named in uses: or
+	// variables: must be canonical for the entity type or vendor-namespaced;
+	// namespaced needs are noted (vendor coupling made visible).
+	if reg != nil {
+		for _, name := range s.Uses {
+			if err := reg.ValidateName(ps.EntityType, name); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "uses: " + err.Error()})
+			}
+		}
+		for _, field := range variableFields(s.Variables) {
+			if err := reg.ValidateName(ps.EntityType, field); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "variables: " + err.Error()})
+			}
+		}
+		for _, name := range append(append([]string{}, s.Uses...), variableFields(s.Variables)...) {
+			if registry.IsNamespaced(name) {
+				ps.Notes = append(ps.Notes,
+					fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
+			}
+		}
+		// Manifest static schemas get the same check (an external adapter's
+		// authoring error surfaces here rather than as a silent mismatch).
+		for _, name := range resolved.Manifest.NeedsFields() {
+			if err := reg.ValidateName(ps.EntityType, name); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
+					Msg: fmt.Sprintf("manifest needs: %v", err)})
+			}
+		}
+		for _, name := range resolved.Manifest.ProvidesFields() {
+			if err := reg.ValidateName(ps.EntityType, name); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
+					Msg: fmt.Sprintf("manifest provides: %v", err)})
+			}
+		}
 	}
 
 	// Role must match position: a source at the head, a deliver at the tail.
@@ -309,6 +442,92 @@ func (p *Plan) PrevState(i int) string {
 		return "sourced"
 	}
 	return p.Steps[i-1].ID
+}
+
+// variableFields lists a variables: mapping's ledger fields (its values),
+// sorted and de-duplicated — the config-derived half of a deliver step's
+// dynamic needs (SPEC §6).
+func variableFields(vars map[string]string) []string {
+	if len(vars) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, f := range vars {
+		seen[f] = true
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func anyBranchAvailable(branches [][]string, available map[string]bool) bool {
+	for _, branch := range branches {
+		if len(branch) == 0 {
+			continue
+		}
+		ok := true
+		for _, f := range branch {
+			if !available[f] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+func describeBranches(branches [][]string, available map[string]bool) string {
+	parts := make([]string, 0, len(branches))
+	for _, b := range branches {
+		var missing []string
+		for _, f := range b {
+			if !available[f] {
+				missing = append(missing, f)
+			}
+		}
+		desc := "[" + strings.Join(b, ", ") + "]"
+		if len(missing) > 0 {
+			desc += " (missing " + strings.Join(missing, ", ") + ")"
+		}
+		parts = append(parts, desc)
+	}
+	return strings.Join(parts, " or ")
+}
+
+// identityPath reports which SPEC §4 identity tiers a field set can derive:
+// strong is any non-name-hash tier, weak the name-hash fallback.
+func identityPath(entityType string, fields []string) (strong, weak bool) {
+	have := map[string]bool{}
+	for _, f := range fields {
+		have[f] = true
+	}
+	switch entityType {
+	case "person", "":
+		strong = have["email"] || have["linkedin_url"] || have["github_username"] || have["twitter_handle"]
+		weak = have["full_name"] || have["name"] || (have["first_name"] && have["last_name"])
+	case "company":
+		strong = have["company_domain"] || have["domain"] || have["website"]
+		weak = have["company_name"] || have["name"]
+	default:
+		// An extensible entity type with no registry vocabulary: nothing to judge.
+		return true, true
+	}
+	return strong, weak
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func describe(available map[string]bool) string {

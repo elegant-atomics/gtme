@@ -17,7 +17,7 @@ func TestPlanPrintsTheResolvedPlan(t *testing.T) {
 		"1. source [source] — csv/source@1",
 		"2. mock [enrich] — mock-enrich-py@1 (external:",
 		"projects:  email, full_name",
-		"provides:  mock_note, mock_score",
+		"provides:  mock.note, mock.score",
 		"cache:     30d",
 		"est/record: $0.0000",
 		"plan ok — nothing has been spent",
@@ -129,6 +129,66 @@ steps:
 		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
 	}
 	contains(t, res.stderr, "uses: is only valid on filter/compose steps", "stderr")
+}
+
+// TestPlanFailsOnUnsatisfiableOneOfNeeds: a one-of needs step (SPEC §7,
+// harvest/profile's shape) plans when any single branch is available and fails
+// naming every branch and what each is missing.
+func TestPlanFailsOnUnsatisfiableOneOfNeeds(t *testing.T) {
+	h := newHarness(t)
+	// No LinkedIn field of any shape.
+	h.write("people.csv", "email,full_name\njane@acme.com,Jane Doe\n")
+	h.write("pipeline.yaml", `name: no-shape
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: linkedin
+    use: harvest/profile
+`)
+	res := h.runWithEnv([]string{"HARVEST_API_KEY=plan-only"}, "", "plan", "pipeline.yaml")
+	if res.code != 2 {
+		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `step "linkedin"`, "stderr")
+	contains(t, res.stderr, "needs at least one of", "stderr")
+	for _, branch := range []string{"linkedin_url", "linkedin_internal_url", "linkedin_sales_nav_url"} {
+		contains(t, res.stderr, branch, "stderr")
+	}
+
+	// Any single shape satisfies the step — here the Sales Navigator URL.
+	h.write("people.csv", "email,full_name,linkedin_sales_nav_url\njane@acme.com,Jane Doe,https://www.linkedin.com/sales/lead/ACwAAAbQ2xKB9\n")
+	res = h.runWithEnv([]string{"HARVEST_API_KEY=plan-only"}, "", "plan", "pipeline.yaml")
+	if res.code != 0 {
+		t.Fatalf("exit = %d with a sales-nav column\nstderr:\n%s", res.code, res.stderr)
+	}
+}
+
+// TestPlanNotes covers the non-blocking observations SPEC §7 and §4a require:
+// a near-miss column is SUGGESTED (never silently mapped), and a namespaced
+// field in a step's needs makes the vendor coupling visible.
+func TestPlanNotes(t *testing.T) {
+	h := newHarness(t)
+	// "E-mail" normalizes to e_mail — not canonical, one edit from "email".
+	h.write("people.csv", "E-mail,full_name,Favorite Color\njane@acme.com,Jane Doe,teal\n")
+	h.write("pipeline.yaml", `name: notes
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: icp-filter
+    use: ai/filter
+    uses: [full_name, csv.favorite_color]
+    with:
+      prompt: "keep people whose favorite color suggests taste"
+`)
+	res := h.mustRun("plan", "pipeline.yaml")
+	contains(t, res.stderr, `column "e_mail" looks like canonical "email"`, "plan output")
+	contains(t, res.stderr, `vendor-namespaced field "csv.favorite_color"`, "plan output")
+	// Suggested is not applied: the column stays namespaced.
+	contains(t, res.stderr, "csv.e_mail", "plan output")
 }
 
 // TestPlanFailsOnMissingCredential is the auth-error path: exit 3, and the fix is

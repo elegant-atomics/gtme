@@ -1,6 +1,13 @@
 // Package csvsource is the csv/source adapter: it reads a CSV file and emits one
 // record per row, with the header row naming the fields (SPEC §10.1). It exists
 // so every part of gtm is testable with zero API keys.
+//
+// It is also the ingress edge of ADR-018: config `columns:` maps canonical
+// field names → CSV headers as written; headers already matching canonical
+// names auto-map; everything else is namespaced csv.<normalized_header>.
+// Canonical values are normalized per the registry (SPEC §4a) here, at this
+// adapter's own boundary — an invalid value is dropped from its record with a
+// logged reason, never a crash.
 package csvsource
 
 import (
@@ -13,10 +20,12 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/trevorfox/gtm/internal/adapters"
 	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/trevorfox/gtm/internal/registry"
 )
 
 // ID is the adapter id.
@@ -36,6 +45,7 @@ type config struct {
 	Path       string
 	EntityType string
 	Limit      int
+	Columns    map[string]string // canonical name → header as written (ADR-018)
 }
 
 func parseConfig(raw map[string]any) (config, error) {
@@ -54,7 +64,24 @@ func parseConfig(raw map[string]any) (config, error) {
 	case int:
 		c.Limit = v
 	}
+	if cols, ok := raw["columns"].(map[string]any); ok {
+		c.Columns = map[string]string{}
+		for name, header := range cols {
+			h, ok := header.(string)
+			if !ok || strings.TrimSpace(h) == "" {
+				return c, fmt.Errorf("csv/source: columns: %q must map to a header name", name)
+			}
+			c.Columns[name] = h
+		}
+	}
 	return c, nil
+}
+
+func (c config) entityType() string {
+	if c.EntityType != "" {
+		return c.EntityType
+	}
+	return "person" // the manifest's entity_type
 }
 
 // Run implements adapters.Adapter.
@@ -88,9 +115,16 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		}
 		return fmt.Errorf("csv/source: reading %s: %w", cfg.Path, err)
 	}
-	fields := normalizeHeader(header)
+	reg, err := registry.Load()
+	if err != nil {
+		return fmt.Errorf("csv/source: %w", err)
+	}
+	fields, err := mapHeader(reg, cfg, header)
+	if err != nil {
+		return err
+	}
 
-	provides, err := schemaFor(fields)
+	provides, err := schemaFor(reg, cfg.entityType(), fields)
 	if err != nil {
 		return err
 	}
@@ -98,19 +132,25 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		return err
 	}
 
-	emitted := 0
+	emitted, row := 0, 1
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		row, err := cr.Read()
+		record, err := cr.Read()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("csv/source: reading %s: %w", cfg.Path, err)
 		}
-		values := rowFields(fields, row)
+		row++
+		values, dropped := rowFields(reg, cfg.entityType(), fields, record)
+		for _, d := range dropped {
+			if err := w.Write(protocol.Log("warn", fmt.Sprintf("row %d: dropped %s", row, d))); err != nil {
+				return err
+			}
+		}
 		if len(values) == 0 {
 			continue // a blank line carries nothing
 		}
@@ -129,9 +169,10 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	return w.Write(protocol.End())
 }
 
-// ProbeSchema reports the fields this CSV will provide by reading its header.
-// It touches only the local filesystem, so the planner can call it without
-// spending anything (SPEC §7).
+// ProbeSchema reports the fields this CSV will provide by reading its header
+// and applying the columns: mapping. It touches only the local filesystem, so
+// the planner can call it without spending anything (SPEC §7); a columns:
+// entry naming a header the file does not have fails here, at plan time.
 func (a *Adapter) ProbeSchema(raw map[string]any) (json.RawMessage, error) {
 	cfg, err := parseConfig(raw)
 	if err != nil {
@@ -150,7 +191,15 @@ func (a *Adapter) ProbeSchema(raw map[string]any) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("csv/source: reading header of %s: %w", cfg.Path, err)
 	}
-	return schemaFor(normalizeHeader(header))
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, fmt.Errorf("csv/source: %w", err)
+	}
+	fields, err := mapHeader(reg, cfg, header)
+	if err != nil {
+		return nil, err
+	}
+	return schemaFor(reg, cfg.entityType(), fields)
 }
 
 // EntityType reports the entity type this source will emit, honouring the config
@@ -177,6 +226,72 @@ func waitForOpen(r *protocol.Reader) (protocol.Message, error) {
 	}
 }
 
+// mapHeader decides each column's output field name (SPEC §10.1, ADR-018), in
+// precedence order: an explicit columns: mapping; a header already matching a
+// canonical name (auto-map, zero config); csv.<normalized_header> for the
+// rest. Near-misses are the planner's to SUGGEST from the probed schema —
+// never silently guessed here.
+func mapHeader(reg *registry.Registry, cfg config, header []string) ([]string, error) {
+	norm := normalizeHeader(header)
+	out := make([]string, len(header))
+	entity := cfg.entityType()
+
+	claimedName := map[string]bool{} // canonical names taken by columns:
+	claimedCol := map[int]bool{}     // column indexes taken by columns:
+	names := make([]string, 0, len(cfg.Columns))
+	for name := range cfg.Columns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := reg.ValidateName(entity, name); err != nil {
+			return nil, fmt.Errorf("csv/source: columns: %w", err)
+		}
+		idx := findColumn(header, norm, cfg.Columns[name])
+		if idx < 0 {
+			return nil, fmt.Errorf("csv/source: columns: no CSV column named %q for %s (headers: %s)",
+				cfg.Columns[name], name, strings.Join(header, ", "))
+		}
+		out[idx] = name
+		claimedName[name] = true
+		claimedCol[idx] = true
+	}
+
+	for i, n := range norm {
+		if claimedCol[i] {
+			continue
+		}
+		if _, ok := reg.Lookup(entity, n); ok && !claimedName[n] {
+			out[i] = n // auto-map: the header already speaks canonical
+			continue
+		}
+		out[i] = "csv." + n // kept, queryable, visibly non-canonical
+	}
+	return out, nil
+}
+
+// findColumn matches a columns: header reference against the file's headers:
+// exact first, then case-insensitive trimmed, then normalized form.
+func findColumn(header, norm []string, want string) int {
+	for i, h := range header {
+		if h == want {
+			return i
+		}
+	}
+	for i, h := range header {
+		if strings.EqualFold(strings.TrimSpace(h), strings.TrimSpace(want)) {
+			return i
+		}
+	}
+	wantNorm := normalizeHeader([]string{want})[0]
+	for i, n := range norm {
+		if n == wantNorm {
+			return i
+		}
+	}
+	return -1
+}
+
 // normalizeHeader lowercases header cells and turns separators into underscores,
 // so "First Name" and "first-name" both become first_name.
 func normalizeHeader(header []string) []string {
@@ -200,31 +315,71 @@ func normalizeHeader(header []string) []string {
 	return out
 }
 
-func rowFields(fields, row []string) map[string]any {
+// rowFields builds one record's fields, normalizing canonical values per the
+// registry at ingress (SPEC §10.1). An invalid value never crashes the run and
+// never reaches the ledger: the field is dropped with a reason.
+func rowFields(reg *registry.Registry, entity string, fields, row []string) (map[string]any, []string) {
 	out := map[string]any{}
+	var dropped []string
 	for i, name := range fields {
-		if i >= len(row) {
-			break
+		if i >= len(row) || name == "" {
+			continue
 		}
-		v := strings.TrimSpace(row[i])
-		if v == "" {
+		raw := strings.TrimSpace(row[i])
+		if raw == "" {
 			continue // an empty cell is not a value
+		}
+		v, err := ingestValue(reg, entity, name, raw)
+		if err != nil {
+			dropped = append(dropped, err.Error())
+			continue
 		}
 		out[name] = v
 	}
-	return out
+	return out, dropped
 }
 
-func schemaFor(fields []string) (json.RawMessage, error) {
+// ingestValue coerces a CSV cell (always a string) toward the field's declared
+// registry type, then applies the field's normalization rule.
+func ingestValue(reg *registry.Registry, entity, name, raw string) (any, error) {
+	f, canonical := reg.Lookup(entity, name)
+	if !canonical {
+		return raw, nil // csv.* leftovers keep the trimmed cell as-is
+	}
+	var v any = raw
+	switch f.Type {
+	case "integer", "number":
+		n, err := strconv.ParseFloat(strings.ReplaceAll(raw, ",", ""), 64)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %q is not a %s", name, raw, f.Type)
+		}
+		v = n
+	case "boolean":
+		b, err := strconv.ParseBool(strings.ToLower(raw))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %q is not a boolean", name, raw)
+		}
+		v = b
+	}
+	out, err := reg.NormalizeValue(entity, name, v)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func schemaFor(reg *registry.Registry, entity string, fields []string) (json.RawMessage, error) {
 	props := map[string]any{}
 	for _, f := range fields {
-		props[f] = map[string]any{"type": "string"}
+		if f == "" {
+			continue
+		}
+		typ := "string"
+		if rf, ok := reg.Lookup(entity, f); ok && rf.Type != "array" {
+			typ = rf.Type
+		}
+		props[f] = map[string]any{"type": typ}
 	}
-	names := make([]string, 0, len(props))
-	for f := range props {
-		names = append(names, f)
-	}
-	sort.Strings(names)
 
 	// A probed header is exact: these are the columns, and no others. Closing the
 	// schema is what lets `gtm plan` catch a pipeline that needs a field the CSV

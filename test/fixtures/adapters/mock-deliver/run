@@ -38,13 +38,20 @@ def main():
             key = msg.get("key") or {}
             fields = msg.get("fields") or {}
             if log_path:
+                # The egress mapping (ADR-018): the adapter maps ledger fields
+                # onto its own merge-field names via config.variables.
+                variables = {
+                    target: fields.get(field)
+                    for target, field in (config.get("variables") or {}).items()
+                    if fields.get(field) not in (None, "")
+                }
                 with open(log_path, "a", encoding="utf-8") as fh:
                     fh.write(
                         json.dumps(
                             {
                                 "identity_key": key.get("identity_key"),
                                 "email": fields.get("email"),
-                                "first_line": fields.get("first_line"),
+                                "variables": variables,
                                 "campaign": config.get("campaign"),
                             }
                         )

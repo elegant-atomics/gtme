@@ -16,7 +16,7 @@ func TestQueryReadsTheLedgerAndSavesSegments(t *testing.T) {
 
 	const sql = `SELECT i.identity_key, fv.field, fv.value
 	             FROM identities i JOIN field_values fv ON fv.identity_id = i.id
-	             WHERE fv.field = 'mock_score' ORDER BY i.identity_key`
+	             WHERE fv.field = 'mock.score' ORDER BY i.identity_key`
 
 	res := h.mustRun("query", sql)
 	lines := nonEmptyLines(res.stdout)
@@ -27,7 +27,7 @@ func TestQueryReadsTheLedgerAndSavesSegments(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
 		t.Fatalf("rows must be NDJSON: %v\n%s", err, lines[0])
 	}
-	if row["identity_key"] != "bob@globex.io" || row["field"] != "mock_score" {
+	if row["identity_key"] != "bob@globex.io" || row["field"] != "mock.score" {
 		t.Errorf("first row = %v", row)
 	}
 	contains(t, res.stderr, "3 rows", "stderr")

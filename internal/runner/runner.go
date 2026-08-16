@@ -18,6 +18,7 @@ import (
 	"github.com/trevorfox/gtm/internal/ledger"
 	"github.com/trevorfox/gtm/internal/planner"
 	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/trevorfox/gtm/internal/registry"
 )
 
 // DefaultConcurrency is the per-step worker pool size (SPEC §9).
@@ -35,6 +36,10 @@ type Options struct {
 	Concurrency int
 	// ResumeRunID continues an existing run instead of minting one.
 	ResumeRunID string
+	// DryRun holds deliver steps back (SPEC §8, ADR-019): variables are
+	// resolved and receipted per record, but no deliver adapter is invoked and
+	// no deliveries row is written. Every other step runs normally.
+	DryRun bool
 }
 
 // StepStat is one step's contribution to the receipt.
@@ -48,15 +53,31 @@ type StepStat struct {
 	Filtered       int // failed a filter verdict
 	Failed         int
 	Gated          int // excluded by when:
+	Skipped        int // deliver records held back by on_missing (SPEC §8)
 	CostUSD        float64
 	AvoidedUSD     float64
 	AvoidedUnknown bool
+
+	// MissingSkips lists every record on_missing held back, with its reason —
+	// the receipt shows them (SPEC §8).
+	MissingSkips []RecordVariables
+	// DryRun lists each record's RESOLVED variables when the run was dry —
+	// the approval artifact a human reviews before arming (SPEC §8).
+	DryRun []RecordVariables
+}
+
+// RecordVariables is one record's resolved (or unresolvable) deliver variables.
+type RecordVariables struct {
+	IdentityKey string
+	Resolved    map[string]string // target merge-field name → resolved value
+	Missing     []string          // ledger fields with no non-empty value
 }
 
 // Result is the outcome of a run.
 type Result struct {
 	RunID  string
 	Status string
+	DryRun bool
 	Steps  []StepStat
 }
 
@@ -80,6 +101,8 @@ type runner struct {
 	stderr io.Writer
 	conc   int
 	runID  string
+	dry    bool
+	reg    *registry.Registry
 	now    func() time.Time
 	// out is the downstream NDJSON stream in pipe mode, nil for `gtm run`.
 	out *protocol.Writer
@@ -96,13 +119,22 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 	if o.Stderr == nil {
 		o.Stderr = io.Discard
 	}
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, fmt.Errorf("runner: %w", err)
+	}
 	r := &runner{
 		l:      o.Ledger,
 		plan:   o.Plan,
 		stderr: o.Stderr,
 		conc:   Concurrency(o.Concurrency),
+		dry:    o.DryRun,
+		reg:    reg,
 		now:    time.Now,
 		stats:  map[string]*StepStat{},
+	}
+	if r.dry {
+		fmt.Fprintln(r.stderr, "dry run: deliver steps will resolve and receipt their variables, but nothing sends")
 	}
 
 	if o.ResumeRunID != "" {
@@ -140,7 +172,7 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		runErr = err
 	}
 
-	return &Result{RunID: r.runID, Status: status, Steps: r.collect()}, runErr
+	return &Result{RunID: r.runID, Status: status, DryRun: r.dry, Steps: r.collect()}, runErr
 }
 
 func (r *runner) execute(ctx context.Context) error {
@@ -193,13 +225,23 @@ func (r *runner) openSession(ctx context.Context, st *planner.Step) (*adapters.S
 	return sess, nil
 }
 
-// openMessage is the OPEN that starts every session (SPEC §5).
+// openMessage is the OPEN that starts every session (SPEC §5). A deliver
+// step's variables: mapping rides in as config — the adapter owns the egress
+// mapping (ADR-018), the runner owns projecting the fields it references.
 func (r *runner) openMessage(st *planner.Step) protocol.Message {
+	config := st.Config
+	if len(st.Variables) > 0 {
+		config = make(map[string]any, len(st.Config)+1)
+		for k, v := range st.Config {
+			config[k] = v
+		}
+		config["variables"] = st.Variables
+	}
 	return protocol.Message{
 		Type:   protocol.TypeOpen,
 		StepID: st.ID,
 		RunID:  r.runID,
-		Config: st.Config,
+		Config: config,
 	}
 }
 
@@ -293,6 +335,9 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 	if err := st.Manifest.ValidateProvides(m.Fields); err != nil {
 		return err
 	}
+	if err := r.checkRegistry(st.EntityType, m.Fields); err != nil {
+		return err
+	}
 
 	var ident ledger.Identity
 	res, err := r.l.UpsertIdentity(ctx, st.EntityType, m.Fields, r.prov(st.ID))
@@ -376,6 +421,18 @@ func (r *runner) emit(key protocol.Key, fields map[string]any) {
 	if err := r.out.Write(protocol.Record(key, fields, nil)); err != nil {
 		fmt.Fprintf(r.stderr, "warning: writing downstream: %v\n", err)
 	}
+}
+
+// checkRegistry is enforcement layer 2 (SPEC §4a): canonical fields in adapter
+// output must match the registry's declared type, value domain and normalized
+// form — the providing adapter was required to normalize at its own boundary.
+func (r *runner) checkRegistry(entityType string, fields map[string]any) error {
+	for name, v := range fields {
+		if err := r.reg.CheckValue(entityType, name, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *runner) logStepFailure(ctx context.Context, st *planner.Step, cause error) {

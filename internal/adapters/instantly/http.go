@@ -88,22 +88,36 @@ func (a *Adapter) resolveCampaign(ctx context.Context, cfg config, apiKey string
 	return "", fmt.Errorf("instantly: no campaign named %q — create it first or pass its id", cfg.Campaign)
 }
 
-// addLead adds one person to the campaign.
+// addLead adds one person to the campaign. Everything beyond the email floor
+// derives from the variables: mapping (SPEC §10.6, ADR-018): a target name
+// matching a first-class lead field maps into the body, anything else becomes
+// a custom variable of that name. Blank values never send — the runner's
+// on_missing policy has already skipped or failed such records (SPEC §8), so
+// the omission here is defense in depth, not the policy itself.
 func (a *Adapter) addLead(ctx context.Context, cfg config, apiKey, campaignID string, fields map[string]any) (leadResponse, error) {
 	body := leadRequest{
 		Campaign:         campaignID,
 		Email:            strings.ToLower(strings.TrimSpace(str(fields["email"]))),
-		FirstName:        str(fields["first_name"]),
-		LastName:         str(fields["last_name"]),
-		CompanyName:      str(fields["company_name"]),
-		Personalization:  str(fields["first_line"]),
 		SkipIfInCampaign: cfg.SkipIfInCampaign,
 	}
 
 	vars := map[string]string{}
-	for _, name := range cfg.Variables {
-		if v := str(fields[name]); v != "" {
-			vars[name] = v
+	for target, field := range cfg.Variables {
+		v := str(fields[field])
+		if v == "" {
+			continue
+		}
+		switch target {
+		case "first_name":
+			body.FirstName = v
+		case "last_name":
+			body.LastName = v
+		case "company_name":
+			body.CompanyName = v
+		case "personalization":
+			body.Personalization = v
+		default:
+			vars[target] = v
 		}
 	}
 	if len(vars) > 0 {

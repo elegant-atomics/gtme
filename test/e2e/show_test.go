@@ -26,28 +26,28 @@ func TestShowIdentityPrintsProjection(t *testing.T) {
 	if !ok {
 		t.Fatalf("fields was not an object: %+v", out["fields"])
 	}
-	if fields["full_name"] != "Jane Doe" || fields["mock_score"] == nil {
-		t.Errorf("fields = %+v, want full_name (sourced) and mock_score (enriched)", fields)
+	if fields["full_name"] != "Jane Doe" || fields["mock.score"] == nil {
+		t.Errorf("fields = %+v, want full_name (sourced) and mock.score (enriched)", fields)
 	}
 
 	// --fields narrows the projection.
-	narrow := h.mustRun("show", "jane.doe@acme.com", "--fields", "mock_score")
+	narrow := h.mustRun("show", "jane.doe@acme.com", "--fields", "mock.score")
 	var narrowed map[string]any
 	if err := json.Unmarshal([]byte(narrow.stdout), &narrowed); err != nil {
 		t.Fatalf("show --fields output must be JSON: %v", err)
 	}
 	nf := narrowed["fields"].(map[string]any)
-	if len(nf) != 1 || nf["mock_score"] == nil {
-		t.Errorf("narrowed fields = %+v, want exactly {mock_score}", nf)
+	if len(nf) != 1 || nf["mock.score"] == nil {
+		t.Errorf("narrowed fields = %+v, want exactly {mock.score}", nf)
 	}
 
 	// --provenance turns each value into {value, source, confidence, run_id, created_at}.
-	prov := h.mustRun("show", "jane.doe@acme.com", "--fields", "mock_score", "--provenance")
+	prov := h.mustRun("show", "jane.doe@acme.com", "--fields", "mock.score", "--provenance")
 	var provenanced map[string]any
 	if err := json.Unmarshal([]byte(prov.stdout), &provenanced); err != nil {
 		t.Fatalf("show --provenance output must be JSON: %v", err)
 	}
-	pf := provenanced["fields"].(map[string]any)["mock_score"].(map[string]any)
+	pf := provenanced["fields"].(map[string]any)["mock.score"].(map[string]any)
 	for _, key := range []string{"value", "source", "confidence", "run_id", "created_at"} {
 		if _, ok := pf[key]; !ok {
 			t.Errorf("--provenance field missing %q: %+v", key, pf)

@@ -14,8 +14,8 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "mock_score": {"type": "integer", "minimum": 0, "maximum": 100},
-      "mock_note": {"type": "string"}
+      "mock.score": {"type": "integer", "minimum": 0, "maximum": 100},
+      "mock.note": {"type": "string"}
     }
   },
   "config_schema": {

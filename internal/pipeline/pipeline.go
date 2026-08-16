@@ -47,6 +47,13 @@ type Step struct {
 	// the planner (which knows adapter roles, unlike this package) enforces
 	// that.
 	Uses []string `yaml:"uses,omitempty" json:"uses,omitempty"`
+	// Variables is the deliver step's egress mapping (SPEC §9, ADR-018/019):
+	// target merge-field name → canonical or namespaced ledger field. Its
+	// values are the step's dynamic needs. Valid only on the deliver step.
+	Variables map[string]string `yaml:"variables,omitempty" json:"variables,omitempty"`
+	// OnMissing is the deliver step's per-record completeness policy (SPEC §8):
+	// skip (default) or fail when a variables: target does not resolve.
+	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
 	Waterfall any `yaml:"waterfall,omitempty" json:"-"`
 }
@@ -154,6 +161,41 @@ func (p *Pipeline) normalize() error {
 	if p.Deliver != nil {
 		if err := claim(p.Deliver, DefaultDeliverID); err != nil {
 			return err
+		}
+	}
+
+	// variables:/on_missing: are deliver-step contracts (SPEC §9); mapping
+	// blocks on interior steps are exactly what ADR-018 forbids.
+	deliverOnly := func(s *Step, where string) error {
+		if s == p.Deliver {
+			return nil
+		}
+		if len(s.Variables) > 0 {
+			return fmt.Errorf("pipeline: %s: variables: is only valid on the deliver step (ADR-018: no interior mappings)", where)
+		}
+		if s.OnMissing != "" {
+			return fmt.Errorf("pipeline: %s: on_missing: is only valid on the deliver step", where)
+		}
+		return nil
+	}
+	if err := deliverOnly(p.Source, p.Source.ID); err != nil {
+		return err
+	}
+	for i := range p.Steps {
+		if err := deliverOnly(&p.Steps[i], p.Steps[i].ID); err != nil {
+			return err
+		}
+	}
+	if p.Deliver != nil {
+		switch p.Deliver.OnMissing {
+		case "", "skip", "fail":
+		default:
+			return fmt.Errorf("pipeline: %s: on_missing must be \"skip\" or \"fail\" (got %q)", p.Deliver.ID, p.Deliver.OnMissing)
+		}
+		for target, field := range p.Deliver.Variables {
+			if strings.TrimSpace(target) == "" || strings.TrimSpace(field) == "" {
+				return fmt.Errorf("pipeline: %s: variables: entries need a non-empty target and field", p.Deliver.ID)
+			}
 		}
 	}
 

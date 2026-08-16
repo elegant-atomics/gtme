@@ -4,20 +4,23 @@
   "role": "deliver",
   "entity_type": "person",
   "needs": {
+    "dynamic": true,
     "type": "object",
     "required": ["email"],
     "properties": {
-      "email": {"type": "string"},
-      "first_line": {"type": "string"},
-      "ps_line": {"type": "string"},
-      "full_name": {"type": "string"}
+      "email": {"type": "string"}
     }
   },
   "config_schema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "campaign": {"type": "string"}
+      "campaign": {"type": "string"},
+      "variables": {
+        "type": "object",
+        "additionalProperties": {"type": "string", "minLength": 1},
+        "description": "Egress mapping, injected by the runner from the step-level variables: key (ADR-018)."
+      }
     }
   },
   "credentials_optional": ["MOCK_DELIVER_LOG"],

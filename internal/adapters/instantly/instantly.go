@@ -24,8 +24,14 @@ import (
 // ID is the adapter id.
 const ID = "instantly/add-to-campaign"
 
-// DefaultVariables are the fields passed to Instantly as custom variables.
-var DefaultVariables = []string{"first_line", "ps_line", "title"}
+// firstClassTargets are variables: target names that map into Instantly's
+// first-class lead-body fields rather than custom variables (SPEC §10.6).
+var firstClassTargets = map[string]bool{
+	"first_name":      true,
+	"last_name":       true,
+	"company_name":    true,
+	"personalization": true,
+}
 
 //go:embed manifest.json
 var manifestJSON []byte
@@ -42,12 +48,15 @@ type Adapter struct {
 type config struct {
 	Campaign         string
 	SkipIfInCampaign bool
-	Variables        []string
-	BaseURL          string
+	// Variables is the egress mapping (ADR-018): target merge-field name →
+	// ledger field. Injected by the runner from the step-level variables: key.
+	// No merge field is hard-coded (SPEC §10.6).
+	Variables map[string]string
+	BaseURL   string
 }
 
 func parseConfig(raw map[string]any) (config, error) {
-	c := config{SkipIfInCampaign: true, Variables: DefaultVariables, BaseURL: DefaultBaseURL}
+	c := config{SkipIfInCampaign: true, BaseURL: DefaultBaseURL}
 	c.Campaign, _ = raw["campaign"].(string)
 	if strings.TrimSpace(c.Campaign) == "" {
 		return c, fmt.Errorf("instantly/add-to-campaign: config.campaign is required")
@@ -55,15 +64,14 @@ func parseConfig(raw map[string]any) (config, error) {
 	if v, ok := raw["skip_if_in_campaign"].(bool); ok {
 		c.SkipIfInCampaign = v
 	}
-	if list, ok := raw["variables"].([]any); ok {
-		var vars []string
-		for _, item := range list {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				vars = append(vars, s)
+	if vars, ok := raw["variables"].(map[string]any); ok {
+		c.Variables = map[string]string{}
+		for target, field := range vars {
+			f, ok := field.(string)
+			if !ok || strings.TrimSpace(f) == "" {
+				return c, fmt.Errorf("instantly/add-to-campaign: variables: %q must map to a field name", target)
 			}
-		}
-		if len(vars) > 0 {
-			c.Variables = vars
+			c.Variables[target] = f
 		}
 	}
 	if v, ok := raw["base_url"].(string); ok && v != "" {

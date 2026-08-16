@@ -13,6 +13,7 @@ import (
 
 	"github.com/trevorfox/gtm/internal/adapters"
 	"github.com/trevorfox/gtm/internal/httpx"
+	"github.com/trevorfox/gtm/internal/identity"
 	"github.com/trevorfox/gtm/internal/protocol"
 )
 
@@ -120,16 +121,15 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	return w.Write(protocol.End())
 }
 
-// enrich looks up one person and emits what was learned.
+// enrich looks up one person and emits what was learned. Any one LinkedIn URL
+// shape will do (SPEC §10.4, one-of needs), preferring the public form; a
+// lookup that started from a non-public shape additionally provides the
+// resolved public linkedin_url — ADR-020's recovery path, from which the key
+// upgrade to the slug tier follows automatically.
 func (a *Adapter) enrich(ctx context.Context, w *protocol.Writer, cfg config, apiKey string, key protocol.Key, in map[string]any) error {
-	linkedinURL, _ := in["linkedin_url"].(string)
-	if strings.TrimSpace(linkedinURL) == "" {
-		return w.Write(protocol.Log("warn", "harvest/profile: skipping "+key.IdentityKey+": no linkedin_url"))
-	}
-	// The ledger stores a normalized slug ("in/jane-doe"); HarvestAPI wants a URL.
-	lookup := linkedinURL
-	if !strings.Contains(lookup, "://") {
-		lookup = "https://www.linkedin.com/" + strings.TrimPrefix(lookup, "/")
+	lookup, hadPublic := lookupURL(in)
+	if lookup == "" {
+		return w.Write(protocol.Log("warn", "harvest/profile: skipping "+key.IdentityKey+": no LinkedIn URL of any shape"))
 	}
 
 	prof, err := a.fetchProfile(ctx, cfg, apiKey, lookup)
@@ -148,6 +148,13 @@ func (a *Adapter) enrich(ctx context.Context, w *protocol.Writer, cfg config, ap
 	}
 
 	learned := fields(prof, posts, cfg.PostsLimit)
+	if !hadPublic {
+		if resolved := identity.NormalizeLinkedInURL(prof.LinkedinURL); resolved != "" {
+			learned["linkedin_url"] = resolved
+		} else if resolved := identity.NormalizeLinkedInURL("https://www.linkedin.com/in/" + strings.TrimSpace(prof.PublicIdentifier)); resolved != "" {
+			learned["linkedin_url"] = resolved
+		}
+	}
 	calls := 1
 	if cfg.PostsLimit > 0 {
 		calls = 2
@@ -162,6 +169,35 @@ func (a *Adapter) enrich(ctx context.Context, w *protocol.Writer, cfg config, ap
 		return w.Write(protocol.Log("warn", "harvest/profile: nothing returned for "+key.IdentityKey))
 	}
 	return w.Write(protocol.Record(key, learned, nil))
+}
+
+// lookupURL picks the URL to look a record up by — public form first, then
+// internal, then Sales Navigator (SPEC §10.4) — and reports whether the public
+// form was already known.
+func lookupURL(in map[string]any) (url string, hadPublic bool) {
+	get := func(name string) string {
+		s, _ := in[name].(string)
+		return strings.TrimSpace(s)
+	}
+	if u := get("linkedin_url"); u != "" {
+		return urlify(u), true
+	}
+	if u := get("linkedin_internal_url"); u != "" {
+		return urlify(u), false
+	}
+	if u := get("linkedin_sales_nav_url"); u != "" {
+		return urlify(u), false
+	}
+	return "", false
+}
+
+// urlify accepts a bare slug from older ledgers ("in/jane-doe") as well as a
+// full URL; HarvestAPI wants a URL.
+func urlify(s string) string {
+	if strings.Contains(s, "://") {
+		return s
+	}
+	return "https://www.linkedin.com/" + strings.TrimPrefix(s, "/")
 }
 
 // manifestProvides reads the provides schema from the embedded manifest so the

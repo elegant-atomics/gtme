@@ -22,13 +22,16 @@ const (
 
 // Strength ranks how durable a key is. A record that arrives with a stronger
 // key than the identity it matches upgrades that identity in place (SPEC §4).
+// Values are compared relatively and never persisted.
 type Strength int
 
 const (
 	StrengthNameHash Strength = 1
-	StrengthSlug     Strength = 2 // normalized LinkedIn slug
-	StrengthDomain   Strength = 2 // registrable domain, for companies
-	StrengthEmail    Strength = 3
+	StrengthTwitter  Strength = 2 // reserved handle tier, key prefix "tw:" (ADR-020)
+	StrengthGitHub   Strength = 3 // reserved handle tier, key prefix "gh:" (ADR-020)
+	StrengthSlug     Strength = 4 // normalized public LinkedIn slug
+	StrengthDomain   Strength = 4 // registrable domain, for companies
+	StrengthEmail    Strength = 5
 )
 
 // Key is a canonical identity key plus how strong it is.
@@ -73,8 +76,16 @@ func personCandidates(fields map[string]any) []Key {
 	if email := NormalizeEmail(str(fields, "email")); email != "" {
 		out = append(out, Key{Person, email, StrengthEmail})
 	}
+	// Only the public vanity form keys (SPEC §4, ADR-020): internal and
+	// Sales-Navigator URLs are separate fields and never key material.
 	if slug := NormalizeLinkedIn(str(fields, "linkedin_url")); slug != "" {
 		out = append(out, Key{Person, slug, StrengthSlug})
+	}
+	if h := NormalizeHandle(str(fields, "github_username")); h != "" {
+		out = append(out, Key{Person, "gh:" + h, StrengthGitHub})
+	}
+	if h := NormalizeHandle(str(fields, "twitter_handle")); h != "" {
+		out = append(out, Key{Person, "tw:" + h, StrengthTwitter})
 	}
 	if name := normalizeName(personName(fields)); name != "" {
 		domain := NormalizeDomain(str(fields, "company_domain"))
@@ -105,19 +116,82 @@ func NormalizeEmail(s string) string {
 	return s
 }
 
-// NormalizeLinkedIn reduces a LinkedIn URL to its path slug: protocol, host,
-// query, fragment and trailing slash stripped, lowercased — e.g.
-// "https://www.linkedin.com/in/Jane-Doe/?trk=x" becomes "in/jane-doe".
+// LinkedInShape classifies the observable URL shapes SPEC §4 (ADR-020) keeps
+// as explicitly distinct fields, so they can never collide under one name.
+type LinkedInShape int
+
+const (
+	LinkedInNone     LinkedInShape = iota // not a usable LinkedIn URL
+	LinkedInPublic                        // public vanity URL → linkedin_url
+	LinkedInInternal                      // opaque member token / profile paths → linkedin_internal_url
+	LinkedInSalesNav                      // sales/… paths → linkedin_sales_nav_url
+)
+
+// ClassifyLinkedIn reports which shape a LinkedIn-URL-ish value is. Adapters
+// use it to emit the matching canonical field at their own boundary (SPEC §4).
+func ClassifyLinkedIn(s string) LinkedInShape {
+	path := linkedinPath(s)
+	if path == "" {
+		return LinkedInNone
+	}
+	segs := strings.Split(path, "/")
+	switch strings.ToLower(segs[0]) {
+	case "sales":
+		return LinkedInSalesNav
+	case "profile", "talent":
+		return LinkedInInternal
+	case "in", "pub":
+		if len(segs) < 2 || segs[1] == "" {
+			return LinkedInNone
+		}
+		if isMemberToken(segs[1]) {
+			return LinkedInInternal
+		}
+		return LinkedInPublic
+	case "company", "school", "showcase":
+		// Public organization pages; keyable for companies.
+		if len(segs) < 2 || segs[1] == "" {
+			return LinkedInNone
+		}
+		return LinkedInPublic
+	default:
+		return LinkedInNone
+	}
+}
+
+// NormalizeLinkedIn reduces a PUBLIC LinkedIn URL to its path slug: protocol,
+// host, query, fragment and trailing slash stripped, lowercased — e.g.
+// "https://www.linkedin.com/in/Jane-Doe/?trk=x" becomes "in/jane-doe". Any
+// non-public shape returns "" — internal and Sales-Navigator forms are never
+// key material (SPEC §4, ADR-020).
 func NormalizeLinkedIn(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if ClassifyLinkedIn(s) != LinkedInPublic {
 		return ""
 	}
-	s = strings.ToLower(s)
+	return strings.ToLower(linkedinPath(s))
+}
+
+// NormalizeLinkedInURL is the registry's linkedin_url rule (SPEC §4a): the
+// canonical stored form of a public LinkedIn URL. Any other shape is an
+// invalid value for the field and returns "".
+func NormalizeLinkedInURL(s string) string {
+	slug := NormalizeLinkedIn(s)
+	if slug == "" {
+		return ""
+	}
+	return "https://www.linkedin.com/" + slug
+}
+
+// linkedinPath extracts a LinkedIn URL's path — query/fragment stripped, host
+// dropped, trailing slash trimmed, percent-escapes resolved — with case
+// preserved (internal member tokens are case-sensitive).
+func linkedinPath(s string) string {
+	s = strings.TrimSpace(s)
 	if i := strings.IndexAny(s, "?#"); i >= 0 {
 		s = s[:i]
 	}
-	s = strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
+	s = stripPrefixFold(s, "https://")
+	s = stripPrefixFold(s, "http://")
 	// Drop a leading host (anything up to the first slash that looks like a host).
 	if i := strings.Index(s, "/"); i > 0 && strings.Contains(s[:i], ".") {
 		s = s[i+1:]
@@ -127,9 +201,62 @@ func NormalizeLinkedIn(s string) string {
 		return ""
 	}
 	// Percent-escapes are common in scraped URLs; unescape so equivalent URLs
-	// collapse to one key.
+	// collapse to one value.
 	if un, err := url.PathUnescape(s); err == nil {
 		s = un
+	}
+	return s
+}
+
+// isMemberToken reports whether a path slug is a LinkedIn opaque member token
+// (SPEC §4): a case-insensitive acwaa/acoaa prefix followed by a base64-like
+// tail. Errs toward false — a false positive would demote a real vanity slug,
+// a false negative keys on an opaque token; the prefix check plus length makes
+// either vanishingly rare.
+func isMemberToken(slug string) bool {
+	l := strings.ToLower(slug)
+	if !strings.HasPrefix(l, "acwaa") && !strings.HasPrefix(l, "acoaa") {
+		return false
+	}
+	if len(slug) < 12 {
+		return false
+	}
+	for _, r := range slug {
+		ok := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '='
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// NormalizeHandle is the registry's handle rule (SPEC §4a, the reserved
+// github_username/twitter_handle tiers): trim, strip a leading @, strip a
+// github.com / twitter.com / x.com URL prefix, lowercase.
+func NormalizeHandle(s string) string {
+	s = strings.TrimSpace(s)
+	s = stripPrefixFold(s, "https://")
+	s = stripPrefixFold(s, "http://")
+	s = stripPrefixFold(s, "www.")
+	for _, host := range []string{"github.com/", "twitter.com/", "x.com/"} {
+		s = stripPrefixFold(s, host)
+	}
+	s = strings.TrimPrefix(s, "@")
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" || strings.ContainsAny(s, " \t") {
+		return ""
+	}
+	return s
+}
+
+// stripPrefixFold removes a case-insensitive prefix.
+func stripPrefixFold(s, prefix string) string {
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return s[len(prefix):]
 	}
 	return s
 }

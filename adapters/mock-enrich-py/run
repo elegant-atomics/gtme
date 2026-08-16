@@ -5,7 +5,7 @@ It exists to prove the adapter boundary is a real process boundary and not a Go
 interface in disguise: gtm speaks to this script over stdin/stdout NDJSON exactly
 as it speaks to its own built-ins (SPEC §5, §10.7).
 
-Adds `mock_score`, derived deterministically from the identity key so repeated
+Adds `mock.score`, derived deterministically from the identity key so repeated
 runs agree, and emits a zero COST so cost accounting is exercised end to end.
 """
 
@@ -17,8 +17,8 @@ PROVIDES = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "mock_score": {"type": "integer", "minimum": 0, "maximum": 100},
-        "mock_note": {"type": "string"},
+        "mock.score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "mock.note": {"type": "string"},
     },
 }
 
@@ -78,9 +78,9 @@ def main():
                 )
                 return 3
 
-            fields = {"mock_score": score(identity_key)}
+            fields = {"mock.score": score(identity_key)}
             if config.get("note"):
-                fields["mock_note"] = config["note"]
+                fields["mock.note"] = config["note"]
 
             send({"type": "RECORD", "key": key, "fields": fields})
             send(
