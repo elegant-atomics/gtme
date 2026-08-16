@@ -248,4 +248,36 @@ document is the script, not the record).
 
 ## Campaign log
 
-*(empty — filled in after a human authorizes and runs a campaign above)*
+### 2026-08-15 — Campaign zero: ran clean, one finding
+
+Human-authorized and armed the same day the M7 mechanics landed. Target:
+Instantly campaign `gtm-campaign-zero-2026-08-15` (created as a shell — no
+sending accounts attached, never activated, so lead creation was the only
+real-world effect). Source: a 10-row CSV of operator-controlled plus-alias
+addresses with three deliberate probes (a mixed-case email, a nameless row,
+a caps-duplicate of row 1).
+
+- **Guard:** email column stripped → `gtm plan` exit 2 at the source
+  (`columns:` naming a missing header), zero rows read. ✅
+- **Dry run:** 10 rows → 9 identities (caps-duplicate collapsed); receipt
+  rendered 8 records' resolved `first_name` values, held the nameless row
+  back (`on_missing: skip`, reason named); zero `deliveries` rows, zero
+  adapter calls. Reviewed by the human before arming. ✅
+- **Armed:** 8/8 delivered; leads verified in Instantly via a separate API
+  read — payloads carried exactly the mapped `first_name` + `email`,
+  nothing else. Mixed-case email keyed and delivered lowercase. ✅
+- **Re-run, unchanged:** 8 skipped `already_delivered`, zero adapter calls
+  for them, `deliveries` count unchanged at 8 — the Top-up invariant with
+  no cache layer involved. ✅
+
+**Finding (code bug, fixed):** SPEC §10.6 says the campaign name resolves
+to an id *once per run*; the armed run resolved once per worker-pool
+session (four times). Read-only calls, no behavioral harm, but a real
+divergence from a DECIDED section. Fixed same day: a process-level
+name→id cache in the instantly adapter, with a regression test
+(`TestResolvesCampaignOncePerProcess`).
+
+**Observation (no action):** Instantly populates its own `company_domain`
+field on each lead, derived server-side from the lead's email — visible in
+API reads, not something gtm sends. Noted so a future read of lead data
+doesn't get attributed to the pipeline's mapping.
