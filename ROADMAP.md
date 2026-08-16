@@ -56,6 +56,36 @@ against a small sample — is a plausible third mode once `gtm show` and
 `gtm plan` exist as building blocks. Genuinely speculative; no ADR grounds
 its shape.
 
+## Groups, option C — rules living on the group
+
+DECISIONS.md ADR-021 (proposed) deliberately stops at "groups remember,
+pipelines decide": the group tables carry membership and history, and all
+policy lives in plan-validatable pipeline YAML. The excluded half is
+groups that *own* behavior, parked here so it isn't built early:
+
+- **Intensional groups** — a group defined by a saved segment's SQL that
+  evaluates itself (the "smart list"). Touches the same
+  membership-refresh semantics as segment-sources below.
+- **Group-owned rule bundles and lifecycle state machines** — frequency
+  caps, stage transitions, auto-add/auto-remove rules. This is the
+  workflow-engine line §0's closed-grammar principle refuses for now.
+- **Typed groups** — a `type` becomes meaningful only if it implies a rule
+  bundle; until then character stays derived from events and references.
+- **Cross-type traversal policies** — "exclude people whose company is in
+  `<group>`, via `works_at`": real, and the same relation-traversal
+  territory as the `expand` role above; they should be designed together.
+
+## SQL segments as pipeline sources
+
+Named in SPEC §1's long-term list; sharpened by the groups discussion
+(ADR-021): a segment is an intensional definition (a saved SQL statement
+re-evaluated at read time), and with group events in the ledger, "audience
+minus anyone touched in scope X, judged pass in Y" is one query. Making a
+segment a *source* (pipeline input) needs: read-only evaluation feeding
+identity keys, membership snapshotting semantics for the run, and a story
+for fields the segment's SELECT carries along. Unresolved; needs a design
+pass.
+
 ## MCP as a control-plane doorway
 
 Standing position (DECISIONS-SEED.md, not an ADR): MCP is a later doorway,

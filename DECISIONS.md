@@ -247,6 +247,126 @@ harvest re-contract; registry entries in `spec/fields/person.json`.
 
 ---
 
+## Session packet, 2026-08-16 (groups: the association primitive)
+
+Produced by a design conversation during the incremental validation
+campaign (campaign zero and its widenings — see VALIDATION.md's campaign
+log). The trigger: campaign zero exposed that delivery dedupe scopes to
+the adapter rather than any chosen scope, and that filter verdicts scope
+to the run while their meaning is campaign-relative — both symptoms of a
+missing model layer between durable facts and per-run bookkeeping.
+
+### ADR-021: Groups — a named association between identities and a context
+**Status:** Accepted (2026-08-16 — proposed and iterated in a design
+conversation the same day: segments-redundancy, filter-orthogonality,
+nondeterminism, and after-the-fact-grouping objections each tested and
+absorbed; human-approved. Spec impact not yet applied — a separate
+reconciliation-plus-build pass, like ADR-017/018/019's.)
+**Naming note:** `groups` is verified safe unquoted as a SQLite table name
+(the reserved word is `GROUP`; joins and `GROUP BY` against a `groups`
+table coexist cleanly, tested on 3.43). MySQL-class engines reserve
+`GROUPS`; irrelevant to v0's SQLite-only contract (§2) and an internal
+concern for any future hosted store.
+**Context:** The ledger models durable facts (identities/field_values) and
+execution receipts (runs/run_records) crisply, but everything in between —
+campaign membership, suppression lists, qualified pools, touch history —
+is either smeared across config strings and external tools or accidentally
+hardcoded: `deliveries` dedupes per adapter (not per chosen scope), and
+filter verdicts persist per run while their meaning is campaign-relative
+(so a top-up re-judges — and, the judge being an LLM, possibly re-*rolls*
+— people the same campaign already decided on). Every tool in the
+category has this association layer in fragments (lists, audiences,
+campaign membership, suppression lists), each hardcoding one flavor with
+one policy; the general case is one primitive.
+**Decision:** A **group** is a named association between identities and a
+context: `groups(id, name UNIQUE, note, created_at)` plus an append-only
+`group_events(id, group_id, identity_id, event, detail, run_id,
+created_at)` with exactly three event kinds — `added`/`removed`
+(membership, provenance in detail) and `touched` (a delivery under this
+group's banner). Current membership is a view over added/removed (the
+ADR-003 append-then-derive pattern). Members are identities, so groups
+hold people and companies alike. Groups carry **no type field and no
+executable logic**: a group's character (campaign-like, DNC-list-like,
+pool-like) is derived from its events and the pipelines that reference it
+— a stored type would be an assertion no behavior backs.
+
+Groups participate in pipelines at both ends, plus two gates — all
+runner-owned semantics (adapters see only projections, never the ledger),
+all plan-validated:
+
+- **Terminus:** a pipeline may end in group membership instead of (or in
+  addition to) an external deliver — records that complete the run are
+  `added`. This is the recommended campaign decomposition: a *qualify*
+  pipeline (source → enrich → filter ⇒ group) runs cheaply and often; the
+  group is a durable, reviewable, hand-editable artifact; a separate
+  *send* pipeline consumes it deliberately. The judgment-to-money gap
+  gets a human-inspectable checkpoint, per the plan-gate principle.
+- **Source:** a group can be a pipeline source — members projected from
+  the ledger like any record. (The easy, extensional half of ROADMAP's
+  "segments as sources"; a filter step remains role-agnostic about where
+  its records came from.)
+- `require: <group>` / `exclude: <group>` on any step — membership as a
+  plan-checkable gate. Exclusion is also the **judgment-memory
+  mechanism**: a qualify pipeline that excludes its own output groups
+  (`exclude: [q3-qualified, q3-rejected]`) sends only never-judged
+  records to the AI filter, so each identity is judged once per scope.
+  This is a determinism device before a cost one — an LLM judge is
+  stochastic run to run, and set membership freezes its first answer as a
+  recorded decision; re-judging becomes a deliberate act (remove from the
+  group, change the prompt), never an accident of re-running. Plain set
+  arithmetic, inspectable with `gtm query`, replaces any judgment-cache
+  mechanism. (A `remember:`-style cache consulting judgment events was
+  considered and dropped as redundant sugar over exclude-and-add.)
+- `record: <group>` on a deliver step — successful deliveries append
+  `touched`; **defaults to the pipeline name**, so every pipeline is
+  safely scoped by default and sharing a scope across pipelines is an
+  explicit override.
+- `suppress: {group: <g>, within: Nd}` on a deliver step — skip records
+  with a `touched` in that group/window; skips are receipted with reasons
+  (the `on_missing` pattern).
+
+Filtering stays orthogonal: the filter *role* (AI-backed or not — any
+adapter emitting VERDICTs qualifies: deterministic rules, verification
+services, human review) gates which records continue through this run,
+groups persist sets, and only the runner connects them. Single-pipeline
+use with no groups at all remains fully supported.
+
+Everything subtler is `gtm query`: segments-as-SQL extend over the group
+tables automatically, and an extensional "frozen list" is simply a group
+nobody updates. Two affordances follow: `gtm groups add <group>
+--from-segment <name>` (or `--query "SQL"`) snapshots an intensional
+definition into extensional membership, each `added` event carrying
+"segment X evaluated at T" provenance; and because the run layer logs
+every person's every run (run_records, step_events, deliveries,
+field_values.run_id), any grouping — including a filter's *failers* — is
+reconstructable after the fact, so `record:` stays single-valued and the
+terminus captures completers only in v0.
+**Consequences:** Groups are not redundant with segments: segments
+*derive* sets from what the ledger already implies (and re-evaluate, so
+membership drifts); groups *assert* sets — hand-picked members, imported
+lists, frozen commitments — with membership provenance as an event trail,
+plan-checkable references safe enough for the delivery path (arbitrary
+segment SQL is not, per the ADR-018 declarative-vs-opaque line), and a
+scope key that `touched` events need to exist at all. Segments answer
+questions; groups record decisions about sets. "Campaign" needs no entity
+and no spec vocabulary — it is a usage pattern (a group a qualify
+pipeline fills, a send pipeline consumes, records touches into, and
+suppresses against). Delivery suppression becomes chosen rather than
+accidental; the current adapter-wide dedupe survives as the idempotency
+floor (§8) with group suppression layered above it. `run_records` is
+recognizable as a degenerate group (label forced to one execution) — not
+refactored, just understood. The deliberately excluded half (option C) is
+parked in ROADMAP.md: group-owned rules, intensional self-evaluating
+groups, lifecycle state machines, cross-type traversal policies, typed
+groups.
+**Spec impact:** AMEND (not yet applied) — §3 ledger DDL (two tables + a
+membership view), §9 YAML (group terminus and source, `require:`,
+`exclude:`, `record:`, `suppress:`), §8 deliver semantics and receipt
+lines, §7 plan checks (referenced groups exist; windows well-formed), a
+`gtm groups` verb set (list with derived character, `add
+--from-segment/--query`), and acceptance criteria. To be applied only
+after human approval, as a reconciliation-plus-build pass like
+ADR-017/018/019's.
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
