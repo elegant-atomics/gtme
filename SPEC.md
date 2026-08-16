@@ -1288,7 +1288,7 @@ engine with provenance `sql/enrich @ <query-hash>`. `sql/filter`: a
 fail with the predicate named. SQL steps run normally under `--simulate`
 (they are offline by construction).
 
-### The universal floor (ADR-023)
+### The universal floor (ADR-023; Out half built in M12)
 
 The smallest adapter set with near-total reach docks onto the three
 universal transports — files, webhooks, the web. Universality is bought
@@ -1296,11 +1296,25 @@ by pushing semantics into user config, so universal adapters are always
 the worst version of any given integration: their job is the guarantee
 ("wireable today"), not excellence; bindings are the ceiling. The set:
 In — `csv/source` (§10.1), `webhook/source` (§10.8), and group-as-source
-(ADR-021, spec impact pending); transform — `ai/*` (pure, above) and
-`sql/*`; out — `http/deliver` and `csv/deliver` (decided, post-binding-
-engine; see ROADMAP.md for their contracts, including `http/deliver`'s
-REQUIRED idempotency-key template). Receipts showing the same `http/*`
+(§9, built in M9); transform — `ai/*` (pure, above) and `sql/*`; out —
+`http/deliver` and `csv/deliver`. Receipts showing the same `http/*`
 target recurring across runs are the cue to mint a named binding.
+
+**`http/deliver`** (built in M12): POST the resolved `variables:` per
+record to any URL — the binding engine's deliver role invoked
+anonymously. Config: `url` (templatable), optional
+`method`/`query`/`headers`/`auth`/`body` (a template; its default is the
+resolved variables object). The step-level `idempotency:` key is
+REQUIRED — even the trivial case cannot infer delivery semantics, it
+must be told (ADR-023) — and a missing one is a plan error, not a
+defaulted identity key.
+
+**`csv/deliver`** (built in M12): write delivered records to a CSV —
+universal output to anything with an import button, and the natural
+human-review artifact. Config: `path`; the columns are the `variables:`
+targets (sorted, stable), plus a leading `identity_key`. The header is
+written once on file creation; rows append across runs, and §8
+idempotency is what keeps a re-run from appending duplicates.
 
 ---
 
@@ -1424,6 +1438,13 @@ decided contract, not shipped behavior.
   a `require:`d plan names missing `uses:` fields; `gtm vacuum` reports
   evictions and touches nothing else; `--simulate` counts `http/enrich`
   as a gap while SQL steps run.
+- **M12 — the universal Out floor (ADR-023; §10a).** `http/deliver` and
+  `csv/deliver`. ✅ E2E, offline: `http/deliver` dry-runs to a resolved-
+  variables receipt with zero calls, delivers the mapped variables to a
+  local URL when armed, and re-delivers nothing on a re-run; a plan
+  without its `idempotency:` key fails naming the rule; `csv/deliver`
+  writes header + rows, appends nothing on a re-run, and the file is
+  reviewable as written.
 
 Repo layout:
 ```
@@ -1564,6 +1585,16 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.10 — 2026-08-16 (M12: the universal Out floor)
+**Added:** §10a `http/deliver` (anonymous deliver binding; step-level
+`idempotency:` REQUIRED per ADR-023 — a plan error when missing, never a
+default) and `csv/deliver` (variables as columns plus `identity_key`,
+header-once, append-across-runs, §8 idempotency preventing duplicate
+rows); milestone M12. Auth declared in an `http/*` step's config
+(`auth.env`) now resolves through the credential machinery (§6: env
+first, then `~/.gtm/secrets`) and is plan-checked. ROADMAP's
+"Universal Out floor" entry retired — built.
 
 ### v0.9 — 2026-08-16 (M11: transform floor + ADR-030 payload retention)
 **Added:** §3 `payloads` DDL — the ADR-030 cache tier, explicitly exempt

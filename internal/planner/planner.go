@@ -554,8 +554,30 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	}
 	ps.MissingOptional = missingOptional
 
+	// Auth declared in an http/* step's config resolves through the same
+	// machinery as manifest credentials (SPEC §10a, v0.10): env first, then
+	// ~/.gtm/secrets, plan-checked.
+	if a, ok := ps.Config["auth"].(map[string]any); ok {
+		if env, ok := a["env"].(string); ok && strings.TrimSpace(env) != "" {
+			authCreds, authMissing := secrets.Resolve([]string{strings.TrimSpace(env)})
+			for k, v := range authCreds {
+				ps.Credentials[k] = v
+			}
+			for _, name := range authMissing {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindCredential,
+					Msg: fmt.Sprintf("missing credential %s (set it in the environment or run `gtm secret set %s`)", name, name)})
+			}
+		}
+	}
+
 	if isDeliver {
 		ps.Idempotency = s.Idempotency
+		// http/deliver MUST be told its idempotency key (ADR-023, SPEC §10a):
+		// even the trivial case cannot infer delivery semantics.
+		if resolved.Manifest.ID == "http/deliver" && strings.TrimSpace(s.Idempotency) == "" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: "http/deliver requires idempotency: — a generic target cannot infer delivery semantics, it must be told (ADR-023)"})
+		}
 	}
 	return ps, problems
 }

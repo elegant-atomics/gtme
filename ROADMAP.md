@@ -91,16 +91,6 @@ half, still needing the design pass above. The
 `gtm groups add --from-segment` snapshot affordance (ADR-021) covers the
 common case in the meantime.
 
-## Universal Out floor — `http/deliver` and `csv/deliver`
-
-Decided by ADR-023, deferred to after the binding engine (both small).
-`http/deliver` POSTs mapped variables per record to any URL, with an
-idempotency-key template REQUIRED in config (even the trivial case cannot
-infer delivery semantics — it must be told). `csv/deliver` writes a
-segment/run's records to CSV — universal output to anything with an
-import button, and the natural human-review artifact. Parked here only
-for sequencing; the decisions are made.
-
 ## Floor→ceiling growth loop
 
 Standing position from ADR-023: receipts showing the same `http/*` target

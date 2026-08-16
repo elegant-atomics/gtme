@@ -1215,3 +1215,33 @@ declared field with the payload retained and the second run cache-skipped
 provenance, both sql/filter styles, the plan gates, and vacuum touching
 nothing unexpired.
 **Spec impact:** None beyond v0.9.
+
+### 2026-08-16 — M12 internals: the universal Out floor
+
+**Question:** How thin can http/deliver and csv/deliver be while staying
+honest about what a generic Out cannot know?
+**Choice:** (1) `http/deliver` IS the engine's deliver role invoked
+anonymously: OPEN synthesizes a binding from config and every record runs
+the same deliverRecord path a named binding uses — the §10a unification
+made literal, and zero new delivery semantics. The default body is the
+resolved variables object (`$variables` splice); a `body:` template
+overrides. The step-level `idempotency:` key is plan-REQUIRED, never
+defaulted — ADR-023's "even the trivial case cannot infer semantics",
+enforced where a default identity key would have silently guessed.
+(2) Auth declared in an http/* step's config (`auth.env`) now resolves
+through the same machinery as manifest credentials (env, then
+~/.gtm/secrets) and is plan-checked — previously a config-referenced env
+var would have bypassed the secrets file entirely. (3) `csv/deliver` is
+a plain process adapter (file I/O, not HTTP): columns are the sorted
+variables: targets behind a leading identity_key; the header is written
+under O_CREATE|O_EXCL so concurrent sessions cannot double-write it, and
+each row is a single O_APPEND write so sessions interleave whole rows.
+Re-runs append nothing because §8 idempotency holds records back before
+the adapter is ever invoked — the file inherits delivery semantics
+instead of reimplementing them.
+**Why:** The acceptance runs both halves offline, including on_missing
+holding the nameless record out of both the webhook calls and the review
+file — the Out floor inherits every deliver guarantee (dry/armed,
+completeness, idempotency, suppression) because it sits behind the same
+runner semantics.
+**Spec impact:** None beyond v0.10.
