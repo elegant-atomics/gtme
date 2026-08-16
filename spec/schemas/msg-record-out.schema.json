@@ -14,6 +14,16 @@
       "type": "object",
       "description": "Per-field confidence, OPTIONAL, default 1.0 (SPEC.md §5).",
       "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+    },
+    "payload": {
+      "type": "object",
+      "required": ["body"],
+      "additionalProperties": false,
+      "description": "OPTIONAL raw vendor response (or per-record slice) this record was extracted from (SPEC.md §5, ADR-030). The runner decides retention from the adapter's declaration; old readers ignore this field.",
+      "properties": {
+        "content_type": {"type": "string"},
+        "body": {"type": "string"}
+      }
     }
   },
   "definitions": {

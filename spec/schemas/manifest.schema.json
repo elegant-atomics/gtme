@@ -69,6 +69,15 @@
     "batch": {
       "type": "boolean",
       "description": "Marks adapters the runner must feed in batches — the AI steps — one invocation per batch_size records (SPEC.md §6, §9)."
+    },
+    "keep_payloads": {
+      "type": "boolean",
+      "description": "ADR-030: whether raw responses this adapter attaches to its RECORDs (SPEC.md §5) are retained in the payloads cache tier. Default true; steps may override with keep_payloads: false in config."
+    },
+    "payload_ttl_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "ADR-030: retention window for this adapter's payloads (default 90). 0 means no expiry — kept until an explicit gtm vacuum decision."
     }
   }
 }

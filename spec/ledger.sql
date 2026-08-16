@@ -155,3 +155,21 @@ FROM (
   WHERE event IN ('added', 'removed')
 )
 WHERE rn = 1 AND event = 'added';
+
+-- Payloads: raw vendor responses as CACHE, not facts (ADR-030, SPEC §3).
+-- Extracted = fact (append-only, above); unextracted = cache (purgeable).
+-- Never projected into any step; evicted opportunistically at run start and
+-- by `gtm vacuum` (SPEC §8). NULL expires_at = keep until explicit vacuum.
+
+CREATE TABLE payloads (
+  id           TEXT PRIMARY KEY,          -- ULID
+  identity_id  TEXT NOT NULL REFERENCES identities(id),
+  adapter      TEXT NOT NULL,             -- adapter id that fetched it
+  run_id       TEXT,
+  content_type TEXT,                      -- e.g. application/json, text/markdown
+  body         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT
+);
+CREATE INDEX ix_payloads_lookup ON payloads(identity_id, adapter, created_at DESC);
+CREATE INDEX ix_payloads_expiry ON payloads(expires_at);

@@ -27,6 +27,15 @@
     "config_schema": { "type": "object" },
     "freshness_days": { "type": "integer", "minimum": 0 },
     "cost_estimate_usd": { "type": "number", "minimum": 0 },
+    "keep_payloads": {
+      "type": "boolean",
+      "description": "ADR-030: whether the engine attaches raw responses to this binding's RECORDs for retention. Default true; steps may override with keep_payloads: false in config."
+    },
+    "payload_ttl_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "ADR-030: retention window for this binding's payloads (default 90). 0 = no expiry."
+    },
     "credentials": { "type": "array", "items": { "type": "string" } },
     "credentials_optional": { "type": "array", "items": { "type": "string" } },
     "auth": {

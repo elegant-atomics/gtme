@@ -273,6 +273,27 @@ FROM (
 )
 WHERE rn = 1 AND event = 'added';
 
+-- Payloads: raw vendor responses as CACHE, not facts (ADR-030). Extracted =
+-- fact (append-only, above); unextracted = cache (this table, purgeable).
+-- Never projected into any step and absent from `gtm show`'s default output;
+-- the only paths out are extraction (which writes facts) and deliberate
+-- promotion into a content field. expires_at drives eviction: opportunistic
+-- at run start plus `gtm vacuum` (§8). NULL expires_at means keep until an
+-- operator vacuums explicitly.
+
+CREATE TABLE payloads (
+  id           TEXT PRIMARY KEY,          -- ULID
+  identity_id  TEXT NOT NULL REFERENCES identities(id),
+  adapter      TEXT NOT NULL,             -- adapter id that fetched it
+  run_id       TEXT,
+  content_type TEXT,                      -- e.g. application/json, text/markdown
+  body         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT
+);
+CREATE INDEX ix_payloads_lookup ON payloads(identity_id, adapter, created_at DESC);
+CREATE INDEX ix_payloads_expiry ON payloads(expires_at);
+
 -- The current-value projection (ADR-003) is two views, not one: "highest
 -- confidence within the freshness window" cannot be answered by an
 -- unparameterized view, because the window is a per-caller argument (§7's
@@ -488,6 +509,19 @@ Adapter → runner:
 {"type":"END"}
 ```
 
+An outbound RECORD MAY carry a `payload` attachment — the raw vendor
+response (or its per-record slice, for sources) the record was extracted
+from, for ADR-030 retention:
+```
+{"type":"RECORD","key":{...},"fields":{...},"payload":{"content_type":"application/json","body":"..."}}
+```
+The runner owns whether it is kept: it consults the adapter's retention
+declaration (§6) and writes the `payloads` table (§3) with the declared
+TTL; an adapter that emits no payloads simply retains nothing. Old readers
+ignore the field, per this section's forward-compatibility rule. (This is
+the capture path ADR-030's mechanism requires; its spec-impact list named
+§3/§6/§8/§10a and this RECORD extension is the minimal §5 counterpart.)
+
 A source's outbound RECORD carries `key` OPTIONAL rather than required:
 ```
 {"type":"RECORD","fields":{"email":"jane@acme.com","full_name":"Jane Doe"}}
@@ -576,6 +610,13 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   nothing to check.
 - `freshness_days`: default cache window for fields this adapter provides;
   overridable per step (`cache:` in YAML).
+- **Payload retention (ADR-030):** `keep_payloads` (default true) and
+  `payload_ttl_days` (default 90) declare whether raw responses this
+  adapter attaches to its RECORDs (§5) are retained and for how long; a
+  step MAY override with `keep_payloads: false` in its config. Retention
+  only applies where an adapter actually attaches payloads — in this
+  build, the binding engine and `http/enrich`; the Go vendor adapters do
+  not attach them yet (a queued adoption, recorded, not silent).
 - `batch`: marks an adapter the runner MUST feed in `batch_size`-sized
   invocations (§9, default 25 — one adapter session per batch) rather than
   dispatching it across the normal per-record worker pool. `ai/filter` and
@@ -706,11 +747,22 @@ gtm show --run last [--fields ...] [--provenance] [--limit N]
 gtm runs [RUN_ID]                 # list runs / show one run's receipt
 gtm freeze [RUN_ID|last] [--bundle DIR] # bare: YAML to stdout; --bundle: campaign bundle
 gtm groups [show NAME | add NAME ... | remove NAME ...]   # ADR-021, see below
+gtm vacuum                        # evict expired payloads (ADR-030), nothing else
 gtm help --agent                  # machine-readable full CLI + adapter surface
 ```
 
 This is the entire v0 verb set (ADR-005, extended by ADR-021's `gtm
-groups` in M9; ADR-030's `gtm vacuum` is decided with build queued). There is no `gtm x`, no
+groups` in M9 and ADR-030's `gtm vacuum` in M11).
+
+### Payload eviction — `gtm vacuum` (ADR-030; built in M11)
+
+`gtm vacuum` deletes payloads whose `expires_at` has passed — and nothing
+else; facts are append-only forever, and payload eviction is the one
+legitimate deletion in the system (§3: cache, not knowledge). It reports
+how many rows went. The runner also evicts opportunistically at the start
+of every armed run, so a busy ledger stays bounded without a daemon
+(ADR-009's stance); `gtm vacuum` exists for quiet ledgers and for
+operators who want eviction on their own schedule. There is no `gtm x`, no
 multi-process pipe chaining, and no standalone `source`/`filter`/`enrich`/
 `compose`/`deliver` subcommands — those existed only to support pipe mode
 and are cut along with it. `uses:`, `cache:`, `when:` and every other
@@ -1083,9 +1135,8 @@ be behind an interface so fixture tests never touch the network.
 
 The binding tier, the conformance-kit extension, the naming rule with its
 ai/* provenance format, and the OpenAPI rule below were built in milestone
-M8 (§11, changelog v0.6). `http/enrich` and `sql/enrich`/`sql/filter`
-remain decided contract with build queued; until their milestone builds,
-code/spec divergence there is queued work, not an AUDIT.md finding.
+M8 (§11, changelog v0.6); `http/enrich` and `sql/enrich`/`sql/filter` in
+milestone M11 (changelog v0.9), together with ADR-030's payload retention.
 
 ### Two-tier adapters (ADR-022)
 
@@ -1163,7 +1214,7 @@ same canonical-when-shared, namespaced-when-proprietary logic as fields
 `ai/compose @ <model-id>` (e.g. `ai/compose @ claude-sonnet-4-6`), and
 COST attributes spend per model.
 
-### `http/enrich` — generic fetch enricher (ADR-024)
+### `http/enrich` — generic fetch enricher (ADR-024; built in M11)
 
 Per-record HTTP request templated from canonical fields; two modes:
 (a) JSON extraction — the binding engine's enrich role invoked inline;
@@ -1179,13 +1230,27 @@ means N AI steps across M runs reuse one fetch, and receipts show exactly
 what content was judged. Scope stated honestly: no-JS fetching only;
 JS-heavy pages route to a reader-provider binding (see ROADMAP.md).
 
+Contract as built (M11): config carries `url` (templated from
+`{{record.<field>}}` placeholders, which are also the step's derived
+dynamic needs), optional `method`/`query`/`headers`/`auth`, and exactly
+one of `markdown: true` + `field: <name>` (the declared content field —
+canonical or namespaced per §4a) or `extract: {<field>: <path>, …}` (the
+engine's inline JSON mode). `freshness_days` is REQUIRED config with no
+default and doubles as the step's cache window, so N AI steps across M
+runs reuse one fetch. The engine-enforced size cap defaults to 256 KB
+(`max_bytes` overrides); an oversized response is dropped with a warning,
+never truncated silently. Fetched responses attach as payloads (§5) under
+the ADR-030 declaration. Under `--simulate` the step is a counted
+simulation gap — replaying retained payloads is the ROADMAP
+simulate-replay verb, not this build.
+
 **`ai/*` purity invariant:** an AI step's inputs are exactly its
 projected fields, and its only network access is its model engine's API
 (§2). An `ai/*` step MUST NOT fetch external content — acquisition
 belongs to `http/enrich` and bindings, which are deterministic and
 cacheable.
 
-### `sql/enrich` and `sql/filter` — the deterministic transform floor (ADR-027)
+### `sql/enrich` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11)
 
 `sql/enrich`: a single SELECT over the projection view (plus relations),
 scoped to the run's records, executed read-only (`mode=ro`) and
@@ -1205,6 +1270,23 @@ not competing. The transform floor is symmetric: `sql/*` for the
 computable, `ai/*` for the judgeable; both read projections, both write
 facts, both free to re-run. (This shrinks ADR-018's code-transform
 escape hatch to nearly nothing.)
+
+Contract as built (M11): like the group source, SQL steps are
+runner-owned — no adapter, no wire protocol, ledger access the runner
+mediates. Config carries `query` plus declared `uses:` (fields the plan
+validates as available) and, for `sql/enrich`, `provides:` (the declared
+output fields, canonical or namespaced). The query runs ONCE per step —
+set-based, not per record — on the read-only connection, timeboxed
+(30s), with the run id bound as `:run_id` for scoping convenience; the
+engine guarantees scope regardless by applying result rows only to the
+run's eligible records (out-of-run rows are dropped and counted). The
+result MUST yield an `identity_id` column. `sql/enrich`: every declared
+provides field must appear as a result column; values append through the
+engine with provenance `sql/enrich @ <query-hash>`. `sql/filter`: a
+`pass` column (with optional `reason`) judges explicitly, or — with no
+`pass` column — membership-style: returned records pass, absent records
+fail with the predicate named. SQL steps run normally under `--simulate`
+(they are offline by construction).
 
 ### The universal floor (ADR-023)
 
@@ -1326,6 +1408,22 @@ decided contract, not shipped behavior.
   ✅ Acceptance: freeze campaign zero, move the bundle to a clean ledger,
   simulate and dry-run it successfully. Sequenced after groups so bundled
   pipelines carry group references against built semantics from day one.
+- **M11 — the transform floor + payload retention (ADR-024, ADR-027,
+  ADR-030; §10a, §3, §5, §6, §8).** `http/enrich` (markdown + inline JSON
+  modes, mandatory freshness, size cap), `sql/enrich`/`sql/filter`
+  (runner-owned, declared contracts, query-hash provenance), the
+  `payloads` cache tier with RECORD payload attachments, declared
+  retention, opportunistic eviction, and `gtm vacuum`.
+  ✅ Unit: payload eviction removes exactly the expired; the SQL contract
+  (identity_id required, provides columns checked, run-scoped
+  application). ✅ E2E, offline: `http/enrich` fetches a local page to
+  markdown into a declared field with a payload retained, and a re-run
+  within the freshness window cache-skips the fetch; `sql/enrich` writes
+  a derived field with `sql/enrich @ <hash>` provenance; `sql/filter`
+  gates records by predicate, both explicit-`pass` and membership-style;
+  a `require:`d plan names missing `uses:` fields; `gtm vacuum` reports
+  evictions and touches nothing else; `--simulate` counts `http/enrich`
+  as a gap while SQL steps run.
 
 Repo layout:
 ```
@@ -1466,6 +1564,21 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.9 — 2026-08-16 (M11: transform floor + ADR-030 payload retention)
+**Added:** §3 `payloads` DDL — the ADR-030 cache tier, explicitly exempt
+from append-only, never projected (mirrored in `spec/ledger.sql`); §5
+optional `payload` attachment on outbound RECORDs — the capture path
+ADR-030's mechanism requires, called out here because the ADR's
+spec-impact list named §3/§6/§8/§10a and this is its minimal §5
+counterpart (`spec/schemas/msg-record-out.schema.json` updated); §6
+`keep_payloads`/`payload_ttl_days` retention surface with per-step
+override (Go vendor adapters attach nothing yet — a recorded queued
+adoption); §8 `gtm vacuum` and opportunistic run-start eviction; §10a
+`http/enrich` and `sql/enrich`/`sql/filter` contracts as built (config
+surfaces, 256 KB default cap, `:run_id` binding, `identity_id` result
+contract, query-hash provenance, membership-style filters); milestone
+M11 with acceptance criteria.
 
 ### v0.8 — 2026-08-16 (M10 build: campaign bundles)
 **Changed:** §8 bundles marked built. Behavioral notes from the build:
