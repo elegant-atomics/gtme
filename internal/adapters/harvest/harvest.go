@@ -139,7 +139,7 @@ func (a *Adapter) enrich(ctx context.Context, w *protocol.Writer, cfg config, ap
 
 	var posts []post
 	if cfg.PostsLimit > 0 {
-		posts, err = a.fetchPosts(ctx, cfg, apiKey, lookup)
+		posts, err = a.fetchPosts(ctx, cfg, apiKey, prof.ID, lookup)
 		if err != nil {
 			// Posts are a bonus; a profile without them is still worth keeping.
 			_ = w.Write(protocol.Log("warn", fmt.Sprintf("harvest/profile: posts for %s: %v", key.IdentityKey, err)))

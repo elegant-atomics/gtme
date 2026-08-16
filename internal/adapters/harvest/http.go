@@ -5,12 +5,13 @@ package harvest
 // this file.
 //
 // Endpoints: GET https://api.harvestapi.io/linkedin/profile?url=...
-//            GET https://api.harvestapi.io/linkedin/profile-posts?profileUrl=...
+//            GET https://api.harvestapi.io/linkedin/profile-posts?profileId=... (or profile=<url>)
 // Auth:      X-API-Key header
 // Docs:      https://docs.harvestapi.io/linkedin-api-reference/profile/get
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,9 +29,9 @@ const (
 
 // profileResponse wraps a single profile.
 type profileResponse struct {
-	Element profile `json:"element"`
-	Status  string  `json:"status"`
-	Error   string  `json:"error"`
+	Element profile         `json:"element"`
+	Status  json.RawMessage `json:"status"` // number on the live API; never consumed
+	Error   string          `json:"error"`
 }
 
 // profile is the subset of a HarvestAPI profile gtm maps.
@@ -57,20 +58,43 @@ type profile struct {
 }
 
 // position is one role in the profile's history.
+// flexInt tolerates HarvestAPI sending a number either bare or as a quoted
+// string — the live API returns startDate.month as a string where the
+// documented shape (and our fixtures) had an int. Found by campaign zero's
+// harvest increment, 2026-08-15.
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(raw []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		// A non-numeric month/year label ("Present") carries no number; the
+		// text field is the fallback the mapping already uses.
+		*f = 0
+		return nil
+	}
+	*f = flexInt(n)
+	return nil
+}
+
 type position struct {
 	CompanyName string `json:"companyName"`
 	Position    string `json:"position"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	StartDate   struct {
-		Year  int    `json:"year"`
-		Month int    `json:"month"`
-		Text  string `json:"text"`
+		Year  flexInt `json:"year"`
+		Month flexInt `json:"month"`
+		Text  string  `json:"text"`
 	} `json:"startDate"`
 	EndDate struct {
-		Year  int    `json:"year"`
-		Month int    `json:"month"`
-		Text  string `json:"text"`
+		Year  flexInt `json:"year"`
+		Month flexInt `json:"month"`
+		Text  string  `json:"text"`
 	} `json:"endDate"`
 	Duration string `json:"duration"`
 }
@@ -103,8 +127,8 @@ func (p position) line() string {
 }
 
 func (p position) span() string {
-	start := yearOf(p.StartDate.Year, p.StartDate.Text)
-	end := yearOf(p.EndDate.Year, p.EndDate.Text)
+	start := yearOf(int(p.StartDate.Year), p.StartDate.Text)
+	end := yearOf(int(p.EndDate.Year), p.EndDate.Text)
 	switch {
 	case start == "" && end == "":
 		return strings.TrimSpace(p.Duration)
@@ -127,10 +151,10 @@ func yearOf(year int, text string) string {
 // postsResponse wraps a page of posts. HarvestAPI has used both `elements` and
 // `element` for list payloads; both are accepted.
 type postsResponse struct {
-	Elements []post `json:"elements"`
-	Element  []post `json:"element"`
-	Status   string `json:"status"`
-	Error    string `json:"error"`
+	Elements []post          `json:"elements"`
+	Element  []post          `json:"element"`
+	Status   json.RawMessage `json:"status"`
+	Error    string          `json:"error"`
 }
 
 func (r postsResponse) results() []post {
@@ -142,10 +166,12 @@ func (r postsResponse) results() []post {
 
 // post is one LinkedIn post.
 type post struct {
-	Content    string `json:"content"`
-	Text       string `json:"text"`
-	PostedAt   string `json:"postedAt"`
-	PostedDate string `json:"postedDate"`
+	Content string `json:"content"`
+	Text    string `json:"text"`
+	// postedAt is an object on the live API (string in early fixtures) and is
+	// never consumed — decoded loosely so shape drift can't fail the batch.
+	PostedAt   json.RawMessage `json:"postedAt"`
+	PostedDate json.RawMessage `json:"postedDate"`
 }
 
 func (p post) body() string {
@@ -179,15 +205,24 @@ func (a *Adapter) fetchProfile(ctx context.Context, cfg config, apiKey, linkedin
 	return out.Element, nil
 }
 
-// fetchPosts gets recent posts for one profile.
-func (a *Adapter) fetchPosts(ctx context.Context, cfg config, apiKey, linkedinURL string) ([]post, error) {
+// fetchPosts gets recent posts for one profile. The live API selects the
+// target with `profileId` (fastest) or `profile` (a URL) — the `profileUrl`
+// param our fixtures assumed does not exist ("No valid target provided");
+// found by campaign zero's harvest increment, 2026-08-15.
+func (a *Adapter) fetchPosts(ctx context.Context, cfg config, apiKey, profileID, linkedinURL string) ([]post, error) {
+	query := map[string]string{"page": "1"}
+	if strings.TrimSpace(profileID) != "" {
+		query["profileId"] = strings.TrimSpace(profileID)
+	} else {
+		query["profile"] = linkedinURL
+	}
 	var out postsResponse
 	err := httpx.JSON(ctx, a.HTTP, httpx.Request{
 		Method:   "GET",
 		URL:      strings.TrimRight(cfg.BaseURL, "/") + postsPath,
 		Provider: "harvest",
 		Headers:  map[string]string{"X-API-Key": apiKey},
-		Query:    map[string]string{"profileUrl": linkedinURL, "page": "1"},
+		Query:    query,
 	}, &out)
 	if err != nil {
 		return nil, err

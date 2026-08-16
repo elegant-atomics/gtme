@@ -22,7 +22,7 @@
       {
         "companyName": "Initech",
         "position": "Director of Demand Gen",
-        "startDate": {"year": 2019},
+        "startDate": {"year": "2019", "month": "6"},
         "endDate": {"year": 2022}
       }
     ]
