@@ -41,8 +41,8 @@ func TestValidateName(t *testing.T) {
 		wantHint     string
 	}{
 		{"person", "email", false, ""},
-		{"person", "apollo.id", false, ""},                // namespaced, tier 3
-		{"person", "csv.favorite_color", false, ""},       // namespaced, tier 3
+		{"person", "apollo.id", false, ""},                        // namespaced, tier 3
+		{"person", "csv.favorite_color", false, ""},               // namespaced, tier 3
 		{"person", "full_nmae", true, `did you mean "full_name"`}, // near-miss suggested
 		{"person", "shoe_size", true, "not a canonical person field"},
 		{"martian", "anything_goes", false, ""}, // no vocabulary for the type yet
