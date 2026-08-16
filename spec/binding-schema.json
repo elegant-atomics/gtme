@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtm.spec/binding-schema.json",
+  "title": "Declarative binding",
+  "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md §10a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter — no expression language may ever grow in here. DRAFT: authored in the ADR-022..029 reconciliation pass ahead of the binding-engine build; conformance tests will harden it.",
+  "type": "object",
+  "required": ["id", "version", "role", "entity_type", "request", "extract"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Adapter id, e.g. 'attio/assert'. Named by the contract owner (ADR-026)."
+    },
+    "version": { "type": "integer", "minimum": 1 },
+    "role": {
+      "enum": ["source", "enrich", "deliver"],
+      "description": "source: pagination + cursor/STATE; enrich: per-record request; deliver: idempotency + dry-run receipts."
+    },
+    "entity_type": { "type": "string", "minLength": 1 },
+    "needs": {
+      "description": "Same manifest surface as process adapters (SPEC.md §6): a JSON Schema, 'dynamic', or the dynamic-with-floor object form."
+    },
+    "provides": {
+      "description": "Same manifest surface as process adapters (SPEC.md §6)."
+    },
+    "config_schema": { "type": "object" },
+    "freshness_days": { "type": "integer", "minimum": 0 },
+    "credentials": { "type": "array", "items": { "type": "string" } },
+    "credentials_optional": { "type": "array", "items": { "type": "string" } },
+    "auth": {
+      "type": "object",
+      "required": ["type", "env"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["header", "query", "basic", "bearer"] },
+        "name": {
+          "type": "string",
+          "description": "Header or query-param name; unused for basic/bearer."
+        },
+        "env": {
+          "type": "string",
+          "description": "Env var holding the credential (resolved per SPEC.md §6 credentials rules)."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Optional literal prefix for the value, e.g. 'Bearer '."
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["method", "url"],
+      "additionalProperties": false,
+      "description": "Templating draws only from step config and the record's canonical fields — no expressions, no computation.",
+      "properties": {
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "url": { "type": "string", "minLength": 1 },
+        "query": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Query-param templates."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "description": "Body template (JSON shape with templated string leaves)."
+        }
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "required": ["strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "enum": ["page", "cursor", "offset"] },
+        "param": { "type": "string", "description": "Request param carrying page/cursor/offset." },
+        "cursor_path": { "type": "string", "description": "JSONPath to the next cursor in the response (cursor strategy)." },
+        "page_size": { "type": "integer", "minimum": 1 },
+        "size_param": { "type": "string" },
+        "termination": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "empty_records": { "type": "boolean", "description": "Stop when a page yields zero records." },
+            "path": { "type": "string", "description": "JSONPath whose falsy/absent value stops pagination." }
+          }
+        },
+        "max": { "type": "integer", "minimum": 1, "description": "Hard cap on pages fetched." }
+      }
+    },
+    "extract": {
+      "type": "object",
+      "required": ["records", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "records": {
+          "type": "string",
+          "description": "JSONPath to the record array (or single record) in the response."
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "canonical (or vendor-namespaced) field name -> extraction rule.",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string", "description": "JSONPath within a record." },
+              {
+                "type": "object",
+                "required": ["path"],
+                "additionalProperties": false,
+                "properties": {
+                  "path": { "type": "string" },
+                  "transform": {
+                    "type": "string",
+                    "description": "A registry normalization rule id (SPEC.md §4a) — never arbitrary logic."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "errors": {
+      "type": "object",
+      "description": "HTTP status (or status class like '4xx') -> verdict mapping.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["verdict"],
+        "additionalProperties": false,
+        "properties": {
+          "verdict": { "enum": ["fail_record", "fail_run", "retry", "skip"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "idempotency": {
+      "enum": ["native", "ledger"],
+      "description": "Which party guarantees delivery dedupe: the vendor's own semantics (native, e.g. an assert/upsert endpoint) or the runner's deliveries table (ledger). Required for role: deliver."
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "per": { "enum": ["record", "request", "unit"] },
+        "amount_usd": { "type": "number", "minimum": 0 },
+        "unit_path": { "type": "string", "description": "JSONPath to a units-consumed count in the response (per: unit)." }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 0 },
+        "backoff_seconds": { "type": "number", "minimum": 0 },
+        "rate_per_hour": { "type": "integer", "minimum": 1 },
+        "windows": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Hourly send/fetch windows, e.g. '09:00-17:00'."
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional pagination-consistency session: a UUID minted per run and passed through on every request.",
+      "properties": {
+        "param": { "type": "string" },
+        "in": { "enum": ["header", "query", "body"] }
+      }
+    }
+  }
+}

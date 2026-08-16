@@ -596,6 +596,19 @@ carries the same meaning — the planner's walk is the only place needing
 the rule stated. The motivating case: `harvest/profile` needs at least one
 kind of LinkedIn URL (§10.4), which no flat `required` list can say.
 
+**Dynamic provides (ADR-024; decided 2026-08-16, build queued — see
+§11):** the mirror of dynamic needs. A step whose *output* field names are
+defined by user config rather than a static manifest — `http/enrich`'s
+configured content field, a `sql/enrich` step's declared `provides:`
+(§10a) — MAY declare its manifest `provides` as dynamic; its *effective*
+provides are then derived from config. The planner MUST add the derived
+names to the available-field set for downstream validation exactly as it
+adds static `provides`, and downstream `uses:`/`needs` referencing them
+validate normally. A derived name MUST be canonical or vendor-namespaced
+per §4a — an ad-hoc name is namespaced unless the config maps it to a
+canonical field — and the runtime MUST validate the step's output against
+the derived provides exactly as it validates static provides (§5).
+
 **Ingress mapping checks (ADR-018):** for a source with a `columns:`
 mapping (§10.1), the planner MUST additionally verify, still with no
 network calls and no spend: (a) every mapped header exists in the source's
@@ -626,13 +639,13 @@ At execution time, per step, per record:
 gtm init                          # create ledger + ~/.gtm
 gtm secret set KEY [VALUE]        # VALUE omitted → prompt, no echo
 gtm plan pipeline.yaml            # validate + print plan, no execution
-gtm run  pipeline.yaml [--resume RUN_ID] [--dry-run]
+gtm run  pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]
 gtm query "SQL"                   # read-only SQL against the ledger
 gtm query --save NAME "SQL"       # saved segment
 gtm show <identity-key>           # read-only projection inspector
 gtm show --run last [--fields ...] [--provenance] [--limit N]
 gtm runs [RUN_ID]                 # list runs / show one run's receipt
-gtm freeze [RUN_ID|last] > pipeline.yaml
+gtm freeze [RUN_ID|last] [--bundle DIR] # bare: YAML to stdout; --bundle: campaign bundle
 gtm help --agent                  # machine-readable full CLI + adapter surface
 ```
 
@@ -728,6 +741,49 @@ the same command without the flag; a dry run is an ordinary run in every
 other respect (its own run id, receipt, and `gtm runs` entry), and because
 it writes no deliveries, the armed run's idempotency behaves as if the dry
 run had never happened.
+
+### Simulation gate — `gtm run --simulate` (ADR-028; decided 2026-08-16, build queued — see §11)
+
+`gtm run --simulate` executes the ENTIRE pipeline offline: every binding
+(§10a) is served from its conformance fixtures, and every process/AI step
+is either fixture-served or stubbed — an AI step replays a recorded
+fixture response when one exists, else emits a synthetic verdict marked
+as synthetic. A simulated run MUST perform zero network calls, zero
+spend, and zero sends, and MUST be deterministic. Its output is a full
+receipt marked **SIMULATED** (the receipt schema gains a `simulated`
+flag), and a simulated run MUST NOT contribute to the durable identity
+layer: its writes are excluded from projection and cache (whether by
+ephemerality or by flagging is an implementation decision, recorded in
+DECISIONS.md at build time). With this the gate ladder is complete:
+**simulate → plan → dry-run → armed** — behavior offline, then contracts,
+then live-reads with delivery withheld, then live. An agent that authors
+a pipeline can fully validate it (structure via plan, behavior via
+simulate) before a human reviews anything. A binding without fixtures
+MUST surface in the simulated receipt as a simulation gap, not silently
+pass. Acceptance criterion: the campaign-zero pipeline simulates
+end-to-end with zero network calls.
+
+### Campaign bundles — `gtm freeze --bundle` (ADR-029; decided 2026-08-16, build queued — see §11)
+
+`gtm freeze --bundle DIR` produces a **campaign bundle**: a directory (or
+tarball) containing the pipeline YAML, every referenced binding at its
+exact version, AI prompt files, saved queries, the relevant registry
+slice, and a manifest — bundle format version, content hashes, source run
+id — per `spec/bundle-manifest.json`. (Bare `gtm freeze` keeps its
+existing job: the reconstructed `pipeline.yaml` on stdout.) Guarantees:
+(a) **self-contained** — `gtm run <bundle-path>` resolves nothing outside
+the bundle except credentials; (b) **diffable** — text files, stable
+ordering; (c) **portable** — the same bundle runs on any machine/ledger;
+membership and cache naturally differ, contracts don't. `gtm run` MUST
+accept a bundle path wherever it accepts a pipeline path, and
+`--simulate` MUST work on a bundle using fixtures included in it, making
+a bundle a fully offline-verifiable artifact. Group references in a
+bundled pipeline (ADR-021) are names resolved against the target ledger —
+membership travels with the ledger, not the bundle — and plan's
+referenced-groups-exist check applies, so a bundle moved to a clean
+ledger fails loudly at plan rather than running ungated. Acceptance
+criterion: freeze campaign zero, move the bundle to a clean ledger,
+simulate and dry-run it successfully.
 
 ---
 
@@ -872,6 +928,147 @@ be behind an interface so fixture tests never touch the network.
 
 ---
 
+## 10a. The binding tier & universal steps — DECIDED (ADR-022..027; decided 2026-08-16, build queued — see §11)
+
+Everything in this section is decided contract; none of it is shipped
+behavior until its milestone builds (§11). Until then code/spec
+divergence here is queued work, not an AUDIT.md finding.
+
+### Two-tier adapters (ADR-022)
+
+The adapter model is two-tier. **Tier 1 — bindings:** a binding is a YAML
+document conforming to `spec/binding-schema.json`, interpreted
+deterministically by one generic HTTP execution engine in the runner. All
+judgment is frozen at authoring time, never exercised per call. The
+schema is kept to ~8 primitives: auth (type, header/param name, env var
+ref); a request template (method, URL, body AND query-param templating
+from config + canonical fields); pagination (strategy page|cursor|offset,
+termination, max); extraction (records JSONPath plus per-field
+response→canonical paths, with a `transform:` hook restricted to registry
+normalization rules — never arbitrary logic); error→verdict mapping; an
+idempotency declaration `native | ledger` (which party guarantees dedupe:
+Attio assert = native; Instantly = ledger via the deliveries table); a
+cost declaration (per record / per request / unit); and a retry/rate
+policy including hourly windows, with an optional session declaration
+(a UUID-per-run passed through, for vendors offering
+pagination-consistency sessions). Binding roles are source (pagination +
+cursor/STATE), enrich (per-record request), and deliver (idempotency +
+dry-run receipts). A binding declares the same manifest surface as a
+process adapter (`needs`/`provides`/`config_schema`/`freshness_days`, §6)
+so `gtm plan` treats both tiers identically; named external bindings are
+discovered on the §6 path (`~/.gtm/adapters/<name>/` containing
+`binding.yaml` instead of an executable).
+
+**Tier 2 — process adapters:** the §5/§6 NDJSON contract, unchanged.
+**Graduation rule (hard):** the moment a binding needs logic —
+conditionals, expressions, multi-call workflows, OAuth dances, request
+signing, computation — it graduates to a process adapter. No expression
+language may ever grow inside binding YAML. Bindings cover anything that
+sells an API; process adapters cover anything that must be fought for
+(a managed provider absorbing the fight — HarvestAPI over scraping — is
+tier 1; only DIY scraping is tier 2).
+
+**Engine unification:** inline `http/*` steps are the binding engine
+invoked anonymously with config carried in the pipeline YAML; a named
+binding is the same config published, versioned, and conformance-tested.
+Recurring inline config across pipelines is the signal to extract and
+name a binding.
+
+**Conformance:** the §4a conformance kit extends to bindings: every
+binding MUST ship golden fixture payloads and a conformance test
+asserting fixtures in → canonical, registry-valid records out. These
+fixtures are also what `--simulate` (§8) executes against.
+
+**Security invariant:** bindings MUST NOT be able to execute code; a
+binding's blast radius is exactly what the engine permits. This is what
+makes third-party bindings reviewable, diffable data (see ROADMAP.md on
+the marketplace framing).
+
+### OpenAPI is codegen input, never runtime input (ADR-025)
+
+A runtime OpenAPI-driven generic adapter MUST NOT be built: an API spec
+describes endpoints (syntax), while an adapter encodes operation
+selection, idempotency keys, verdicts, and canonical mapping (semantics
+no spec contains) — and per-call model judgment would mean per-row cost,
+nondeterminism where money moves, and records in model context, violating
+the ledger-as-bus. OpenAPI's place is bind time: the adapter-authoring
+skill's happy path is paste an OpenAPI URL → a model proposes a binding
+(operation, mapping, idempotency, pagination) → conformance tests pass →
+the adapter exists.
+
+### Adapter naming — the contract owner names the adapter (ADR-026)
+
+An adapter is named by whoever defines its contract. `apollo/search`:
+Apollo's API defines the step's meaning → vendor-named. `ai/filter`,
+`ai/compose`: the contract is the operation (uses: in, verdict/fields
+out); the model provider is an interchangeable engine → operation-named,
+provider is config. When a provider capability leaks into the contract
+(a response format that IS the product), it takes the vendor name — the
+same canonical-when-shared, namespaced-when-proprietary logic as fields
+(§4a). Provenance carries the engine: for `ai/*` steps,
+`field_values.source` MUST record the model identifier in the form
+`ai/compose @ <model-id>` (e.g. `ai/compose @ claude-sonnet-4-6`), and
+COST attributes spend per model.
+
+### `http/enrich` — generic fetch enricher (ADR-024)
+
+Per-record HTTP request templated from canonical fields; two modes:
+(a) JSON extraction — the binding engine's enrich role invoked inline;
+(b) `markdown: true` — fetch a page, convert to markdown, store it as a
+ledger field (e.g. `homepage_markdown`) whose name the step declares in
+config (dynamic provides, §7). Fetched content fields are facts with
+provenance; the step MUST declare `freshness_days` (web content rots — a
+missing value is a plan error, no default), and the engine MUST enforce a
+response size cap (default an implementation decision recorded at build
+time). Division of labor: `http/enrich` does deterministic acquisition;
+`ai/*` steps judge the stored content via `uses:` — fetch-once economics
+means N AI steps across M runs reuse one fetch, and receipts show exactly
+what content was judged. Scope stated honestly: no-JS fetching only;
+JS-heavy pages route to a reader-provider binding (see ROADMAP.md).
+
+**`ai/*` purity invariant:** an AI step's inputs are exactly its
+projected fields, and its only network access is its model engine's API
+(§2). An `ai/*` step MUST NOT fetch external content — acquisition
+belongs to `http/enrich` and bindings, which are deterministic and
+cacheable.
+
+### `sql/enrich` and `sql/filter` — the deterministic transform floor (ADR-027)
+
+`sql/enrich`: a single SELECT over the projection view (plus relations),
+scoped to the run's records, executed read-only (`mode=ro`) and
+timeboxed, with no side effects. Result columns become field values
+appended by the ENGINE like any adapter output — the step never writes
+storage directly; append-only, provenance `sql/enrich @ <query-hash>`,
+freshness semantics all preserved. Contracts are DECLARED, not parsed
+from SQL: the step's config carries `uses:` and `provides:`; `gtm plan`
+validates both (§7 dynamic needs and provides), and the engine MUST check
+result columns match the declared provides. `sql/filter`: the same
+mechanism producing per-record VERDICTs from a predicate — closing
+membership-by-ledger-facts cases ("has replied ever", "3+ known contacts
+at company") that `where=` combinators don't reach. `sql/filter` derives
+verdicts from what the ledger implies, re-evaluated each run; ADR-021's
+`require:`/`exclude:` gates assert recorded membership — complementary,
+not competing. The transform floor is symmetric: `sql/*` for the
+computable, `ai/*` for the judgeable; both read projections, both write
+facts, both free to re-run. (This shrinks ADR-018's code-transform
+escape hatch to nearly nothing.)
+
+### The universal floor (ADR-023)
+
+The smallest adapter set with near-total reach docks onto the three
+universal transports — files, webhooks, the web. Universality is bought
+by pushing semantics into user config, so universal adapters are always
+the worst version of any given integration: their job is the guarantee
+("wireable today"), not excellence; bindings are the ceiling. The set:
+In — `csv/source` (§10.1), `webhook/source` (§10.8), and group-as-source
+(ADR-021, spec impact pending); transform — `ai/*` (pure, above) and
+`sql/*`; out — `http/deliver` and `csv/deliver` (decided, post-binding-
+engine; see ROADMAP.md for their contracts, including `http/deliver`'s
+REQUIRED idempotency-key template). Receipts showing the same `http/*`
+target recurring across runs are the cue to mint a named binding.
+
+---
+
 ## 11. Milestones & acceptance criteria — build in this order
 
 Each milestone ends with `make check` green (fmt, vet, unit tests) plus the
@@ -938,6 +1135,18 @@ offline.
   deliver adapter renders resolved variables in the receipt, writes zero
   `deliveries` rows, and applies `on_missing: skip` verdicts; the same
   pipeline armed delivers, and re-run delivers nothing twice.
+
+**Next milestones (decided, not yet sequenced).** Two
+reconciliation-plus-build passes are queued: **groups** (ADR-021, spec
+impact not yet applied) and the **binding engine** (§10a — the engine and
+binding schema; apollo/search, harvest/profile, and
+instantly/add-to-campaign ported to bindings with acceptance = receipt
+diff against each Go twin on campaign-zero data, dry runs where delivery
+is involved; first net-new integration = an Attio binding, idempotency
+native; `--simulate` (§8) lands with it and bundles (§8) immediately
+after). Their relative order is a pending human decision; this list
+resumes numbering (M8, M9) once it is made. Until each builds, its
+sections above are decided contract, not shipped behavior.
 
 Repo layout:
 ```
@@ -1078,6 +1287,25 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.5 — 2026-08-16 (ADR-022..029 reconciliation — spec only, build queued)
+**Added:** §10a two-tier adapter model: declarative bindings interpreted
+by one generic HTTP engine, `spec/binding-schema.json`, the hard
+graduation rule, conformance-kit extension to bindings, engine
+unification of inline `http/*` steps, the contract-owner naming rule with
+`ai/*` model-identifier provenance, the OpenAPI-as-codegen-input rule,
+`http/enrich` (JSON + markdown modes, mandatory `freshness_days`, size
+cap, no-JS scope), `sql/enrich`/`sql/filter` with declared SQL contracts,
+the `ai/*` purity invariant, and the universal-floor framing
+(ADR-022..027); §7 dynamic provides beside dynamic needs (ADR-024); §8
+simulation gate — `gtm run --simulate`, the completed
+simulate → plan → dry-run → armed ladder, SIMULATED receipts excluded
+from projection/cache (ADR-028); §8 campaign bundles — `gtm freeze
+--bundle`, `spec/bundle-manifest.json`, `gtm run` accepting a bundle
+path, simulate-on-bundle (ADR-029); §11 next-milestones note (binding
+engine vs groups sequencing pending).
+**Changed:** nothing shipped changes in this pass — every v0.5 section is
+decided contract with build queued, flagged as such in place.
 
 ### v0.4 — 2026-08-15 (ADR-017/018/019 reconciliation + ADR-020)
 **Added:** §4a canonical field registry with `spec/fields/person.json`,
