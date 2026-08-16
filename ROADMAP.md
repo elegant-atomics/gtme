@@ -134,6 +134,18 @@ would make gtme multichannel with zero new architecture. Gated on the
 binding engine, a deliverability/safety review, and the same armed-gate
 discipline as email delivery.
 
+## Payload re-extraction, fixture minting, simulate replay
+
+ADR-030 creates the substrate (retained raw payloads as purgeable cache);
+these are the verbs it deliberately defers: a re-extraction mode that
+runs an improved binding's `extract:` over stored payloads (back-filling
+new fields at zero vendor cost); minting conformance fixtures from real
+stored payloads (systematizing what the campaign-zero shape-drift
+episode did by hand); and `--simulate` replaying a pipeline against the
+operator's own payload history instead of synthetic fixtures. Each needs
+a small design pass on invocation shape (a verb? an engine flag?) once
+the ADR-030 substrate exists.
+
 ## Adapter marketplace — the bindings security framing
 
 The marketplace itself stays a §13 non-goal. When it comes, ADR-022's

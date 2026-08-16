@@ -679,6 +679,77 @@ manifest schema (`spec/bundle-manifest.json`); run accepts a bundle path;
 acceptance: freeze campaign zero, move bundle to a clean ledger, simulate
 + dry-run it successfully.
 
+---
+
+## Session addendum, 2026-08-16 (payload retention)
+
+Proposed in a working session during the M8 wrap (not a seed packet):
+M8's port made the cost of discarding raw vendor responses visible, and
+the design conversation resolved where retention can live without
+breaking the append-only spine. Human-approved same day.
+
+### ADR-030: Payload retention — raw vendor responses are cache, not facts
+**Status:** Accepted (2026-08-16 — proposed and iterated in a design
+conversation during the M8 wrap; human-approved same day)
+**Context:** Adapters extract canonical fields and discard the raw vendor
+response; the ledger keeps only what the mapping chose at fetch time.
+ADR-022 changed the economics of that discard: extraction is now
+declarative data, so a retained payload plus an improved binding equals
+better canonical fields with zero re-spend — "fetch once, judge many"
+(ADR-024) generalizes to *fetch once, extract many*. Retained payloads
+are also per-record recorded fixtures (the campaign-zero shape-drift
+episode — live HarvestAPI shapes the fixtures never saw — becomes a
+systematic minting loop, and `--simulate` can replay real history), and
+they are point-in-time truth: the profile that existed when a verdict
+was rendered is irreplaceable. Two constraints shape the mechanism.
+First, freshness is a *read* gate, not deletion — a "TTL" implemented as
+freshness leaves data in place, so retention safety needs real eviction,
+and deleting from `field_values` would breach the append-only spine
+(ADR-002). Second, a payload stored as a namespaced field would leak
+into needs-all projections: an AI step with no `uses:` projects
+everything, so multi-KB documents would silently enter prompts —
+records-in-model-context, which ADR-025 rejects.
+**Decision:** A hard line: **extracted = fact, unextracted = cache.**
+Facts (`field_values`, canonical or vendor-namespaced) remain append-only
+forever. Raw payloads live in their own table —
+`payloads(id, identity_id, adapter, run_id, content_type, body,
+created_at, expires_at)` — which is cache material and therefore
+legitimately purgeable. Payloads are never projected into any step and
+never appear in `gtm show`'s default output; the only paths out are
+(a) extraction, which writes facts with normal provenance, and
+(b) deliberate promotion into a content *field* (the `http/enrich`
+`homepage_markdown` pattern, with mandatory freshness and size cap) when
+AI steps should judge the content. Retention is declared, not assumed:
+adapters and bindings declare `keep_payloads` with a TTL and an
+engine-enforced size cap (manifest/binding default, per-step override —
+the `freshness_days` shape). Default is **on** with a 90-day TTL,
+defensible precisely because eviction exists. Eviction is opportunistic
+at run start plus an explicit `gtm vacuum` verb (receipted; no daemon,
+per ADR-009's stance). The unit stored is the per-record slice for
+sources, the response body for enrich/deliver.
+**Consequences:** Registry promotions become retroactive — when a field
+earns canonical status by the rule of two, historical payloads back-fill
+it; likewise a new `<vendor>.<field>` extraction entry mints values from
+documents already paid for. The append-only principle survives intact by
+scoping what counts as knowledge. Storage is bounded by TTL and size
+cap; the PII posture improves over silent forever-retention because
+retention is per-adapter declared, bounded, and evictable. Deliberately
+deferred to ROADMAP.md: a re-extraction verb/engine mode, fixture
+minting from stored payloads, and simulate-replay-from-history — this
+ADR creates the substrate, not the verbs.
+**Sequencing:** Not M9 (groups). Build with the `http/enrich`/`sql/*`
+milestone, which already brings the size-cap and content-field
+machinery, and whose `sql/enrich` is the natural query surface over
+payload-derived facts.
+**Spec impact:** AMEND (build queued per sequencing) — §3 gains the
+`payloads` DDL with the cache-not-facts note (explicitly exempt from
+append-only, never projected); §6 and §10a gain the
+`keep_payloads`/TTL/size-cap surface; §8 gains `gtm vacuum`; ROADMAP.md
+gains the re-extraction/fixture-minting/simulate-replay entries.
+Acceptance: a run with retention on stores payloads and a re-run after a
+binding improvement back-fills a new field with zero vendor calls;
+`gtm vacuum` removes expired payloads and nothing else.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
