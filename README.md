@@ -167,6 +167,37 @@ enrichment while it's fresh. Raw vendor responses are retained (bounded,
 TTL'd, evictable) so improving an extraction back-fills from payloads
 you already paid for — at zero vendor spend.
 
+## A campaign is a folder
+
+Everything that defines a campaign is text, so a campaign works the way
+the rest of your engineering does: a directory under version control.
+
+```
+q3-outbound/
+  qualify.yaml          # source → enrich → ai/filter ⇒ group (cheap, run often)
+  send.yaml             # group → compose → deliver (deliberate, gated)
+  contacts.csv          # input data, when the source is a file
+```
+
+Pipelines diff in code review. Prompt changes are commits. A colleague's
+campaign is a `git pull`. And when a run is worth keeping,
+`gtme freeze --bundle` snapshots it into a self-contained artifact:
+
+```
+bundle/
+  manifest.json         # format version, source run id, sha256 per file
+  pipeline.yaml         # the exact config that ran
+  adapters/             # every referenced binding, at its frozen version,
+    apollo-search/      #   with its fixtures — so the bundle simulates offline
+  registry/             # the field vocabulary the contracts speak
+```
+
+`gtme run <bundle>` accepts the folder anywhere a pipeline path goes,
+verifies every hash first, and resolves the bundle's own bindings ahead of
+whatever the machine has installed. Contracts travel; your ledger,
+credentials, and input data stay yours. The natural unit for a playbook, a
+handoff, or a per-client repo.
+
 ## Get started
 
 ```sh
@@ -223,6 +254,9 @@ Then interrogate what happened — no log spelunking:
   why nothing is decided until it's in the repo.
 - **[ROADMAP.md](ROADMAP.md)** — named, deliberately deferred: the expand
   role, payload re-extraction, an OpenAPI→binding codegen skill, and more.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — the contribution surface is
+  adapters, and most adapters are one reviewable YAML file; here's the
+  shape and the checklist.
 - `gtme help --agent` — the whole surface, machine-readable, for your
   agent.
 
