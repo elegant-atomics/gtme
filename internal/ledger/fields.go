@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // FieldWrite is one field learned about an identity.

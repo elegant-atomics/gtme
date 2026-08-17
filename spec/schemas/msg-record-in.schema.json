@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-record-in.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-record-in.schema.json",
   "title": "RECORD (runner → adapter)",
   "description": "One record handed to a non-source adapter (SPEC.md §5). `fields` is exactly the projection of the adapter's `needs` (or of the step's `uses:`, ADR-004) — nothing more. The runner always canonicalizes and sends `key`; sources never receive this message.",
   "type": "object",

@@ -72,10 +72,10 @@ type Engine interface {
 }
 
 // Resolve picks an engine. The step's config chooses between the engines the
-// spec defines; GTM_AI_ENGINE overrides it so tests (and an operator debugging a
+// spec defines; GTME_AI_ENGINE overrides it so tests (and an operator debugging a
 // pipeline) can swap in the fixture engine without editing the pipeline. getenv
 // is the caller's env view — an adapter passes its Ports.Getenv so credentials
-// injected by the runner (including ~/.gtm/secrets) are seen; nil falls back to
+// injected by the runner (including ~/.gtme/secrets) are seen; nil falls back to
 // the process env.
 func Resolve(engine, model string, getenv func(string) string) (Engine, string, error) {
 	if getenv == nil {
@@ -84,11 +84,11 @@ func Resolve(engine, model string, getenv func(string) string) (Engine, string, 
 	// The Ports view is consulted first so the runner can put a step onto the
 	// fixture engine under --simulate (SPEC §8) without touching process env;
 	// process env still works for tests and operators.
-	if v := envOverride(getenv, "GTM_AI_ENGINE"); v != "" {
+	if v := envOverride(getenv, "GTME_AI_ENGINE"); v != "" {
 		engine = v
 	}
 	if model == "" {
-		model = envOverride(getenv, "GTM_AI_MODEL")
+		model = envOverride(getenv, "GTME_AI_MODEL")
 	}
 	if model == "" {
 		model = DefaultModel
@@ -125,14 +125,14 @@ func ProvenanceModel(engine, model string, getenv func(string) string) string {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	if v := envOverride(getenv, "GTM_AI_ENGINE"); v != "" {
+	if v := envOverride(getenv, "GTME_AI_ENGINE"); v != "" {
 		engine = v
 	}
 	if strings.TrimSpace(engine) == EngineFixture {
 		return "fixture"
 	}
 	if model == "" {
-		model = envOverride(getenv, "GTM_AI_MODEL")
+		model = envOverride(getenv, "GTME_AI_MODEL")
 	}
 	if model == "" {
 		model = DefaultModel

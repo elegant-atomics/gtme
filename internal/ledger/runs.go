@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // Run statuses.
@@ -21,7 +21,7 @@ const (
 const StateSourced = "sourced"
 
 // AdhocPipeline is a reserved pipeline name (SPEC §3's schema comment on
-// runs.pipeline). gtm freeze refuses to keep it as a frozen pipeline's name
+// runs.pipeline). gtme freeze refuses to keep it as a frozen pipeline's name
 // (see frozenPipeline in internal/cli/freeze.go) — a safeguard against a
 // pipeline named literally "(adhoc)", which reads as an accident, not intent.
 const AdhocPipeline = "(adhoc)"
@@ -335,7 +335,7 @@ func (l *Ledger) StepEventSeen(ctx context.Context, runID, stepID, event string)
 }
 
 // StepIDs lists the step ids that appear in a run's events, in first-seen
-// order — the order steps actually ran in, which gtm freeze and gtm runs
+// order — the order steps actually ran in, which gtme freeze and gtme runs
 // both use to present a run's steps.
 //
 // Ordering is by the smallest event ULID rather than by timestamp: two steps can

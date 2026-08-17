@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/ai"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/ai"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // Adapter ids.
@@ -139,7 +139,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	model := cfg.Model
 	if engine == nil {
 		// p.Getenv, not os.Getenv: the runner injects credentials (including
-		// ~/.gtm/secrets) into the session env, never the process env.
+		// ~/.gtme/secrets) into the session env, never the process env.
 		e, resolved, err := ai.Resolve(cfg.Engine, cfg.Model, p.Getenv)
 		if err != nil {
 			return err

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // Group is one named association context.
@@ -216,7 +216,7 @@ func (l *Ledger) Groups(ctx context.Context) ([]GroupInfo, error) {
 	return out, rows.Err()
 }
 
-// GroupEvents lists a group's newest events (for `gtm groups show`).
+// GroupEvents lists a group's newest events (for `gtme groups show`).
 func (l *Ledger) GroupEvents(ctx context.Context, groupID string, limit int) ([]GroupEvent, error) {
 	if limit <= 0 {
 		limit = 20
@@ -246,7 +246,7 @@ func (l *Ledger) GroupEvents(ctx context.Context, groupID string, limit int) ([]
 }
 
 // IdentityIDsFromSQL runs a read-only SELECT and returns its identity_id
-// column — the contract `gtm groups add --query/--from-segment` requires
+// column — the contract `gtme groups add --query/--from-segment` requires
 // (SPEC §8): segments-as-SQL naturally join identities.
 func (l *Ledger) IdentityIDsFromSQL(ctx context.Context, query string) ([]string, error) {
 	if err := ReadOnlyStatement(query); err != nil {

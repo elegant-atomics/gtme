@@ -79,7 +79,7 @@ func TestSimulateCampaignZero(t *testing.T) {
 	}
 	res = h.mustRun("runs")
 	if got := res.stdout + res.stderr; len(nonEmptyLines(got)) > 1 {
-		t.Errorf("gtm runs after simulate:\n%s", got)
+		t.Errorf("gtme runs after simulate:\n%s", got)
 	}
 }
 

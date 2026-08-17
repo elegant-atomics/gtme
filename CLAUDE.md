@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-`gtm` is built from **SPEC.md**. It is canonical for all observable behavior
+`gtme` is built from **SPEC.md**. It is canonical for all observable behavior
 (CLI surface, exit codes, schemas, wire protocol, ledger DDL, acceptance
 criteria). Sections marked **DECIDED** are constraints, not suggestions.
 Read it fully before any change. Code that diverges from spec is a bug even

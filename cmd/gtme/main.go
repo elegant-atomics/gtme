@@ -1,4 +1,4 @@
-// Command gtm is a CLI for GTM data pipelines. See SPEC.md.
+// Command gtme is a CLI for GTM data pipelines. See SPEC.md.
 package main
 
 import (
@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/trevorfox/gtm/internal/cli"
+	"github.com/elegant-atomics/gtme/internal/cli"
 )
 
 func main() {

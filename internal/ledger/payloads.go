@@ -3,13 +3,13 @@ package ledger
 // Payloads: raw vendor responses as cache, not facts (SPEC §3, ADR-030).
 // The one purgeable table in the ledger — facts stay append-only forever;
 // payloads carry an expiry and are evicted opportunistically at run start
-// and by `gtm vacuum` (SPEC §8). Never projected into any step.
+// and by `gtme vacuum` (SPEC §8). Never projected into any step.
 
 import (
 	"context"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // WritePayload retains one raw response. ttlDays 0 means no expiry — kept

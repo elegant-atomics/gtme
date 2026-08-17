@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/bundle"
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/bundle"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
 )
 
 // cmdFreeze reconstructs the pipeline.yaml that produced a run, from the
-// config snapshot CreateRun stored at the start of `gtm run` (SPEC §8, §1 bet
+// config snapshot CreateRun stored at the start of `gtme run` (SPEC §8, §1 bet
 // 4) — a reproducibility and audit tool, not a mode-conversion one (that was
 // pipe mode's job pre-ADR-005). The YAML goes to stdout so it can be
 // redirected into a file.
@@ -28,7 +28,7 @@ func cmdFreeze(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	if len(positional) > 1 {
-		return fail(ExitValidation, "usage: gtm freeze [RUN_ID|last] [--bundle DIR]")
+		return fail(ExitValidation, "usage: gtme freeze [RUN_ID|last] [--bundle DIR]")
 	}
 	target := "last"
 	if len(positional) == 1 {

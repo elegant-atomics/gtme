@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-verdict.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-verdict.schema.json",
   "title": "VERDICT (adapter → runner)",
   "description": "A filter step's decision about one record (SPEC.md §5, §7). Stored in run_records.verdicts; pass=false freezes the record's state at this step. `pass` is a *bool in Go, so an explicit false is always on the wire; a VERDICT with no pass at all is treated as a fail.",
   "type": "object",

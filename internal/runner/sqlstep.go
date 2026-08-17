@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/planner"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/planner"
 )
 
 // sqlTimebox bounds one SQL step's query (SPEC §10a).

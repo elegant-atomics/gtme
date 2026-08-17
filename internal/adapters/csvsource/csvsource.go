@@ -1,6 +1,6 @@
 // Package csvsource is the csv/source adapter: it reads a CSV file and emits one
 // record per row, with the header row naming the fields (SPEC §10.1). It exists
-// so every part of gtm is testable with zero API keys.
+// so every part of gtme is testable with zero API keys.
 //
 // It is also the ingress edge of ADR-018: config `columns:` maps canonical
 // field names → CSV headers as written; headers already matching canonical
@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/protocol"
-	"github.com/trevorfox/gtm/internal/registry"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/registry"
 )
 
 // ID is the adapter id.
@@ -382,7 +382,7 @@ func schemaFor(reg *registry.Registry, entity string, fields []string) (json.Raw
 	}
 
 	// A probed header is exact: these are the columns, and no others. Closing the
-	// schema is what lets `gtm plan` catch a pipeline that needs a field the CSV
+	// schema is what lets `gtme plan` catch a pipeline that needs a field the CSV
 	// does not have, instead of discovering it per record at run time.
 	raw, err := json.Marshal(map[string]any{
 		"type":                 "object",

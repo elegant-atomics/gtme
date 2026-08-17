@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	_ "github.com/trevorfox/gtm/internal/adapters/all"
-	"github.com/trevorfox/gtm/internal/registry"
-	"github.com/trevorfox/gtm/spec"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
+	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/elegant-atomics/gtme/spec"
 )
 
 func TestRegistryFilesValidateAgainstSchema(t *testing.T) {

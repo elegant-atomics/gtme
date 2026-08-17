@@ -1,4 +1,4 @@
-BINARY := bin/gtm
+BINARY := bin/gtme
 PKG    := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 
@@ -17,16 +17,16 @@ test:
 	go test $(PKG)
 
 build:
-	go build -ldflags "-X github.com/trevorfox/gtm/internal/cli.Version=$(VERSION)" -o $(BINARY) ./cmd/gtm
+	go build -ldflags "-X github.com/elegant-atomics/gtme/internal/cli.Version=$(VERSION)" -o $(BINARY) ./cmd/gtme
 
 # live runs the manual provider smoke tests (SPEC §12: a human gate). Each test
 # skips unless its credential is set; nothing is delivered to a real campaign
-# unless GTM_LIVE_DELIVER=yes.
+# unless GTME_LIVE_DELIVER=yes.
 live:
 	go test -tags live -count=1 -v ./test/live/
 
 live-deliver:
-	GTM_LIVE_DELIVER=yes go test -tags live -count=1 -v -run Deliver ./test/live/
+	GTME_LIVE_DELIVER=yes go test -tags live -count=1 -v -run Deliver ./test/live/
 
 tidy:
 	go mod tidy

@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/adapters/harvest"
-	"github.com/trevorfox/gtm/internal/adapters/instantly"
-	"github.com/trevorfox/gtm/internal/ai"
-	"github.com/trevorfox/gtm/internal/binding"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/adapters/harvest"
+	"github.com/elegant-atomics/gtme/internal/adapters/instantly"
+	"github.com/elegant-atomics/gtme/internal/ai"
+	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 func requireEnv(t *testing.T, name string) string {
@@ -106,10 +106,10 @@ func TestApolloSearchLive(t *testing.T) {
 }
 
 // TestHarvestProfileLive spends one HarvestAPI lookup. Point it at a profile you
-// are happy to fetch with GTM_LIVE_LINKEDIN_URL.
+// are happy to fetch with GTME_LIVE_LINKEDIN_URL.
 func TestHarvestProfileLive(t *testing.T) {
 	key := requireEnv(t, "HARVEST_API_KEY")
-	url := requireEnv(t, "GTM_LIVE_LINKEDIN_URL")
+	url := requireEnv(t, "GTME_LIVE_LINKEDIN_URL")
 
 	msgs := drive(t, &harvest.Adapter{},
 		map[string]any{"posts_limit": float64(2)},
@@ -133,7 +133,7 @@ func TestHarvestProfileLive(t *testing.T) {
 // without adding anyone to it.
 func TestInstantlyCampaignsLive(t *testing.T) {
 	key := requireEnv(t, "INSTANTLY_API_KEY")
-	campaign := requireEnv(t, "GTM_LIVE_CAMPAIGN")
+	campaign := requireEnv(t, "GTME_LIVE_CAMPAIGN")
 
 	// A record is never sent: the adapter resolves the campaign at OPEN, and with
 	// no records there is nothing to deliver.
@@ -147,13 +147,13 @@ func TestInstantlyCampaignsLive(t *testing.T) {
 // a second, explicit opt-in because it puts a person into a sending sequence.
 func TestInstantlyDeliverLive(t *testing.T) {
 	key := requireEnv(t, "INSTANTLY_API_KEY")
-	campaign := requireEnv(t, "GTM_LIVE_CAMPAIGN")
-	email := requireEnv(t, "GTM_LIVE_DELIVER_EMAIL")
-	if os.Getenv("GTM_LIVE_DELIVER") != "yes" {
-		t.Skip("set GTM_LIVE_DELIVER=yes to add a real lead to a real campaign")
+	campaign := requireEnv(t, "GTME_LIVE_CAMPAIGN")
+	email := requireEnv(t, "GTME_LIVE_DELIVER_EMAIL")
+	if os.Getenv("GTME_LIVE_DELIVER") != "yes" {
+		t.Skip("set GTME_LIVE_DELIVER=yes to add a real lead to a real campaign")
 	}
 	if !strings.Contains(email, "@") {
-		t.Fatalf("GTM_LIVE_DELIVER_EMAIL = %q", email)
+		t.Fatalf("GTME_LIVE_DELIVER_EMAIL = %q", email)
 	}
 
 	msgs := drive(t, &instantly.Adapter{},
@@ -163,7 +163,7 @@ func TestInstantlyDeliverLive(t *testing.T) {
 			map[string]any{
 				"email":      email,
 				"first_name": "Live",
-				"first_line": "This is a gtm live smoke test.",
+				"first_line": "This is a gtme live smoke test.",
 			}, nil))
 
 	for _, m := range msgs {
@@ -178,9 +178,9 @@ func TestInstantlyDeliverLive(t *testing.T) {
 // TestAnthropicEngineLive spends a few cents of tokens.
 func TestAnthropicEngineLive(t *testing.T) {
 	requireEnv(t, "ANTHROPIC_API_KEY")
-	t.Setenv("GTM_AI_ENGINE", ai.EngineAPI)
+	t.Setenv("GTME_AI_ENGINE", ai.EngineAPI)
 
-	engine, model, err := ai.Resolve(ai.EngineAPI, os.Getenv("GTM_AI_MODEL"), nil)
+	engine, model, err := ai.Resolve(ai.EngineAPI, os.Getenv("GTME_AI_MODEL"), nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

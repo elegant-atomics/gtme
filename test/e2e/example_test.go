@@ -93,7 +93,7 @@ func TestRunsAndSecretCommands(t *testing.T) {
 	contains(t, receipt.stderr, "pipeline: csv-to-mock", "receipt")
 	contains(t, receipt.stderr, "records: 3", "receipt")
 	contains(t, receipt.stderr, "mock", "receipt")
-	contains(t, receipt.stderr, "gtm freeze", "receipt should say how to rebuild the pipeline")
+	contains(t, receipt.stderr, "gtme freeze", "receipt should say how to rebuild the pipeline")
 
 	if res := h.run("runs", "01ZZZZZZZZZZZZZZZZZZZZZZZZ"); res.code != 2 {
 		t.Errorf("unknown run exit = %d, want 2", res.code)
@@ -116,7 +116,7 @@ func TestRunsAndSecretCommands(t *testing.T) {
 	}
 
 	// The secrets file is private and the stored credential satisfies a plan.
-	info, err := os.Stat(filepath.Join(h.home, ".gtm", "secrets"))
+	info, err := os.Stat(filepath.Join(h.home, ".gtme", "secrets"))
 	if err != nil {
 		t.Fatalf("stat secrets: %v", err)
 	}
@@ -135,7 +135,7 @@ steps:
     use: needs-key
 `)
 	if res := h.run("plan", "keyed.yaml"); res.code != 0 {
-		t.Errorf("plan exit = %d — a secret in ~/.gtm/secrets should satisfy a credential\nstderr:\n%s",
+		t.Errorf("plan exit = %d — a secret in ~/.gtme/secrets should satisfy a credential\nstderr:\n%s",
 			res.code, res.stderr)
 	}
 }

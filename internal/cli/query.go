@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // cmdQuery runs read-only SQL against the ledger, and saves or replays named
@@ -48,7 +48,7 @@ func cmdQuery(ctx context.Context, env Env, args []string) error {
 		}
 		tw.Flush()
 		if len(saved) == 0 {
-			fmt.Fprintln(env.Stderr, "no saved segments yet — save one with `gtm query --save NAME \"SQL\"`")
+			fmt.Fprintln(env.Stderr, "no saved segments yet — save one with `gtme query --save NAME \"SQL\"`")
 		}
 		return nil
 	}
@@ -67,7 +67,7 @@ func cmdQuery(ctx context.Context, env Env, args []string) error {
 		}
 		query = saved.SQL
 	case query == "":
-		return fail(ExitValidation, `usage: gtm query "SQL" | gtm query --name NAME | gtm query --list`)
+		return fail(ExitValidation, `usage: gtme query "SQL" | gtme query --name NAME | gtme query --list`)
 	}
 
 	if err := ledger.ReadOnlyStatement(query); err != nil {

@@ -9,14 +9,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // cmdShow is the read-only projection inspector (SPEC §8, DECISIONS.md
 // ADR-006). It never writes to the ledger, and — unlike every other verb here
 // — its result is the point, so it goes to stdout as data rather than to
-// stderr as a receipt: `gtm show` answers "what does the system know", the
-// same job `gtm query` does for a whole segment.
+// stderr as a receipt: `gtme show` answers "what does the system know", the
+// same job `gtme query` does for a whole segment.
 func cmdShow(ctx context.Context, env Env, args []string) error {
 	fs := flag.NewFlagSet("show", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
@@ -46,12 +46,12 @@ func cmdShow(ctx context.Context, env Env, args []string) error {
 
 	if *run != "" {
 		if len(positional) != 0 {
-			return fail(ExitValidation, "usage: gtm show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]")
+			return fail(ExitValidation, "usage: gtme show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]")
 		}
 		return showRun(ctx, env, l, *run, only, *provenance, *limit)
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtm show <identity-key> [--fields a,b] [--provenance]")
+		return fail(ExitValidation, "usage: gtme show <identity-key> [--fields a,b] [--provenance]")
 	}
 	return showIdentity(ctx, env, l, positional[0], only, *provenance)
 }
@@ -158,7 +158,7 @@ func renderFields(rec ledger.Record, provenance bool) map[string]any {
 }
 
 // writeJSON writes one indented JSON object to stdout, for the single-record
-// form of `gtm show` (SPEC §8's --run form is NDJSON instead, since it can be
+// form of `gtme show` (SPEC §8's --run form is NDJSON instead, since it can be
 // many records).
 func writeJSON(env Env, v any) error {
 	enc := json.NewEncoder(env.Stdout)

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // Call is one HTTP request the adapter made, captured for assertions.

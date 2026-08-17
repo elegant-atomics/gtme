@@ -19,7 +19,7 @@ func runCLI(t *testing.T, args ...string) (int, string, string) {
 func TestInitCreatesLedgerAndIsRepeatable(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "ledger.db")
-	t.Setenv("GTM_LEDGER", dbPath)
+	t.Setenv("GTME_LEDGER", dbPath)
 
 	code, stdout, stderr := runCLI(t, "init")
 	if code != ExitOK {
@@ -46,7 +46,7 @@ func TestInitCreatesLedgerAndIsRepeatable(t *testing.T) {
 }
 
 func TestInitRejectsArguments(t *testing.T) {
-	t.Setenv("GTM_LEDGER", filepath.Join(t.TempDir(), "ledger.db"))
+	t.Setenv("GTME_LEDGER", filepath.Join(t.TempDir(), "ledger.db"))
 	if code, _, _ := runCLI(t, "init", "extra"); code != ExitValidation {
 		t.Errorf("exit = %d, want %d", code, ExitValidation)
 	}
@@ -57,12 +57,12 @@ func TestUnknownAndMissingCommand(t *testing.T) {
 		t.Errorf("exit = %d, want %d (stderr %q)", code, ExitValidation, stderr)
 	}
 	if code, _, _ := runCLI(t); code != ExitValidation {
-		t.Errorf("bare gtm exit = %d, want %d", code, ExitValidation)
+		t.Errorf("bare gtme exit = %d, want %d", code, ExitValidation)
 	}
 }
 
 func TestEveryVerbIsImplemented(t *testing.T) {
-	t.Setenv("GTM_LEDGER", filepath.Join(t.TempDir(), "ledger.db"))
+	t.Setenv("GTME_LEDGER", filepath.Join(t.TempDir(), "ledger.db"))
 	runCLI(t, "init")
 
 	// No verb should report itself unimplemented any more.
@@ -72,7 +72,7 @@ func TestEveryVerbIsImplemented(t *testing.T) {
 	} {
 		_, _, stderr := runCLI(t, args...)
 		if strings.Contains(stderr, "not implemented") {
-			t.Errorf("gtm %s reports itself unimplemented: %q", strings.Join(args, " "), stderr)
+			t.Errorf("gtme %s reports itself unimplemented: %q", strings.Join(args, " "), stderr)
 		}
 	}
 }
@@ -83,7 +83,7 @@ func TestPlanAndRunNeedAPipelineArgument(t *testing.T) {
 		if code != ExitValidation {
 			t.Errorf("%s exit = %d, want %d", verb, code, ExitValidation)
 		}
-		if !strings.Contains(stderr, "usage: gtm "+verb) {
+		if !strings.Contains(stderr, "usage: gtme "+verb) {
 			t.Errorf("%s stderr = %q", verb, stderr)
 		}
 	}
@@ -97,7 +97,7 @@ func TestVersion(t *testing.T) {
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "gtm ") {
+	if !strings.Contains(stderr, "gtme ") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }

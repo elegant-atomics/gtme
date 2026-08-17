@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 
 	_ "modernc.org/sqlite"
 )
@@ -21,7 +21,7 @@ import (
 var implementationOnlyObjects = map[string]string{
 	"schema_migrations": "migration bookkeeping (SPEC §3 mandates numbered migration files but names no ledger table for them)",
 	"identity_aliases":  "DECISIONS.md 2026-08-12: keeps every key an identity has been known by, so an identity upgrade (SPEC §4) cannot produce a duplicate",
-	"saved_queries":     "DECISIONS.md: storage for `gtm query --save NAME` (SPEC §8 names the feature, not its storage)",
+	"saved_queries":     "DECISIONS.md: storage for `gtme query --save NAME` (SPEC §8 names the feature, not its storage)",
 }
 
 // schemaObjects lists the tables and views in a database, by name.

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/adapters/adaptertest"
-	"github.com/trevorfox/gtm/internal/httpx"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/adapters/adaptertest"
+	"github.com/elegant-atomics/gtme/internal/httpx"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 func routes(t *testing.T) map[string]adaptertest.Response {

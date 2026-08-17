@@ -43,7 +43,7 @@ func (h *harness) writeBinding(newID string, yamlPath string) {
 		h.t.Fatalf("no id line in %s", yamlPath)
 	}
 	doc := strings.Replace(string(raw), "id: "+oldID, "id: "+newID, 1)
-	dir := filepath.Join(h.home, ".gtm", "adapters", strings.ReplaceAll(newID, "/", "-"))
+	dir := filepath.Join(h.home, ".gtme", "adapters", strings.ReplaceAll(newID, "/", "-"))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		h.t.Fatalf("mkdir: %v", err)
 	}

@@ -51,7 +51,7 @@ func (h *harness) fixtureScript(name string, responses ...string) []string {
 	}
 	body += "\n]\n"
 	path := h.write(name, body)
-	return []string{"GTM_AI_ENGINE=fixture", "GTM_AI_FIXTURE=" + path}
+	return []string{"GTME_AI_ENGINE=fixture", "GTME_AI_FIXTURE=" + path}
 }
 
 func jsonString(s string) string {
@@ -77,7 +77,7 @@ func TestAIStepsFilterComposeAndDeliver(t *testing.T) {
 	  {"identity_key": "carol@initech.dev", "pass": false, "reason": "not a decision maker"}
 	]`
 	env := h.fixtureScript("ai.json", "I'd be happy to help! Here are the results:", filterAnswer, "$auto")
-	env = append(env, "GTM_CONCURRENCY=1", "MOCK_DELIVER_LOG="+deliverLog)
+	env = append(env, "GTME_CONCURRENCY=1", "MOCK_DELIVER_LOG="+deliverLog)
 
 	first := h.runWithEnv(env, "", "run", "pipeline.yaml")
 	if first.code != 0 {
@@ -124,7 +124,7 @@ func TestAIStepsFilterComposeAndDeliver(t *testing.T) {
 
 	// Second run: same pipeline, same records. Nothing may be delivered twice.
 	env2 := h.fixtureScript("ai2.json", filterAnswer, "$auto")
-	env2 = append(env2, "GTM_CONCURRENCY=1", "MOCK_DELIVER_LOG="+deliverLog)
+	env2 = append(env2, "GTME_CONCURRENCY=1", "MOCK_DELIVER_LOG="+deliverLog)
 	second := h.runWithEnv(env2, "", "run", "pipeline.yaml")
 	if second.code != 0 {
 		t.Fatalf("second run exit = %d\nstderr:\n%s", second.code, second.stderr)
@@ -160,7 +160,7 @@ steps:
       prompt: Keep the good ones.
 `)
 	env := h.fixtureScript("ai.json", "nope", "still not json")
-	env = append(env, "GTM_CONCURRENCY=1")
+	env = append(env, "GTME_CONCURRENCY=1")
 
 	res := h.runWithEnv(env, "", "run", "pipeline.yaml")
 	if res.code == 0 {

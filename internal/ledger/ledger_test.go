@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/identity"
 )
 
 // openTest returns a ledger in a temp dir with a controllable clock.

@@ -37,7 +37,7 @@ func TestRunSourceThroughExternalAdapter(t *testing.T) {
 	contains(t, first.stderr, "source: sourced 3 records", "first run stderr")
 	contains(t, first.stderr, "mock: 3 in, 3 out", "first run stderr")
 	if first.stdout != "" {
-		t.Errorf("gtm run must keep stdout data-only, got:\n%s", first.stdout)
+		t.Errorf("gtme run must keep stdout data-only, got:\n%s", first.stdout)
 	}
 
 	// Identities: three people, and the three companies their domains imply.

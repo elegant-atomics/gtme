@@ -27,7 +27,7 @@ steps:
       fail_on: bob@globex.io
 `)
 
-	first := h.runWithEnv([]string{"GTM_CONCURRENCY=1"}, "", "run", "failing.yaml")
+	first := h.runWithEnv([]string{"GTME_CONCURRENCY=1"}, "", "run", "failing.yaml")
 	if first.code == 0 {
 		t.Fatalf("expected a non-zero exit when the adapter dies\nstderr:\n%s", first.stderr)
 	}

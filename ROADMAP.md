@@ -25,8 +25,8 @@ before `expand` gets a manifest shape.
 
 ## Pipes as a transport, not a syntax
 
-DECISIONS.md ADR-005 killed pipe syntax as a v0 *authoring* surface (`gtm
-source | gtm enrich | ...`) but preserved the seam on purpose: nothing in
+DECISIONS.md ADR-005 killed pipe syntax as a v0 *authoring* surface (`gtme
+source | gtme enrich | ...`) but preserved the seam on purpose: nothing in
 the runner may couple steps to shared in-process memory in a way that
 precludes running the same step executor over a stdio transport later.
 `adapters.Session` is already the boundary a future transport would sit
@@ -52,8 +52,8 @@ specified there. A natural extension of "two modes, one engine" (SPEC.md
 §1): today's modes are pipe-mode-for-exploration (deleted, see ADR-005) and
 YAML-for-frozen-workflows. An interactive shell — inspect the ledger,
 iterate on a pipeline's `needs`/`provides` wiring, re-run a single step
-against a small sample — is a plausible third mode once `gtm show` and
-`gtm plan` exist as building blocks. Genuinely speculative; no ADR grounds
+against a small sample — is a plausible third mode once `gtme show` and
+`gtme plan` exist as building blocks. Genuinely speculative; no ADR grounds
 its shape.
 
 ## Groups, option C — rules living on the group
@@ -88,7 +88,7 @@ pass. ADR-023 (the universal adapter set) confirmed this stays parked: its
 `query/source` slot was reconciled to ADR-021's group-as-source (the
 decided, extensional half); a segment-as-source remains the intensional
 half, still needing the design pass above. The
-`gtm groups add --from-segment` snapshot affordance (ADR-021) covers the
+`gtme groups add --from-segment` snapshot affordance (ADR-021) covers the
 common case in the meantime.
 
 ## Floor→ceiling growth loop
@@ -97,7 +97,7 @@ Standing position from ADR-023: receipts showing the same `http/*` target
 recurring across runs are the tool's cue to suggest minting a named
 binding — and, later, the demand signal that prioritizes what the
 adapter-authoring codegen skill should target. Needs a design pass on
-where the suggestion surfaces (receipt footer? `gtm plan` note?).
+where the suggestion surfaces (receipt footer? `gtme plan` note?).
 
 ## Reader-provider binding for JS-heavy pages
 
@@ -154,5 +154,5 @@ adapters, cheap token economics for an agent driving a shell. MCP's
 request/response tool-call shape fits a different job: an agent composing
 and launching pipelines, monitoring runs, or doing the fuzzy per-record
 research step, sitting *on top of* the CLI rather than replacing it. If
-this gets built, it's a thin control-plane wrapper that shells out to `gtm`
+this gets built, it's a thin control-plane wrapper that shells out to `gtme`
 — the wire protocol and ledger stay the single source of truth.

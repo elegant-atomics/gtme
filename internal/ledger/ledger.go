@@ -26,29 +26,29 @@ type Ledger struct {
 	now  func() time.Time // swappable in tests
 }
 
-// DefaultPath returns the ledger path: $GTM_LEDGER if set, else
-// ~/.gtm/ledger.db.
+// DefaultPath returns the ledger path: $GTME_LEDGER if set, else
+// ~/.gtme/ledger.db.
 func DefaultPath() (string, error) {
-	if p := os.Getenv("GTM_LEDGER"); p != "" {
+	if p := os.Getenv("GTME_LEDGER"); p != "" {
 		return p, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("ledger: locating home directory: %w", err)
 	}
-	return filepath.Join(home, ".gtm", "ledger.db"), nil
+	return filepath.Join(home, ".gtme", "ledger.db"), nil
 }
 
-// Home returns the ~/.gtm directory (or the directory holding $GTM_LEDGER).
+// Home returns the ~/.gtme directory (or the directory holding $GTME_LEDGER).
 func Home() (string, error) {
-	if p := os.Getenv("GTM_LEDGER"); p != "" {
+	if p := os.Getenv("GTME_LEDGER"); p != "" {
 		return filepath.Dir(p), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("ledger: locating home directory: %w", err)
 	}
-	return filepath.Join(home, ".gtm"), nil
+	return filepath.Join(home, ".gtme"), nil
 }
 
 // Open opens (creating if needed) the ledger at path and applies any pending
@@ -70,8 +70,8 @@ func Open(ctx context.Context, path string) (*Ledger, error) {
 	// _txlock=immediate takes the write lock at BEGIN rather than on the first
 	// write. Without it a read-modify-write transaction can be invalidated by
 	// another process writing in between (SQLITE_BUSY_SNAPSHOT), which busy_timeout
-	// cannot wait out — and a `gtm run` can legitimately overlap another `gtm
-	// run`, `gtm query`, or `gtm show` against the same ledger file.
+	// cannot wait out — and a `gtme run` can legitimately overlap another `gtme
+	// run`, `gtme query`, or `gtme show` against the same ledger file.
 	dsn := "file:" + path +
 		"?_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
@@ -100,7 +100,7 @@ func (l *Ledger) Close() error { return l.db.Close() }
 // Path is the file backing this ledger.
 func (l *Ledger) Path() string { return l.path }
 
-// DB exposes the underlying handle for read-only queries (gtm query) and for
+// DB exposes the underlying handle for read-only queries (gtme query) and for
 // packages that need a transaction. Writes should go through Ledger methods so
 // timestamps and IDs stay consistent.
 func (l *Ledger) DB() *sql.DB { return l.db }
@@ -127,7 +127,7 @@ func ParseTime(s string) (time.Time, error) {
 var ErrNotFound = errors.New("ledger: not found")
 
 func (l *Ledger) tx(ctx context.Context, fn func(*sql.Tx) error) error {
-	// Retry a genuinely contended transaction a few times: several gtm processes
+	// Retry a genuinely contended transaction a few times: several gtme processes
 	// can legitimately share one ledger file concurrently, and losing a lock
 	// race is not an error worth showing an operator.
 	const attempts = 5

@@ -5,11 +5,11 @@ invariant: >
 given: >
   A ledger with records from one or more prior runs.
 when: >
-  The operator runs `gtm query --save NAME "SELECT ..."` with a single
+  The operator runs `gtme query --save NAME "SELECT ..."` with a single
   SELECT/WITH/EXPLAIN statement.
 then: >
   The statement is stored and re-executable by name, it runs against a
   read-only connection (`mode=ro`) so it cannot mutate the ledger, and its
   result set can be used to scope which identities a subsequent pipeline or
-  `gtm show` inspects.
-spec_refs: ["§8 gtm query", "§11 M4"]
+  `gtme show` inspects.
+spec_refs: ["§8 gtme query", "§11 M4"]

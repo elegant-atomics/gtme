@@ -119,7 +119,7 @@ func Parse(raw []byte) (*Pipeline, error) {
 	return &p, nil
 }
 
-// Marshal renders a pipeline back to YAML (gtm freeze).
+// Marshal renders a pipeline back to YAML (gtme freeze).
 func Marshal(p *Pipeline) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

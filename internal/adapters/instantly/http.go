@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/trevorfox/gtm/internal/httpx"
+	"github.com/elegant-atomics/gtme/internal/httpx"
 )
 
 // DefaultBaseURL is Instantly's API host.
@@ -55,7 +55,7 @@ type leadResponse struct {
 }
 
 // campaignIDs caches resolved name → id for the life of the process, so one
-// `gtm run` resolves a campaign once (SPEC §10.6) even though the worker pool
+// `gtme run` resolves a campaign once (SPEC §10.6) even though the worker pool
 // opens several adapter sessions. Found by campaign zero's first armed run,
 // which logged one resolution per session.
 var campaignIDs sync.Map

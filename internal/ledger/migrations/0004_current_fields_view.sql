@@ -11,7 +11,7 @@
 -- though windowing still has to happen where the window is known.
 --
 -- current_fields = field_value_ranks with no window applied (rank = 1): the
--- plain, ad hoc `gtm query` answer to "what's the current value", matching
+-- plain, ad hoc `gtme query` answer to "what's the current value", matching
 -- SPEC §8's query examples. The runner's Project() instead reads every rank
 -- for a field, in order, and takes the first row that falls inside its
 -- freshness window — the same rule, applied with a window current_fields

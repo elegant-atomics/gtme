@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/bundle"
-	"github.com/trevorfox/gtm/internal/httpx"
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/pipeline"
-	"github.com/trevorfox/gtm/internal/planner"
-	"github.com/trevorfox/gtm/internal/runner"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/bundle"
+	"github.com/elegant-atomics/gtme/internal/httpx"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/elegant-atomics/gtme/internal/runner"
 )
 
 // cmdRun executes a pipeline file.
@@ -21,7 +21,7 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
 	resume := fs.String("resume", "", "resume an existing run by id (or 'last')")
-	concurrency := fs.Int("concurrency", 0, "worker pool size per step (default 4 or $GTM_CONCURRENCY)")
+	concurrency := fs.Int("concurrency", 0, "worker pool size per step (default 4 or $GTME_CONCURRENCY)")
 	dryRun := fs.Bool("dry-run", false, "hold deliver steps back: resolve and receipt their variables, send nothing (SPEC §8)")
 	simulate := fs.Bool("simulate", false, "execute the whole pipeline offline from fixtures: no network, no spend, nothing sends, nothing persists (SPEC §8)")
 	positional, err := parseFlags(fs, args)
@@ -29,7 +29,7 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtm run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]")
+		return fail(ExitValidation, "usage: gtme run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]")
 	}
 	if *simulate && *dryRun {
 		return fail(ExitValidation, "--simulate already withholds delivery; drop --dry-run")
@@ -88,7 +88,7 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	if *simulate {
 		// Ephemerality is the durability exclusion (SPEC §8): the simulated run
 		// executes against a throwaway copy of the ledger, so its writes cannot
-		// reach projection or cache and it never appears in `gtm runs`.
+		// reach projection or cache and it never appears in `gtme runs`.
 		tmp, cleanup, err := ephemeralLedger(ctx, l)
 		if err != nil {
 			return fail(ExitOther, "%v", err)
@@ -135,7 +135,7 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtm plan pipeline.yaml")
+		return fail(ExitValidation, "usage: gtme plan pipeline.yaml")
 	}
 
 	p, err := pipeline.Load(positional[0])
@@ -189,7 +189,7 @@ func onlyCredentialProblems(err error) bool {
 // ephemeralLedger copies the ledger into a throwaway file (VACUUM INTO — a
 // consistent snapshot even under WAL) and opens it. cleanup removes it.
 func ephemeralLedger(ctx context.Context, l *ledger.Ledger) (*ledger.Ledger, func(), error) {
-	f, err := os.CreateTemp("", "gtm-simulate-*.db")
+	f, err := os.CreateTemp("", "gtme-simulate-*.db")
 	if err != nil {
 		return nil, nil, err
 	}

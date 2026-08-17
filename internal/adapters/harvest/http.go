@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/httpx"
+	"github.com/elegant-atomics/gtme/internal/httpx"
 )
 
 // DefaultBaseURL is HarvestAPI's host.
@@ -34,7 +34,7 @@ type profileResponse struct {
 	Error   string          `json:"error"`
 }
 
-// profile is the subset of a HarvestAPI profile gtm maps.
+// profile is the subset of a HarvestAPI profile gtme maps.
 type profile struct {
 	ID               string `json:"id"`
 	PublicIdentifier string `json:"publicIdentifier"`
@@ -233,7 +233,7 @@ func (a *Adapter) fetchPosts(ctx context.Context, cfg config, apiKey, profileID,
 	return out.results(), nil
 }
 
-// fields maps a profile (and its posts) onto gtm field names.
+// fields maps a profile (and its posts) onto gtme field names.
 func fields(p profile, posts []post, limit int) map[string]any {
 	out := map[string]any{}
 	if s := strings.TrimSpace(p.Headline); s != "" {

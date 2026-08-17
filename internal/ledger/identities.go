@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/identity"
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // Identity is a row of the identities table.
@@ -192,7 +192,7 @@ func (l *Ledger) IdentityByKey(ctx context.Context, entityType, key string) (Ide
 }
 
 // FindByKey looks up one identity by its key alone, across entity types —
-// `gtm show <identity-key>` (SPEC §8, ADR-006) takes no entity_type, since the
+// `gtme show <identity-key>` (SPEC §8, ADR-006) takes no entity_type, since the
 // operator is naming a record, not describing its shape. Person and company
 // keys never collide in practice (different formats: email/LinkedIn-slug/
 // name-hash vs. domain/name-hash), but the schema's UNIQUE constraint is

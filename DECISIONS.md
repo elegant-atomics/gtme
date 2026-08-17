@@ -41,7 +41,7 @@ preserved from the seed.
 ### ADR-003: Projection ships as a SQL VIEW
 **Status:** Accepted (audit fix; supersedes projection-in-Go-only)
 **Context:** Query examples referenced a `current_fields` relation that didn't exist; projection logic lived only in `internal/ledger/project.go`, so query-land and runner-land could drift.
-**Decision:** Define the current-value projection (highest-confidence within freshness window, newest wins ties) as a SQL view created with the schema. Runner and `gtm query` both use it. One definition.
+**Decision:** Define the current-value projection (highest-confidence within freshness window, newest wins ties) as a SQL view created with the schema. Runner and `gtme query` both use it. One definition.
 **Spec impact:** AMEND — ledger section gains the view DDL; query examples corrected to use it.
 
 ### ADR-004: `uses:` — dynamic needs for AI steps
@@ -54,21 +54,21 @@ mechanics here are unchanged, only the framing broadens.
 **Spec impact:** AMEND — manifest/config section + plan semantics.
 
 ### ADR-005: Pipe syntax dropped from v0 entirely
-**Status:** Accepted. **Supersedes** (in order): multi-process pipe chaining as M3 → inline `gtm x '<a>|<b>'` expression form → both.
+**Status:** Accepted. **Supersedes** (in order): multi-process pipe chaining as M3 → inline `gtme x '<a>|<b>'` expression form → both.
 **Context:** The v0 hypotheses to falsify are (a) ledger/runner semantics, (b) adapters writable against the protocol, (c) Claude can build and operate the system. Pipe syntax tests none of them — it is a presentation of the pipeline object — and it was the recurring source of spec inconsistencies.
-**Decision:** v0 CLI surface is exactly: `init, secret, plan, run (--resume), query, show, runs, freeze, help --agent`. No `gtm x`, no multi-process pipes, no standalone source/filter/enrich/compose/deliver subcommands (they existed only for pipe mode — cull them). YAML is the only pipeline authoring surface. One constraint on implementation: nothing may couple steps to shared in-process memory in a way that precludes a future stdio transport; do not build the transport abstraction, just don't destroy the seam.
+**Decision:** v0 CLI surface is exactly: `init, secret, plan, run (--resume), query, show, runs, freeze, help --agent`. No `gtme x`, no multi-process pipes, no standalone source/filter/enrich/compose/deliver subcommands (they existed only for pipe mode — cull them). YAML is the only pipeline authoring surface. One constraint on implementation: nothing may couple steps to shared in-process memory in a way that precludes a future stdio transport; do not build the transport abstraction, just don't destroy the seam.
 **Consequences:** M3 (pipe mode) is deleted; milestones renumber. Validation campaign debugs one execution path. Pipes return post-v0, if at all, as a transport over the same step executor (see ROADMAP.md).
 **Spec impact:** AMEND — CLI surface section, §8 pipe-mode mechanics deleted, milestones restructured, non-goals gains: "pipe syntax deferred; all pipeline surfaces compile to the pipeline object."
 
-### ADR-006: `gtm show` — standalone read-only projection inspector
+### ADR-006: `gtme show` — standalone read-only projection inspector
 **Status:** Accepted (mid-stream tap form dies with ADR-005; standalone form survives)
-**Decision:** `gtm show <identity-key>` and `gtm show --run last` print full ledger projection with `--fields/--provenance/--limit`. Strictly read-only; never appears in freeze output.
+**Decision:** `gtme show <identity-key>` and `gtme show --run last` print full ledger projection with `--fields/--provenance/--limit`. Strictly read-only; never appears in freeze output.
 **Spec impact:** AMEND — add verb to CLI surface (lands in what was M4).
 
-### ADR-007: `gtm help --agent` — self-describing surface
+### ADR-007: `gtme help --agent` — self-describing surface
 **Status:** Accepted
 **Context:** The LLM's real interface is whatever document about the CLI is in its context; that document must be generated, never hand-maintained.
-**Decision:** `gtm help --agent` emits the full surface — verbs, flags, every installed adapter manifest (needs/provides), 3 canonical examples — as one compact (~1–2k token) machine-readable doc regenerated from the registry.
+**Decision:** `gtme help --agent` emits the full surface — verbs, flags, every installed adapter manifest (needs/provides), 3 canonical examples — as one compact (~1–2k token) machine-readable doc regenerated from the registry.
 **Spec impact:** AMEND — add to CLI surface + acceptance criterion (doc must round-trip: an agent given only this doc can author a valid pipeline).
 
 ### ADR-008: `expand` role — named and deferred
@@ -79,7 +79,7 @@ mechanics here are unchanged, only the framing broadens.
 
 ### ADR-009: Webhooks/batch via spool + cron; no daemon
 **Status:** Accepted
-**Decision:** Event-driven operation = commodity receiver (Worker/Zapier/Action) appends payloads to a spool; scheduled `gtm run` drains it via a `webhook/source` adapter (near-clone of csv/source). Deliveries-table idempotency absorbs at-least-once redelivery structurally. Per-event low latency is explicitly out of scope for v0.
+**Decision:** Event-driven operation = commodity receiver (Worker/Zapier/Action) appends payloads to a spool; scheduled `gtme run` drains it via a `webhook/source` adapter (near-clone of csv/source). Deliveries-table idempotency absorbs at-least-once redelivery structurally. Per-event low latency is explicitly out of scope for v0.
 **Spec impact:** AMEND — add webhook/source to adapter list, document the pattern as a recipe, keep "no daemon" in non-goals with this as the stated answer.
 
 ### ADR-010: Spec-as-canon methodology
@@ -329,7 +329,7 @@ all plan-validated:
   stochastic run to run, and set membership freezes its first answer as a
   recorded decision; re-judging becomes a deliberate act (remove from the
   group, change the prompt), never an accident of re-running. Plain set
-  arithmetic, inspectable with `gtm query`, replaces any judgment-cache
+  arithmetic, inspectable with `gtme query`, replaces any judgment-cache
   mechanism. (A `remember:`-style cache consulting judgment events was
   considered and dropped as redundant sugar over exclude-and-add.)
 - `record: <group>` on a deliver step — successful deliveries append
@@ -346,9 +346,9 @@ services, human review) gates which records continue through this run,
 groups persist sets, and only the runner connects them. Single-pipeline
 use with no groups at all remains fully supported.
 
-Everything subtler is `gtm query`: segments-as-SQL extend over the group
+Everything subtler is `gtme query`: segments-as-SQL extend over the group
 tables automatically, and an extensional "frozen list" is simply a group
-nobody updates. Two affordances follow: `gtm groups add <group>
+nobody updates. Two affordances follow: `gtme groups add <group>
 --from-segment <name>` (or `--query "SQL"`) snapshots an intensional
 definition into extensional membership, each `added` event carrying
 "segment X evaluated at T" provenance; and because the run layer logs
@@ -378,7 +378,7 @@ groups.
 membership view), §9 YAML (group terminus and source, `require:`,
 `exclude:`, `record:`, `suppress:`), §8 deliver semantics and receipt
 lines, §7 plan checks (referenced groups exist; windows well-formed), a
-`gtm groups` verb set (list with derived character, `add
+`gtme groups` verb set (list with derived character, `add
 --from-segment/--query`), and acceptance criteria. To be applied only
 after human approval, as a reconciliation-plus-build pass like
 ADR-017/018/019's.
@@ -477,7 +477,7 @@ guarantee ("wireable today"), not excellence. Bindings are the ceiling.
   is repo ADR-021's group-as-source — members of an asserted group
   projected from the ledger, the extensional half — and that is the
   universal-floor In slot: any set you can name, import, or snapshot
-  (`gtm groups add --from-segment/--query`) becomes a source.
+  (`gtme groups add --from-segment/--query`) becomes a source.
   `query/source` stays parked in ROADMAP.md.
 - Transform: `ai/*` steps — kept PURE: fields in via uses:, fields/
   verdicts out, NO network access (see ADR-024 for the fetch half)
@@ -618,7 +618,7 @@ reason as the previous packet, cross-references adjusted. Neither blocks
 the binding-engine milestone: ADR-028 lands naturally with it, ADR-029
 immediately after.
 
-### ADR-028: Simulation gate — `gtm run --simulate`
+### ADR-028: Simulation gate — `gtme run --simulate`
 **Status:** Accepted
 **Context:** Bindings execute against fixture payloads as easily as
 against live vendors (ADR-022's conformance kit already requires
@@ -626,7 +626,7 @@ fixtures). That makes whole-pipeline offline execution nearly free, and
 it fills a gap in the gate ladder: plan validates contracts but executes
 nothing; dry-run executes but touches live read APIs (spend) and stops
 only at delivery.
-**Decision:** `gtm run --simulate <pipeline>`: executes the ENTIRE
+**Decision:** `gtme run --simulate <pipeline>`: executes the ENTIRE
 pipeline with every binding served from its conformance fixtures and
 every process/AI step either fixture-served or stubbed (AI steps replay
 recorded fixture responses when present, else emit a marked synthetic
@@ -654,11 +654,11 @@ end-to-end with zero network calls.
 all being data, a campaign is fully expressible as a folder of text files
 — no code. `freeze` already snapshots a pipeline; this names its output
 format and scope.
-**Decision:** `gtm freeze` produces a **campaign bundle**: a directory
+**Decision:** `gtme freeze` produces a **campaign bundle**: a directory
 (or tarball) containing the pipeline YAML, every referenced binding at
 its exact version, AI prompt files, saved queries, the relevant registry
 slice, and a manifest (bundle format version, content hashes, source run
-id). Properties to guarantee: (a) self-contained — `gtm run` on a bundle
+id). Properties to guarantee: (a) self-contained — `gtme run` on a bundle
 resolves nothing outside it except credentials; (b) diffable — text
 files, stable ordering; (c) portable — same bundle runs on any
 machine/ledger (membership and cache naturally differ; contracts don't).
@@ -718,7 +718,7 @@ forever. Raw payloads live in their own table —
 `payloads(id, identity_id, adapter, run_id, content_type, body,
 created_at, expires_at)` — which is cache material and therefore
 legitimately purgeable. Payloads are never projected into any step and
-never appear in `gtm show`'s default output; the only paths out are
+never appear in `gtme show`'s default output; the only paths out are
 (a) extraction, which writes facts with normal provenance, and
 (b) deliberate promotion into a content *field* (the `http/enrich`
 `homepage_markdown` pattern, with mandatory freshness and size cap) when
@@ -727,7 +727,7 @@ adapters and bindings declare `keep_payloads` with a TTL and an
 engine-enforced size cap (manifest/binding default, per-step override —
 the `freshness_days` shape). Default is **on** with a 90-day TTL,
 defensible precisely because eviction exists. Eviction is opportunistic
-at run start plus an explicit `gtm vacuum` verb (receipted; no daemon,
+at run start plus an explicit `gtme vacuum` verb (receipted; no daemon,
 per ADR-009's stance). The unit stored is the per-record slice for
 sources, the response body for enrich/deliver.
 **Consequences:** Registry promotions become retroactive — when a field
@@ -747,11 +747,11 @@ payload-derived facts.
 **Spec impact:** AMEND (build queued per sequencing) — §3 gains the
 `payloads` DDL with the cache-not-facts note (explicitly exempt from
 append-only, never projected); §6 and §10a gain the
-`keep_payloads`/TTL/size-cap surface; §8 gains `gtm vacuum`; ROADMAP.md
+`keep_payloads`/TTL/size-cap surface; §8 gains `gtme vacuum`; ROADMAP.md
 gains the re-extraction/fixture-minting/simulate-replay entries.
 Acceptance: a run with retention on stores payloads and a re-run after a
 binding improvement back-fills a new field with zero vendor calls;
-`gtm vacuum` removes expired payloads and nothing else.
+`gtme vacuum` removes expired payloads and nothing else.
 
 ## Implementation Decisions
 
@@ -760,7 +760,7 @@ Predates the ADR log above; recorded per SPEC.md §12. Newest last.
 ### 2026-08-12 — Module path
 
 **Q:** What Go module path?
-**Choice:** `github.com/trevorfox/gtm`.
+**Choice:** `github.com/elegant-atomics/gtme`.
 **Why:** Matches the repo owner's GitHub account. Nothing outside `go.mod`,
 imports, and the `make build` ldflags depends on it; rename with a single
 `gofmt -r`-style sweep if the repo lands elsewhere.
@@ -853,7 +853,7 @@ adapter that starts replying early. That bug was found and fixed in M2.
 
 **Q:** §2 pins a minimal dependency set; three additions came up.
 **Choice:** `github.com/anthropics/anthropic-sdk-go` for the AI engine,
-`golang.org/x/term` for the no-echo `gtm secret set` prompt, and
+`golang.org/x/term` for the no-echo `gtme secret set` prompt, and
 `golang.org/x/net/publicsuffix` (already implied by §4's eTLD+1 requirement).
 **Why:** The Anthropic SDK is the vendor-supported client — hand-rolling the
 Messages API would mean owning request shapes, retries and error classification
@@ -866,7 +866,7 @@ no ORM.
 
 **Q:** §2 decides model `claude-sonnet-4-6`.
 **Choice:** Kept as the default, overridable per step (`model:` in `with`) or
-globally (`GTM_AI_MODEL`). A small static price table in
+globally (`GTME_AI_MODEL`). A small static price table in
 `internal/ai/pricing.go` turns token usage into the COST messages the receipt
 sums; an unknown model reports *unpriced* rather than guessing, and the receipt
 prints `?`.
@@ -893,7 +893,7 @@ a schema: it catches invented, dropped and duplicated identity keys.
 
 **Q:** M5 says "tests use a fake engine". How does the test choose it without
 polluting the pipeline format?
-**Choice:** `GTM_AI_ENGINE=fixture` plus `GTM_AI_FIXTURE=<script.json>`, a JSON
+**Choice:** `GTME_AI_ENGINE=fixture` plus `GTME_AI_FIXTURE=<script.json>`, a JSON
 array of scripted responses. `engine:` in a pipeline still accepts only the two
 engines §2 defines. The sentinel response `"$auto"` makes the engine synthesize a
 schema-valid answer for whatever batch is in flight, so a test can exercise
@@ -909,7 +909,7 @@ then valid) testable offline and deterministically.
 AI step wants whatever is known, which no property list can express.
 **Choice:** A `needs` schema that is open-ended and names no properties
 (`additionalProperties: true`, no `properties`) marks the step as *needs-all*;
-the runner projects every field the ledger holds for the record. `gtm plan`
+the runner projects every field the ledger holds for the record. `gtme plan`
 prints "projects: (every field known about the record)".
 **Why:** Without it, an AI filter would receive an empty object. Expressing it in
 the schema keeps the rule in the manifest rather than in an adapter-specific
@@ -935,7 +935,7 @@ paid this provider for this record — and a version bump still invalidates.
 runs on the `claude-code` engine needs no API key, so declaring
 `ANTHROPIC_API_KEY` as required would fail plans that are fine.
 **Choice:** New additive manifest field `credentials_optional`: injected when
-present, reported by `gtm plan` as a warning when absent, never a plan error.
+present, reported by `gtme plan` as a warning when absent, never a plan error.
 Required credentials behave exactly as §6 says.
 **Why:** Keeps "fail before spending" for the cases where the key is genuinely
 required, without inventing conditional-credential syntax.
@@ -948,7 +948,7 @@ stay open-ended?
 **Choice:** No. The static manifest schema is open (the planner may have no
 config to probe with), but a **probed** header is exact, so that schema is closed
 (`additionalProperties: false`).
-**Why:** It is what makes `gtm plan` catch "this pipeline needs `linkedin_url`
+**Why:** It is what makes `gtme plan` catch "this pipeline needs `linkedin_url`
 and your CSV has no such column" before a single record is processed, instead of
 discovering it per record at run time.
 **Spec impact:** None (an implementation-level tightening of an already-open manifest schema).
@@ -969,18 +969,18 @@ the stored key.
 ### 2026-08-13 — Pipe mode is stage-buffered, and adapters can be discovered from a path
 
 **Q:** How much streaming does pipe mode really do, and how do tests reach
-external adapters that are not installed in `~/.gtm/adapters`?
+external adapters that are not installed in `~/.gtme/adapters`?
 **Choice:** Each pipe stage reads its whole input before dispatching, then emits.
-`GTM_ADAPTER_PATH` (colon-separated) is searched before `~/.gtm/adapters`.
+`GTME_ADAPTER_PATH` (colon-separated) is searched before `~/.gtme/adapters`.
 **Why:** Batching (one adapter invocation per `batch_size` records) and per-step
 cache accounting both need the full working set anyway, and buffering keeps the
-run/pipe semantics identical — the acceptance test relies on `gtm freeze`
+run/pipe semantics identical — the acceptance test relies on `gtme freeze`
 producing a pipeline that runs the same way. Per-record streaming is a v1
 question. The search path is how the repo's own fixture adapters are found
 without installing anything.
 **Spec impact:** **PARTIALLY SUPERSEDED by ADR-005.** The stage-buffering half
 documented pipe mode, which is deleted from v0 entirely (see AUDIT.md for the
-dead-code removal). The `GTM_ADAPTER_PATH` discovery mechanism is unaffected —
+dead-code removal). The `GTME_ADAPTER_PATH` discovery mechanism is unaffected —
 it's used by the e2e test harness independent of pipe mode — and remains live.
 
 ### 2026-08-13 — Provider exit codes survive the runner
@@ -988,7 +988,7 @@ it's used by the e2e test harness independent of pipe mode — and remains live.
 **Q:** §8 defines exit codes 3 auth, 4 rate-limited, 5 network. Adapters are the
 things that meet providers.
 **Choice:** `internal/httpx` classifies provider failures and the error carries an
-`ExitCode()`; the runner wraps errors with `%w`, and `gtm run` / the pipe verbs
+`ExitCode()`; the runner wraps errors with `%w`, and `gtme run` / the pipe verbs
 exit with that code. An external adapter that exits 2/3/4/5 has its code
 preserved through `adapters.ExitError`.
 **Why:** "Rate limited" and "your key is wrong" deserve different retry
@@ -998,10 +998,10 @@ table.
 
 ### 2026-08-13 — Saved segments live in the ledger
 
-**Q:** §8 has `gtm query --save NAME` but does not say where the SQL goes.
+**Q:** §8 has `gtme query --save NAME` but does not say where the SQL goes.
 **Choice:** Migration `0003_saved_queries.sql`, a `saved_queries` table.
 **Why:** A segment is a statement about the ledger's contents; it belongs beside
-the ledger, gets backed up with it, and needs no new file format. `gtm query` is
+the ledger, gets backed up with it, and needs no new file format. `gtme query` is
 enforced read-only twice over: the statement must be a single SELECT/WITH/EXPLAIN,
 and it runs on a connection opened `mode=ro`.
 **Spec impact:** None (fills in the storage location `--save` left unspecified).
@@ -1043,7 +1043,7 @@ network and zero durability?
    every other adapter — the runner cannot tell a binding from a process
    adapter, which is what "same manifest surface, plan treats both tiers
    identically" (§10a) demands. Discovery mirrors §6:
-   `~/.gtm/adapters/<name>/binding.yaml` resolves via a loader hook wired in
+   `~/.gtme/adapters/<name>/binding.yaml` resolves via a loader hook wired in
    `internal/adapters/all` (no import cycle). Embedded bindings live under
    `spec/bindings/` (embedded in `package spec` like the field registry).
 2. **The three reference ports are shipped data, not registered built-ins.**
@@ -1086,9 +1086,9 @@ network and zero durability?
    with `VACUUM INTO` (a consistent snapshot under WAL) and runs against the
    throwaway copy — the §8 durability exclusion implemented as ephemerality,
    with no schema flag and nothing for projection/cache to filter. The
-   runner injects `GTM_SIMULATE=1` (bindings switch to fixture-served mode)
-   and, for AI steps, `GTM_AI_ENGINE=fixture` plus a synthesized `["$auto"]`
-   script — an operator-recorded `GTM_AI_FIXTURE` in the process env still
+   runner injects `GTME_SIMULATE=1` (bindings switch to fixture-served mode)
+   and, for AI steps, `GTME_AI_ENGINE=fixture` plus a synthesized `["$auto"]`
+   script — an operator-recorded `GTME_AI_FIXTURE` in the process env still
    wins, which is §8's replay-when-present rule. Credentialed non-AI process
    adapters (and bindings without fixtures) are stubbed: records pass
    through untouched, counted and receipted as simulation gaps; a stubbed
@@ -1115,7 +1115,7 @@ the needs-all wildcard path — and the runner projects members directly;
 nothing crosses the wire protocol. (2) Plan-time group checks live on the
 Plan (`CheckGroups`), called by the CLI with the ledger opened lazily —
 only when the plan references groups — so planner.Build stays ledger-free
-and a group-free pipeline still plans without `gtm init`; the check is
+and a group-free pipeline still plans without `gtme init`; the check is
 enforced under `--simulate` too (a missing group is a contract error, not
 a credential). (3) The terminus adds only completers who are not already
 members — re-asserting membership would put noise in the event trail the
@@ -1127,7 +1127,7 @@ to dry runs too: a rehearsal that ignored the contact policy would
 rehearse the wrong send. (5) Membership gates load each referenced
 group's set once per step and share the `when:` Gated counter — a gated
 record is simply not dispatched, which is the whole judgment-memory
-mechanism. (6) `gtm groups add/remove` edits are idempotent (no-op events
+mechanism. (6) `gtme groups add/remove` edits are idempotent (no-op events
 are skipped); snapshots require an `identity_id` column and run on the
 read-only connection; bare keys resolve via FindByKey with `--type` for
 the ambiguous case. (7) The v0 answer to grouping a filter's failers is a
@@ -1158,11 +1158,11 @@ is what "resolves nothing outside it except credentials" means
 operationally. (3) External process adapters do not travel — executables
 are not data (the ADR-022 security line, applied in reverse) — and
 freeze warns per step instead of silently narrowing the bundle. Built-in
-process adapters ship inside the gtm binary itself. (4) Content hashes
+process adapters ship inside the gtme binary itself. (4) Content hashes
 are verified on every bundle run; a mismatch is a validation error
 naming the file — diffable means the manifest is the truth. (5) Relative
 input files (a source CSV) and credentials stay operator-provided, the
-same category as membership and cache. (6) `gtm freeze` now preserves
+same category as membership and cache. (6) `gtme freeze` now preserves
 the pipeline's own name (`--name` wins; `frozen-<id>` only for ad hoc
 runs) — a bundle carries the campaign's identity, and the old
 always-rename behavior predated anything caring about the name.
@@ -1206,7 +1206,7 @@ through the same path as adapter VERDICTs. Query-hash provenance is the
 first 12 hex of sha256 over the trimmed text. Plan-time field-name
 validation is entity-type-blind for SQL steps (the pipeline's entity is
 not knowable at resolve time); the runtime registry check per record
-still enforces. (5) Eviction: `gtm vacuum` plus an opportunistic purge at
+still enforces. (5) Eviction: `gtme vacuum` plus an opportunistic purge at
 armed-run start; simulated runs skip it (their ledger is a throwaway
 copy).
 **Why:** M11's acceptance runs the whole floor offline: markdown into a
@@ -1230,7 +1230,7 @@ defaulted — ADR-023's "even the trivial case cannot infer semantics",
 enforced where a default identity key would have silently guessed.
 (2) Auth declared in an http/* step's config (`auth.env`) now resolves
 through the same machinery as manifest credentials (env, then
-~/.gtm/secrets) and is plan-checked — previously a config-referenced env
+~/.gtme/secrets) and is plan-checked — previously a config-referenced env
 var would have bypassed the secrets file entirely. (3) `csv/deliver` is
 a plain process adapter (file I/O, not HTTP): columns are the sorted
 variables: targets behind a leading identity_key; the header is written
@@ -1245,3 +1245,25 @@ file — the Out floor inherits every deliver guarantee (dry/armed,
 completeness, idempotency, suppression) because it sits behind the same
 runner semantics.
 **Spec impact:** None beyond v0.10.
+
+### 2026-08-16 — The name is gtme, and the rename is total
+
+**Question:** The project needed its public name before first push: `gtm`
+collides with existing tools, and the working name had always been
+provisional.
+**Choice:** **gtme** — as in *GTM engineer*, which is also the audience —
+decided by the human. Because the repo is pre-public with zero users, the
+rename is total and shim-free: binary `gtme`, home `~/.gtme`, env prefix
+`GTME_`, schema `$id` host `gtme.spec`, module path
+`github.com/elegant-atomics/gtme`, and every command in every document,
+historical entries included (pre-publication, the tool effectively always
+had this name). One exception preserved: `gtm-campaign-zero-*` strings
+name real external Instantly campaigns and keep their historical
+spelling. The operator's live state was copied `~/.gtm` → `~/.gtme`
+(non-destructively; the old directory remains until the operator removes
+it).
+**Why:** Renames get exponentially more expensive after publication — the
+module path is identity in Go, and env vars/home paths ossify into user
+scripts. This was the last free moment to do it.
+**Spec impact:** Changelog v0.12; §2 binary name and every env/path
+reference (applied wholesale).

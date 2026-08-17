@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestShowIdentityPrintsProjection is the M3 acceptance test for `gtm show`
+// TestShowIdentityPrintsProjection is the M3 acceptance test for `gtme show`
 // (SPEC §8, ADR-006): the current-value projection for one identity, with
 // --fields narrowing it and --provenance adding source/confidence/run.
 func TestShowIdentityPrintsProjection(t *testing.T) {
@@ -97,7 +97,7 @@ func TestShowRunListsRecords(t *testing.T) {
 	}
 }
 
-// TestShowNeverWrites keeps `gtm show` read-only (SPEC §8, ADR-006): running
+// TestShowNeverWrites keeps `gtme show` read-only (SPEC §8, ADR-006): running
 // it must not change the ledger's row counts.
 func TestShowNeverWrites(t *testing.T) {
 	h := newHarness(t)
@@ -110,6 +110,6 @@ func TestShowNeverWrites(t *testing.T) {
 	h.mustRun("show", "--run", "last")
 	after := h.queryInt(`SELECT count(*) FROM field_values`)
 	if before != after {
-		t.Errorf("field_values went from %d to %d rows — gtm show wrote to the ledger", before, after)
+		t.Errorf("field_values went from %d to %d rows — gtme show wrote to the ledger", before, after)
 	}
 }

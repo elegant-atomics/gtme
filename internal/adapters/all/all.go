@@ -7,14 +7,14 @@
 package all
 
 import (
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/binding"
 
-	_ "github.com/trevorfox/gtm/internal/adapters/aisteps"
-	_ "github.com/trevorfox/gtm/internal/adapters/csvdeliver"
-	_ "github.com/trevorfox/gtm/internal/adapters/csvsource"
-	_ "github.com/trevorfox/gtm/internal/adapters/harvest"
-	_ "github.com/trevorfox/gtm/internal/adapters/instantly"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/aisteps"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/csvdeliver"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/csvsource"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/harvest"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/instantly"
 )
 
 func init() {

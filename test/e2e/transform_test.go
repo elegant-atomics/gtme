@@ -4,7 +4,7 @@ package e2e
 // retention, offline — http/enrich fetches a local page to markdown into a
 // declared field with the raw response retained as a payload and the second
 // run cache-skipping the fetch; sql/enrich derives a field with query-hash
-// provenance; sql/filter gates by predicate in both styles; gtm vacuum
+// provenance; sql/filter gates by predicate in both styles; gtme vacuum
 // reports; --simulate counts http/enrich as a gap while SQL runs.
 
 import (
@@ -75,7 +75,7 @@ steps:
 	}
 	contains(t, res.stderr, "fetch: 0 in, 0 out, 3 cached", "cache-skip step line")
 
-	// gtm vacuum: nothing has expired; facts and payloads survive.
+	// gtme vacuum: nothing has expired; facts and payloads survive.
 	res = h.mustRun("vacuum")
 	contains(t, res.stderr, "evicted 0 expired payload(s)", "vacuum output")
 	if n := h.queryInt(`SELECT count(*) FROM payloads`); n != 3 {

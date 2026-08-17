@@ -1,4 +1,4 @@
-# gtm — GTM as code
+# gtme — GTM as code
 
 **Built for engineers who do GTM — not the other way around.**
 
@@ -30,7 +30,7 @@ deliver:
 ```
 
 ```
-$ gtm run q3-outbound.yaml
+$ gtme run q3-outbound.yaml
 ...
 step     adapter                   in   out  cached  cost     avoided
 source   apollo/search             0    200  0       $0       -
@@ -45,14 +45,14 @@ receipt shows dollars *avoided*, and nobody gets delivered twice.
 
 ## What it is
 
-- **A single static binary** (`gtm`) that executes campaign pipelines
+- **A single static binary** (`gtme`) that executes campaign pipelines
   defined in YAML. No daemon, no hosted anything, no login.
 - **An append-only SQLite ledger as the data bus.** Steps never pass
   records to each other — they read a projection of what's known and write
   facts back, with provenance, confidence, and freshness on every value.
   What your pipelines learn accumulates; what a run did is receipted.
 - **Contracts everywhere.** Every step declares `needs` and `provides` as
-  JSON Schema against a canonical field registry, so `gtm plan` proves a
+  JSON Schema against a canonical field registry, so `gtme plan` proves a
   pipeline coherent — end to end — before a single record moves or a cent
   is spent. AI steps live behind the same contract as everything else.
 - **Adapters as data.** Most vendor APIs are CRUD over HTTP, so most
@@ -84,7 +84,7 @@ receipt shows dollars *avoided*, and nobody gets delivered twice.
 - **The universal floor** — CSV in, webhooks in, groups in; any-URL POST
   out, CSV out. Anything with an export or an import button is wireable
   today, even before a proper adapter exists.
-- **Portable campaigns** — `gtm freeze --bundle` snapshots a run into a
+- **Portable campaigns** — `gtme freeze --bundle` snapshots a run into a
   self-contained folder (pipeline + bindings + fixtures + hash manifest)
   that runs, simulates, and diffs anywhere.
 
@@ -93,7 +93,7 @@ receipt shows dollars *avoided*, and nobody gets delivered twice.
 ```
                   pipeline.yaml  (the only authoring surface)
                         │
-                    gtm plan ──── contracts, credentials, cost — $0
+                    gtme plan ──── contracts, credentials, cost — $0
                         │
    ┌────────────────────┼─────────────────────────────┐
    │ runner             ▼                             │
@@ -129,7 +129,7 @@ The load-bearing choices:
   keys, deterministic. Plan proves contracts. Dry-run does everything but
   deliver, rendering exactly what *would* send. Arming is the same command
   without the flag.
-- **Agent-operable by design.** `gtm help --agent` emits the full CLI and
+- **Agent-operable by design.** `gtme help --agent` emits the full CLI and
   adapter surface as one machine-readable document; every error names its
   fix; every question about state has a deterministic answer path. An
   agent can author a pipeline and validate its structure *and behavior*
@@ -170,41 +170,41 @@ you already paid for — at zero vendor spend.
 ## Get started
 
 ```sh
-git clone https://github.com/trevorfox/gtm && cd gtm
-make build && ./bin/gtm init
+git clone https://github.com/elegant-atomics/gtme && cd gtme
+make build && ./bin/gtme init
 ```
 
 **The zero-key demo** — run a whole campaign, offline, right now:
 
 ```sh
-./bin/gtm run examples/demo.yaml --simulate
+./bin/gtme run examples/demo.yaml --simulate
 ```
 
 The Apollo source serves its conformance fixtures, the AI steps answer
 synthetically (and are *marked* synthetic in provenance), delivery is held
 with its variables resolved into the receipt — and one record visibly
 fails the delivery floor, because its email is Apollo's locked-email
-placeholder and gtm refuses to key an identity on garbage. Receipts are
+placeholder and gtme refuses to key an identity on garbage. Receipts are
 honest here; that's the point.
 
 **Then with real keys**, the same file climbs the ladder:
 
 ```sh
-./bin/gtm secret set APOLLO_API_KEY        # prompts, no echo
-./bin/gtm secret set ANTHROPIC_API_KEY
-./bin/gtm plan examples/demo.yaml          # contracts + cost, still $0
-./bin/gtm run  examples/demo.yaml --dry-run  # everything but delivery
-./bin/gtm run  examples/demo.yaml          # armed
-./bin/gtm run  examples/demo.yaml          # again: cache skips, zero re-delivery
+./bin/gtme secret set APOLLO_API_KEY        # prompts, no echo
+./bin/gtme secret set ANTHROPIC_API_KEY
+./bin/gtme plan examples/demo.yaml          # contracts + cost, still $0
+./bin/gtme run  examples/demo.yaml --dry-run  # everything but delivery
+./bin/gtme run  examples/demo.yaml          # armed
+./bin/gtme run  examples/demo.yaml          # again: cache skips, zero re-delivery
 ```
 
 Then interrogate what happened — no log spelunking:
 
 ```sh
-./bin/gtm show jane.doe@acme.com --provenance   # every fact, who wrote it, when
-./bin/gtm runs last                             # the receipt, reconstructed
-./bin/gtm query "SELECT field, value FROM current_fields ..."
-./bin/gtm groups                                # decisions about sets, with tallies
+./bin/gtme show jane.doe@acme.com --provenance   # every fact, who wrote it, when
+./bin/gtme runs last                             # the receipt, reconstructed
+./bin/gtme query "SELECT field, value FROM current_fields ..."
+./bin/gtme groups                                # decisions about sets, with tallies
 ```
 
 ## Further exploration
@@ -223,7 +223,7 @@ Then interrogate what happened — no log spelunking:
   why nothing is decided until it's in the repo.
 - **[ROADMAP.md](ROADMAP.md)** — named, deliberately deferred: the expand
   role, payload re-extraction, an OpenAPI→binding codegen skill, and more.
-- `gtm help --agent` — the whole surface, machine-readable, for your
+- `gtme help --agent` — the whole surface, machine-readable, for your
   agent.
 
 ## License

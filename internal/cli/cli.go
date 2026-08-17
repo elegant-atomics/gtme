@@ -1,4 +1,4 @@
-// Package cli dispatches the gtm command line. stdout is data (NDJSON); every
+// Package cli dispatches the gtme command line. stdout is data (NDJSON); every
 // human-facing byte goes to stderr (SPEC §8).
 package cli
 
@@ -11,7 +11,7 @@ import (
 	"os"
 
 	// Built-in adapters register themselves; the CLI is what needs them present.
-	_ "github.com/trevorfox/gtm/internal/adapters/all"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
 )
 
 // Exit codes (SPEC §8).
@@ -52,7 +52,7 @@ func fail(code int, format string, args ...any) error {
 }
 
 // parseFlags parses args allowing flags to appear before or after positional
-// arguments — `gtm enrich harvest/profile --cache 90d` reads naturally, and Go's
+// arguments — `gtme enrich harvest/profile --cache 90d` reads naturally, and Go's
 // flag package stops at the first positional on its own.
 func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
@@ -81,7 +81,7 @@ func Run(ctx context.Context, env Env) int {
 	case "init":
 		err = cmdInit(ctx, env, rest)
 	case "version", "--version", "-v":
-		fmt.Fprintln(env.Stderr, "gtm "+Version)
+		fmt.Fprintln(env.Stderr, "gtme "+Version)
 	case "help", "--help", "-h":
 		if len(rest) == 1 && rest[0] == "--agent" {
 			err = cmdHelpAgent(env)
@@ -107,7 +107,7 @@ func Run(ctx context.Context, env Env) int {
 	case "vacuum":
 		err = cmdVacuum(ctx, env, rest)
 	default:
-		fmt.Fprintf(env.Stderr, "gtm: unknown command %q\n\n", verb)
+		fmt.Fprintf(env.Stderr, "gtme: unknown command %q\n\n", verb)
 		usage(env.Stderr)
 		return ExitValidation
 	}
@@ -115,10 +115,10 @@ func Run(ctx context.Context, env Env) int {
 	if err != nil {
 		var ee exitError
 		if errors.As(err, &ee) {
-			fmt.Fprintln(env.Stderr, "gtm: "+ee.Error())
+			fmt.Fprintln(env.Stderr, "gtme: "+ee.Error())
 			return ee.code
 		}
-		fmt.Fprintln(env.Stderr, "gtm: "+err.Error())
+		fmt.Fprintln(env.Stderr, "gtme: "+err.Error())
 		return ExitOther
 	}
 	return ExitOK
@@ -128,33 +128,33 @@ func Run(ctx context.Context, env Env) int {
 var Version = "0.0.0-dev"
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `gtm — a CLI for GTM data pipelines
+	fmt.Fprint(w, `gtme — a CLI for GTM data pipelines
 
 Usage:
-  gtm init                          create ~/.gtm and the ledger
-  gtm plan pipeline.yaml            validate + print a plan, no execution
-  gtm run  pipeline.yaml [--resume RUN_ID]
-  gtm query "SQL"                   read-only SQL against the ledger
-  gtm query --save NAME "SQL"       save a segment
-  gtm show <identity-key>           print what the ledger knows about a record
-  gtm show --run last               list a run's records
-  gtm runs [RUN_ID|last]            list runs / show one run's receipt
-  gtm freeze [RUN_ID|last]          rebuild a pipeline.yaml from a run
-  gtm freeze [RUN_ID|last] --bundle DIR   assemble a portable campaign bundle
-  gtm secret set KEY [VALUE]        store a credential in ~/.gtm/secrets
-  gtm groups                        list groups with their derived character
-  gtm groups show NAME              members and recent events
-  gtm groups add NAME KEY... [--from-segment NAME | --query "SQL"]
-  gtm groups remove NAME KEY...
-  gtm vacuum                        evict expired payloads (nothing else)
-  gtm help --agent                  machine-readable CLI + adapter surface
-  gtm version
+  gtme init                          create ~/.gtme and the ledger
+  gtme plan pipeline.yaml            validate + print a plan, no execution
+  gtme run  pipeline.yaml [--resume RUN_ID]
+  gtme query "SQL"                   read-only SQL against the ledger
+  gtme query --save NAME "SQL"       save a segment
+  gtme show <identity-key>           print what the ledger knows about a record
+  gtme show --run last               list a run's records
+  gtme runs [RUN_ID|last]            list runs / show one run's receipt
+  gtme freeze [RUN_ID|last]          rebuild a pipeline.yaml from a run
+  gtme freeze [RUN_ID|last] --bundle DIR   assemble a portable campaign bundle
+  gtme secret set KEY [VALUE]        store a credential in ~/.gtme/secrets
+  gtme groups                        list groups with their derived character
+  gtme groups show NAME              members and recent events
+  gtme groups add NAME KEY... [--from-segment NAME | --query "SQL"]
+  gtme groups remove NAME KEY...
+  gtme vacuum                        evict expired payloads (nothing else)
+  gtme help --agent                  machine-readable CLI + adapter surface
+  gtme version
 
 This is the entire v0 verb set (SPEC.md §8, ADR-005). uses:, cache:, when:
 and every other per-step option are pipeline.yaml config, never flags.
 
 Environment:
-  GTM_LEDGER      ledger path (default ~/.gtm/ledger.db)
-  GTM_CONCURRENCY worker pool size per step (default 4)
+  GTME_LEDGER      ledger path (default ~/.gtme/ledger.db)
+  GTME_CONCURRENCY worker pool size per step (default 4)
 `)
 }

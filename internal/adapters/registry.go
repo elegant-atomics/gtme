@@ -98,20 +98,20 @@ func (r *Resolved) Open(ctx context.Context, p Ports) (*Session, error) {
 }
 
 // SearchPath lists the directories external adapters are discovered in:
-// GTM_ADAPTER_PATH entries first, then ~/.gtm/adapters (SPEC §6).
+// GTME_ADAPTER_PATH entries first, then ~/.gtme/adapters (SPEC §6).
 func SearchPath() []string {
 	var dirs []string
-	if p := os.Getenv("GTM_ADAPTER_PATH"); p != "" {
+	if p := os.Getenv("GTME_ADAPTER_PATH"); p != "" {
 		for _, d := range filepath.SplitList(p) {
 			if d != "" {
 				dirs = append(dirs, d)
 			}
 		}
 	}
-	if home := os.Getenv("GTM_HOME"); home != "" {
+	if home := os.Getenv("GTME_HOME"); home != "" {
 		dirs = append(dirs, filepath.Join(home, "adapters"))
 	} else if home, err := os.UserHomeDir(); err == nil {
-		dirs = append(dirs, filepath.Join(home, ".gtm", "adapters"))
+		dirs = append(dirs, filepath.Join(home, ".gtme", "adapters"))
 	}
 	return dirs
 }
@@ -213,9 +213,9 @@ func resolveBindingDir(root, id string) (*Resolved, error) {
 	return nil, nil
 }
 
-// Installed lists every adapter manifest gtm can currently resolve: every
+// Installed lists every adapter manifest gtme can currently resolve: every
 // built-in, plus every external adapter found on SearchPath. Used by
-// `gtm help --agent` (SPEC §8, ADR-007) to regenerate the surface doc from the
+// `gtme help --agent` (SPEC §8, ADR-007) to regenerate the surface doc from the
 // live registry rather than a hand-maintained list. Best-effort: an
 // unreadable or invalid external manifest is skipped rather than failing the
 // whole listing, since a broken third-party adapter directory should not

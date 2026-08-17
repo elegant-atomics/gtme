@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/adapters/adaptertest"
-	_ "github.com/trevorfox/gtm/internal/adapters/all"
-	"github.com/trevorfox/gtm/internal/binding"
-	"github.com/trevorfox/gtm/internal/protocol"
-	"github.com/trevorfox/gtm/internal/registry"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/adapters/adaptertest"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
+	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/registry"
 )
 
 // loadShipped loads one embedded binding and its fixtures.
@@ -334,7 +334,7 @@ func TestSimulateGap(t *testing.T) {
 	}
 }
 
-// TestSimulateServesFixtures: with fixtures present and GTM_SIMULATE set, the
+// TestSimulateServesFixtures: with fixtures present and GTME_SIMULATE set, the
 // engine answers from fixtures without any HTTP seam at all.
 func TestSimulateServesFixtures(t *testing.T) {
 	b, fixtures := loadShipped(t, "harvest-profile")

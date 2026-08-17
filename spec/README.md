@@ -41,5 +41,5 @@ The tests that consume them live in `test/conformance/`.
 sqlite3 /tmp/canonical.db < spec/ledger.sql
 ```
 
-The schemas are draft-07 and validate with any conforming validator; gtm uses
+The schemas are draft-07 and validate with any conforming validator; gtme uses
 `santhosh-tekuri/jsonschema/v5`.

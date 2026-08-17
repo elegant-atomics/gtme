@@ -1,4 +1,4 @@
-module github.com/trevorfox/gtm
+module github.com/elegant-atomics/gtme
 
 go 1.25.0
 

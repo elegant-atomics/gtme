@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/bundle-manifest.json",
+  "$id": "https://gtme.spec/bundle-manifest.json",
   "title": "Campaign bundle manifest",
-  "description": "manifest.json at the root of a campaign bundle produced by `gtm freeze --bundle` (SPEC.md §8, ADR-029). A bundle is self-contained (run resolves nothing outside it except credentials), diffable (text files, stable ordering), and portable (contracts travel; membership and cache stay with the ledger). DRAFT: authored in the ADR-022..029 reconciliation pass ahead of the build; the freeze/run/simulate acceptance criteria will harden it.",
+  "description": "manifest.json at the root of a campaign bundle produced by `gtme freeze --bundle` (SPEC.md §8, ADR-029). A bundle is self-contained (run resolves nothing outside it except credentials), diffable (text files, stable ordering), and portable (contracts travel; membership and cache stay with the ledger). DRAFT: authored in the ADR-022..029 reconciliation pass ahead of the build; the freeze/run/simulate acceptance criteria will harden it.",
   "type": "object",
   "required": ["bundle_format_version", "name", "source_run_id", "created_at", "contents"],
   "additionalProperties": false,
@@ -28,7 +28,7 @@
     },
     "gtm_version": {
       "type": "string",
-      "description": "Version of the gtm binary that produced the bundle (informational)."
+      "description": "Version of the gtme binary that produced the bundle (informational)."
     },
     "contents": {
       "type": "object",

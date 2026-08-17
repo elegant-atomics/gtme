@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/identity"
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/pipeline"
-	"github.com/trevorfox/gtm/internal/planner"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // item is one record's trip through one step.
@@ -363,7 +363,7 @@ func stringify(v any) string {
 }
 
 // dispatch runs a step's eligible records through adapter sessions with a worker
-// pool, and reports the step's tally. Shared by `gtm run` and pipe mode.
+// pool, and reports the step's tally. Shared by `gtme run` and pipe mode.
 func (r *runner) dispatch(ctx context.Context, st *planner.Step, work []*item) error {
 	if len(work) == 0 {
 		r.printStepLine(st)

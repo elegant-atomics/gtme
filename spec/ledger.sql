@@ -1,4 +1,4 @@
--- spec/ledger.sql — the canonical gtm ledger schema (SPEC.md §3, DECIDED).
+-- spec/ledger.sql — the canonical gtme ledger schema (SPEC.md §3, DECIDED).
 --
 -- This file is the machine-checkable form of SPEC.md §3, per ADR-010. It is
 -- transcribed verbatim from that section and MUST stay identical to it. Running
@@ -98,7 +98,7 @@ CREATE TABLE deliveries (
 -- §7's per-step `cache:`), not a fact about the row. field_value_ranks is the
 -- one definition of the RANKING rule (confidence DESC, ties broken by newest
 -- created_at); current_fields is that ranking with no window applied
--- (rank = 1) — the plain `gtm query` answer. The runner's windowed
+-- (rank = 1) — the plain `gtme query` answer. The runner's windowed
 -- projection (internal/ledger/project.go) reads field_value_ranks directly
 -- and takes the first in-window row per field, falling through a stale
 -- top-ranked row to the next-best one — the same ranking, just windowed
@@ -159,7 +159,7 @@ WHERE rn = 1 AND event = 'added';
 -- Payloads: raw vendor responses as CACHE, not facts (ADR-030, SPEC §3).
 -- Extracted = fact (append-only, above); unextracted = cache (purgeable).
 -- Never projected into any step; evicted opportunistically at run start and
--- by `gtm vacuum` (SPEC §8). NULL expires_at = keep until explicit vacuum.
+-- by `gtme vacuum` (SPEC §8). NULL expires_at = keep until explicit vacuum.
 
 CREATE TABLE payloads (
   id           TEXT PRIMARY KEY,          -- ULID

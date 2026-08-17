@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/pipeline"
-	"github.com/trevorfox/gtm/internal/registry"
-	"github.com/trevorfox/gtm/internal/secrets"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/elegant-atomics/gtme/internal/secrets"
 )
 
 // DefaultBatchSize is the batch size for AI steps (SPEC §9).
@@ -546,7 +546,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	ps.Credentials = creds
 	for _, name := range missing {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindCredential,
-			Msg: fmt.Sprintf("missing credential %s (set it in the environment or run `gtm secret set %s`)", name, name)})
+			Msg: fmt.Sprintf("missing credential %s (set it in the environment or run `gtme secret set %s`)", name, name)})
 	}
 	optional, missingOptional := secrets.Resolve(resolved.Manifest.CredentialsOptional)
 	for k, v := range optional {
@@ -556,7 +556,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 
 	// Auth declared in an http/* step's config resolves through the same
 	// machinery as manifest credentials (SPEC §10a, v0.10): env first, then
-	// ~/.gtm/secrets, plan-checked.
+	// ~/.gtme/secrets, plan-checked.
 	if a, ok := ps.Config["auth"].(map[string]any); ok {
 		if env, ok := a["env"].(string); ok && strings.TrimSpace(env) != "" {
 			authCreds, authMissing := secrets.Resolve([]string{strings.TrimSpace(env)})
@@ -565,7 +565,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 			}
 			for _, name := range authMissing {
 				problems = append(problems, Problem{Step: s.ID, Kind: KindCredential,
-					Msg: fmt.Sprintf("missing credential %s (set it in the environment or run `gtm secret set %s`)", name, name)})
+					Msg: fmt.Sprintf("missing credential %s (set it in the environment or run `gtme secret set %s`)", name, name)})
 			}
 		}
 	}
@@ -614,7 +614,7 @@ func (p *Plan) CheckGroups(ctx context.Context, l *ledger.Ledger) error {
 		if _, err := l.GetGroup(ctx, name); err != nil {
 			if errors.Is(err, ledger.ErrNotFound) {
 				problems = append(problems, Problem{Kind: KindContract,
-					Msg: fmt.Sprintf("group %q does not exist — create it with `gtm groups add %s <identity-key>...` or snapshot a segment with `gtm groups add %s --from-segment <name>`", name, name, name)})
+					Msg: fmt.Sprintf("group %q does not exist — create it with `gtme groups add %s <identity-key>...` or snapshot a segment with `gtme groups add %s --from-segment <name>`", name, name, name)})
 				continue
 			}
 			return err

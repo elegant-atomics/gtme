@@ -5,7 +5,7 @@ package e2e
 // exclusion makes judgment memory real (nothing is re-judged), a send
 // pipeline consumes the group as a source, records touches under its scope,
 // and a suppression window holds re-contacts back, receipted. Plus the plan
-// gate on missing groups, the dry-run holds, and the gtm groups verbs.
+// gate on missing groups, the dry-run holds, and the gtme groups verbs.
 
 import (
 	"fmt"
@@ -178,7 +178,7 @@ steps:
 		t.Fatalf("plan exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
 	}
 	contains(t, res.stderr, `group "warm" does not exist`, "plan error")
-	contains(t, res.stderr, "gtm groups add warm", "plan error names the fix")
+	contains(t, res.stderr, "gtme groups add warm", "plan error names the fix")
 
 	// Mint identities, create the group, and the plan passes showing the gate.
 	h.write("mint.yaml", `name: mint

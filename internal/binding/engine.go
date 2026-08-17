@@ -9,12 +9,12 @@ import (
 	"io"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/httpx"
-	"github.com/trevorfox/gtm/internal/identity"
-	"github.com/trevorfox/gtm/internal/protocol"
-	"github.com/trevorfox/gtm/internal/registry"
-	"github.com/trevorfox/gtm/internal/ulid"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/httpx"
+	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
 // MaxPayloadBytes is the engine's payload size cap (SPEC §10a): an oversized
@@ -24,7 +24,7 @@ const MaxPayloadBytes = 256 << 10
 // SimulateEnv is the environment key the runner injects to put a binding
 // engine into fixture-served mode (SPEC §8 simulation gate). It rides in
 // Ports.Env like a credential, so the protocol stays untouched.
-const SimulateEnv = "GTM_SIMULATE"
+const SimulateEnv = "GTME_SIMULATE"
 
 // Engine interprets one binding deterministically (SPEC §10a). It is an
 // ordinary built-in adapter: same protocol boundary, same Session transport.

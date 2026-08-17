@@ -16,7 +16,7 @@ Commits this audit produced: `791f5bb` (category a), `b99f226` (category c).
 
 1. **`current_fields` view didn't exist.** SPEC §3 (ADR-003) requires the
    current-value resolution rule to live in exactly one place, a SQL view;
-   `internal/ledger/project.go` implemented it in Go instead, and `gtm
+   `internal/ledger/project.go` implemented it in Go instead, and `gtme
    query`'s own §8 examples referencing `current_fields` would have failed
    against a real ledger. Fixed: migration `0004_current_fields_view.sql`
    adds `field_value_ranks` (the ranking) and `current_fields` (rank 1,
@@ -40,20 +40,20 @@ Commits this audit produced: `791f5bb` (category a), `b99f226` (category c).
    SPEC §9's own example and `examples/apollo-to-instantly.yaml` both used
    `uses: [name, ...]`, but `apollo/search`'s real manifest provides
    `full_name`, not `name` — `TestHelpAgentExamplesPassPlan` (which actually
-   runs `gtm plan` against generated examples, not just schema-validates
+   runs `gtme plan` against generated examples, not just schema-validates
    them) caught this; both files corrected.
 
-3. **`gtm show` (ADR-006) didn't exist.** Not wired into `cli.go`'s verb
+3. **`gtme show` (ADR-006) didn't exist.** Not wired into `cli.go`'s verb
    switch at all. Fixed: `internal/cli/show.go`, plus
-   `ledger.FindByKey` (entity-type-agnostic identity lookup, since `gtm
+   `ledger.FindByKey` (entity-type-agnostic identity lookup, since `gtme
    show <key>` takes no `entity_type` argument per SPEC §8).
 
-4. **`gtm help --agent` (ADR-007) didn't exist.** Same situation. Fixed:
+4. **`gtme help --agent` (ADR-007) didn't exist.** Same situation. Fixed:
    `internal/cli/help_agent.go`, plus `adapters.Installed()` (built-ins +
    anything on the adapter search path, so the doc never drifts from what
-   `gtm plan` can actually resolve). Its round-trip acceptance criterion
+   `gtme plan` can actually resolve). Its round-trip acceptance criterion
    (SPEC §8 — an agent given only this doc can write a pipeline that
-   passes `gtm plan`) is asserted directly by
+   passes `gtme plan`) is asserted directly by
    `TestHelpAgentExamplesPassPlan`, which is what caught bug #2's example
    error above.
 
@@ -77,7 +77,7 @@ it. Deleted along with it:
 - `internal/runner/pipe.go`, `internal/cli/pipe.go` (whole files): the
   RUN-handshake protocol extension, `PipeOptions`/`RunPipe`,
   `checkIncoming`/`mergeSchema` contract-checking against an incoming
-  stream, and the `gtm source|filter|enrich|compose|deliver` CLI
+  stream, and the `gtme source|filter|enrich|compose|deliver` CLI
   subcommands.
 - `test/e2e/pipe_test.go` (whole file): its acceptance test no longer
   applies. Its shared helpers (`writeAdapter`, `echoAdapterScript`,
@@ -85,12 +85,12 @@ it. Deleted along with it:
   files and moved to `harness_test.go` rather than disappearing.
 - `ledger.AppendRunConfigStep` and `ledger.SetRunConfig`: zero remaining
   callers — both existed only for pipe mode's incremental, concurrent
-  config-snapshot accumulation. `gtm run` writes the whole resolved
+  config-snapshot accumulation. `gtme run` writes the whole resolved
   `Pipeline` atomically at `CreateRun` time and always has.
 - `freeze.go`'s `frozenPipeline` no longer reorders steps by `StepIDs`
   (and the now-unused `stableSortByRank` is deleted): that reordering
   existed only because pipe-mode processes could append their step to a
-  run's config concurrently and out of order. A `gtm run`-produced
+  run's config concurrently and out of order. A `gtme run`-produced
   config snapshot is already in execution order (SPEC §9: steps execute
   strictly in order), so the reorder was provably a no-op on every
   remaining code path.
@@ -98,11 +98,11 @@ it. Deleted along with it:
   `internal/planner/planner.go` that justified behavior (WAL/`_txlock`
   choice, tx retry, `ResolveStep`'s reuse) by citing pipe mode
   specifically — reworded to the reasoning that still holds (concurrent
-  `gtm` invocations against one ledger file remain possible without pipe
+  `gtme` invocations against one ledger file remain possible without pipe
   mode) or removed where nothing still depends on the code being
   described.
 - `README.md`: the shell-pipe quickstart example and "Two modes" section
-  described a surface that no longer exists; removed, `gtm show`/`gtm
+  described a surface that no longer exists; removed, `gtme show`/`gtme
   help --agent` added to the commands table in their place.
 
 ## (b) Spec gaps where the code was right — approved and applied
@@ -151,7 +151,7 @@ ADR-016, the priority after reconciliation is the validation campaign, not
 completing every v0 adapter. Flagged here as the first item of the build
 backlog rather than implemented inline; `internal/cli/help_agent.go`'s
 canonical examples were written to avoid referencing it precisely because
-an unimplemented adapter in a "this must pass `gtm plan`" example would be
+an unimplemented adapter in a "this must pass `gtme plan`" example would be
 self-contradicting (see `TestHelpAgentExamplesPassPlan`).
 
 ## Reviewed, not a divergence

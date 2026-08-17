@@ -43,7 +43,7 @@ func TestHelpAgentSurface(t *testing.T) {
 	for _, v := range doc.Verbs {
 		haveVerb[v.Usage] = true
 	}
-	for _, want := range []string{"gtm init", "gtm plan pipeline.yaml"} {
+	for _, want := range []string{"gtme init", "gtme plan pipeline.yaml"} {
 		found := false
 		for u := range haveVerb {
 			if u == want {
@@ -77,7 +77,7 @@ func TestHelpAgentSurface(t *testing.T) {
 }
 
 // TestHelpAgentExamplesPassPlan is the doc's own acceptance criterion (SPEC
-// §8): every example it prints must be a pipeline `gtm plan` accepts, given
+// §8): every example it prints must be a pipeline `gtme plan` accepts, given
 // only the credentials a real operator would set — nothing about the example
 // itself should be broken or aspirational.
 func TestHelpAgentExamplesPassPlan(t *testing.T) {
@@ -110,7 +110,7 @@ func TestHelpAgentExamplesPassPlan(t *testing.T) {
 		path := h.write(ex.Name+".yaml", ex.Yaml)
 		plan := h.runWithEnv(creds, "", "plan", path)
 		if plan.code != 0 {
-			t.Errorf("example %q failed gtm plan (exit %d):\n%s", ex.Name, plan.code, plan.stderr)
+			t.Errorf("example %q failed gtme plan (exit %d):\n%s", ex.Name, plan.code, plan.stderr)
 		}
 	}
 }

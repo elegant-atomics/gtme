@@ -1,12 +1,12 @@
 # The pipeline from SPEC §9, ready to run once the four credentials are set:
 #
-#   gtm secret set APOLLO_API_KEY
-#   gtm secret set HARVEST_API_KEY
-#   gtm secret set ANTHROPIC_API_KEY
-#   gtm secret set INSTANTLY_API_KEY
+#   gtme secret set APOLLO_API_KEY
+#   gtme secret set HARVEST_API_KEY
+#   gtme secret set ANTHROPIC_API_KEY
+#   gtme secret set INSTANTLY_API_KEY
 #
-#   gtm plan examples/apollo-to-instantly.yaml   # free: no calls, no spend
-#   gtm run  examples/apollo-to-instantly.yaml   # spends money and adds real leads
+#   gtme plan examples/apollo-to-instantly.yaml   # free: no calls, no spend
+#   gtme run  examples/apollo-to-instantly.yaml   # spends money and adds real leads
 #
 # The Instantly campaign must already exist; the deliver step resolves its name
 # to an id once per run and fails if there is no match. Delivery is keyed on

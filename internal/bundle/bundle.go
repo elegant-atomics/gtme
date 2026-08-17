@@ -1,4 +1,4 @@
-// Package bundle implements campaign bundles (SPEC §8, ADR-029): `gtm freeze
+// Package bundle implements campaign bundles (SPEC §8, ADR-029): `gtme freeze
 // --bundle` snapshots a run into a self-contained, diffable, portable folder —
 // the pipeline YAML, every referenced binding at its exact version (with its
 // conformance fixtures, so `--simulate` works offline on the bundle), the
@@ -17,10 +17,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/binding"
-	"github.com/trevorfox/gtm/internal/pipeline"
-	"github.com/trevorfox/gtm/spec"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/elegant-atomics/gtme/spec"
 )
 
 // FormatVersion is the bundle layout version (spec/bundle-manifest.json).
@@ -39,7 +39,7 @@ type Manifest struct {
 	Contents            map[string]string `json:"contents"`
 }
 
-// IsBundle reports whether a path is a bundle directory: the shape `gtm run`
+// IsBundle reports whether a path is a bundle directory: the shape `gtme run`
 // sniffs to accept a bundle path wherever it accepts a pipeline path (SPEC §8).
 func IsBundle(path string) bool {
 	info, err := os.Stat(path)
@@ -96,7 +96,7 @@ func Write(dir string, p *pipeline.Pipeline, sourceRunID, gtmVersion, createdAt 
 			warnings = append(warnings,
 				fmt.Sprintf("step %s (%s) is an external process adapter — executables are not data and do not travel; install it on the target machine", s.ID, s.Use))
 		default:
-			// A built-in process adapter ships inside the gtm binary itself;
+			// A built-in process adapter ships inside the gtme binary itself;
 			// the bundle needs the same binary either way.
 		}
 	}
@@ -159,7 +159,7 @@ func Load(dir string) (*Manifest, *pipeline.Pipeline, error) {
 		return nil, nil, fmt.Errorf("bundle: parsing %s: %w", ManifestFile, err)
 	}
 	if m.BundleFormatVersion != FormatVersion {
-		return nil, nil, fmt.Errorf("bundle: format version %d, this gtm understands %d", m.BundleFormatVersion, FormatVersion)
+		return nil, nil, fmt.Errorf("bundle: format version %d, this gtme understands %d", m.BundleFormatVersion, FormatVersion)
 	}
 	for name, want := range m.Contents {
 		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
@@ -177,7 +177,7 @@ func Load(dir string) (*Manifest, *pipeline.Pipeline, error) {
 	return &m, p, nil
 }
 
-// AdaptersDir is where a bundle's bindings live; `gtm run` points adapter
+// AdaptersDir is where a bundle's bindings live; `gtme run` points adapter
 // resolution here first, so the bundle resolves nothing outside itself
 // except credentials (SPEC §8).
 func AdaptersDir(dir string) string { return filepath.Join(dir, "adapters") }

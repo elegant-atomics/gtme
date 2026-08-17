@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
-// ExitError carries an external adapter's exit status, so the gtm process can
+// ExitError carries an external adapter's exit status, so the gtme process can
 // exit with the same class of code the adapter used (SPEC §8: 3 auth,
 // 4 rate-limited, 5 network).
 type ExitError struct {
@@ -24,7 +24,7 @@ type ExitError struct {
 func (e *ExitError) Error() string { return e.Err.Error() }
 func (e *ExitError) Unwrap() error { return e.Err }
 
-// ExitCode reports the adapter's exit code when it is one gtm defines, else 0 so
+// ExitCode reports the adapter's exit code when it is one gtme defines, else 0 so
 // the caller falls back to its own default.
 func (e *ExitError) ExitCode() int {
 	switch e.Code {

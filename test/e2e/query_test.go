@@ -7,7 +7,7 @@ import (
 )
 
 // TestQueryReadsTheLedgerAndSavesSegments is the M5 acceptance test for
-// `gtm query`: rows on stdout, a saved segment that replays, and no way to write.
+// `gtme query`: rows on stdout, a saved segment that replays, and no way to write.
 func TestQueryReadsTheLedgerAndSavesSegments(t *testing.T) {
 	h := newHarness(t)
 	h.write("people.csv", peopleCSV)
@@ -56,7 +56,7 @@ func TestQueryReadsTheLedgerAndSavesSegments(t *testing.T) {
 	}
 }
 
-// TestQueryRefusesToWrite keeps `gtm query` read-only in both layers.
+// TestQueryRefusesToWrite keeps `gtme query` read-only in both layers.
 func TestQueryRefusesToWrite(t *testing.T) {
 	h := newHarness(t)
 	h.write("people.csv", peopleCSV)

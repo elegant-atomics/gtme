@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-record-out.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-record-out.schema.json",
   "title": "RECORD (adapter → runner)",
   "description": "One fact-bearing record from an adapter (SPEC.md §5). `key` is REQUIRED for every role but `source`: a source emits raw fields and the runner derives the identity key from them (SPEC.md §4, `emits_key_fields`), so a source's RECORD legitimately has no key.",
   "type": "object",

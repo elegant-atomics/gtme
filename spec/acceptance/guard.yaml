@@ -6,7 +6,7 @@ given: >
   A pipeline.yaml with a step whose `needs.required` (or `uses`, for AI steps)
   is not satisfied by any upstream `provides`.
 when: >
-  The operator runs `gtm plan`.
+  The operator runs `gtme plan`.
 then: >
   The command exits non-zero with an error naming the specific step and field
   (§7), performs zero network calls, and writes zero cost rows — the same

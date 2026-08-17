@@ -5,7 +5,7 @@ invariant: >
 given: >
   A run killed or crashed partway through (some records past a step, some not).
 when: >
-  The operator runs `gtm run pipeline.yaml --resume RUN_ID`.
+  The operator runs `gtme run pipeline.yaml --resume RUN_ID`.
 then: >
   Every record whose `run_records.state` already reflects completion of a step
   does not re-invoke that step's adapter or incur that step's cost again, and

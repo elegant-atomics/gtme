@@ -3,7 +3,7 @@ package cli
 import (
 	"encoding/json"
 
-	"github.com/trevorfox/gtm/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/adapters"
 )
 
 // cmdHelpAgent emits the full CLI + adapter surface as one compact,
@@ -11,7 +11,7 @@ import (
 // the live verb table below and the installed adapter registry — never
 // hand-maintained by a human. Acceptance criterion (SPEC §8): this document
 // alone must be enough for an agent to author a pipeline.yaml that passes
-// `gtm plan`, so every field an agent would need to make that decision
+// `gtme plan`, so every field an agent would need to make that decision
 // (needs/provides/config_schema/credentials) is here, not just names.
 func cmdHelpAgent(env Env) error {
 	doc := agentDoc{
@@ -41,18 +41,18 @@ type agentVerb struct {
 // usage() deliberately, so a change to one is a visible diff away from the
 // other, even though nothing enforces they stay in sync mechanically.
 var agentVerbs = []agentVerb{
-	{"gtm init", "create ~/.gtm and the ledger"},
-	{"gtm secret set KEY [VALUE]", "store a credential in ~/.gtm/secrets (VALUE omitted = prompt, no echo)"},
-	{"gtm plan pipeline.yaml", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend"},
-	{"gtm run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending; --simulate executes everything offline from fixtures (no network, no spend, nothing persists)"},
-	{"gtm query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
-	{"gtm show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},
-	{"gtm show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
-	{"gtm runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
-	{"gtm freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtm run` accepts wherever it accepts a pipeline path (ADR-029)"},
-	{"gtm groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021)"},
-	{"gtm vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
-	{"gtm help --agent", "print this document"},
+	{"gtme init", "create ~/.gtme and the ledger"},
+	{"gtme secret set KEY [VALUE]", "store a credential in ~/.gtme/secrets (VALUE omitted = prompt, no echo)"},
+	{"gtme plan pipeline.yaml", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend"},
+	{"gtme run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending; --simulate executes everything offline from fixtures (no network, no spend, nothing persists)"},
+	{"gtme query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
+	{"gtme show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},
+	{"gtme show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
+	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
+	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
+	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021)"},
+	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
+	{"gtme help --agent", "print this document"},
 }
 
 type agentAdapter struct {
@@ -70,8 +70,8 @@ type agentAdapter struct {
 }
 
 // agentAdapters reads the live registry (built-ins + anything on
-// GTM_ADAPTER_PATH / ~/.gtm/adapters), so this document always matches what
-// `gtm plan` will actually resolve.
+// GTME_ADAPTER_PATH / ~/.gtme/adapters), so this document always matches what
+// `gtme plan` will actually resolve.
 func agentAdapters() []agentAdapter {
 	installed := adapters.Installed()
 	out := make([]agentAdapter, 0, len(installed))
@@ -105,13 +105,13 @@ type agentExample struct {
 // agent sees uses: on both AI-backed roles and a source other than
 // apollo/search. Every adapter named here is a real, implemented v0 adapter,
 // because this document's own acceptance criterion is that an agent can use
-// it alone to write a pipeline that passes `gtm plan` — an example that
+// it alone to write a pipeline that passes `gtme plan` — an example that
 // doesn't itself pass plan would contradict that.
 var agentExamples = []agentExample{
 	{
 		Name:        "minimal-offline",
 		Description: "csv/source into a cached enrich step; runs with zero API keys (README quickstart).",
-		Yaml: `name: hello-gtm
+		Yaml: `name: hello-gtme
 version: 1
 source:
   use: csv/source

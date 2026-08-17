@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/pipeline.schema.json",
+  "$id": "https://gtme.spec/schemas/pipeline.schema.json",
   "title": "pipeline.yaml",
   "description": "The only pipeline authoring surface in v0 (SPEC.md §9, ADR-005). Validate the YAML document after decoding it to JSON. Derived from internal/pipeline.Pipeline, which decodes with KnownFields(true) — hence additionalProperties: false.",
   "type": "object",

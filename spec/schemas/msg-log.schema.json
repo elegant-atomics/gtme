@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-log.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-log.schema.json",
   "title": "LOG (adapter → runner)",
   "description": "Human-facing noise from an adapter (SPEC.md §5). The runner relays it to stderr; stdout is reserved for data (SPEC.md §8).",
   "type": "object",

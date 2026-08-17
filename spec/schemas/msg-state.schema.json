@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-state.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-state.schema.json",
   "title": "STATE (adapter → runner)",
   "description": "A resumable source's cursor (SPEC.md §5), so a re-run can pick up where the last one stopped.",
   "type": "object",

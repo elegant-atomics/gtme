@@ -1,6 +1,6 @@
 // Package httpx is the shared HTTP layer for provider adapters: one interface to
 // stub in tests, JSON helpers, retry with backoff, and error classification that
-// maps onto gtm's exit codes (SPEC §8).
+// maps onto gtme's exit codes (SPEC §8).
 package httpx
 
 import (

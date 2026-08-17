@@ -1,14 +1,14 @@
-# The zero-key demo: `gtm run examples/demo.yaml --simulate` executes this
+# The zero-key demo: `gtme run examples/demo.yaml --simulate` executes this
 # entire pipeline offline — the Apollo source is served from its conformance
 # fixtures, the AI steps answer synthetically (marked as such), and delivery
 # is held with its variables resolved into the receipt. No API keys, no
 # network, no spend, nothing persisted.
 #
-# With real keys set (gtm secret set APOLLO_API_KEY / ANTHROPIC_API_KEY /
+# With real keys set (gtme secret set APOLLO_API_KEY / ANTHROPIC_API_KEY /
 # ATTIO_API_KEY), the same file climbs the rest of the ladder:
-#   gtm plan examples/demo.yaml          # contracts + cost, still $0
-#   gtm run  examples/demo.yaml --dry-run  # everything but delivery
-#   gtm run  examples/demo.yaml          # armed
+#   gtme plan examples/demo.yaml          # contracts + cost, still $0
+#   gtme run  examples/demo.yaml --dry-run  # everything but delivery
+#   gtme run  examples/demo.yaml          # armed
 name: demo
 version: 1
 

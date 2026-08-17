@@ -3,7 +3,7 @@
 Recorded exchanges between the runner and adapters, in the NDJSON format of
 SPEC.md §5. They are the machine-checkable counterpart of that section's prose
 examples (ADR-010): the Go test suite loads them and validates every message
-against `spec/schemas/`, so a schema that drifts from what gtm actually puts on
+against `spec/schemas/`, so a schema that drifts from what gtme actually puts on
 the wire fails a test instead of quietly rotting.
 
 ## `basic-run.ndjson`

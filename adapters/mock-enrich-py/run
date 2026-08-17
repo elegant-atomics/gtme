@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""mock-enrich-py — an external gtm adapter, Python 3 stdlib only.
+"""mock-enrich-py — an external gtme adapter, Python 3 stdlib only.
 
 It exists to prove the adapter boundary is a real process boundary and not a Go
-interface in disguise: gtm speaks to this script over stdin/stdout NDJSON exactly
+interface in disguise: gtme speaks to this script over stdin/stdout NDJSON exactly
 as it speaks to its own built-ins (SPEC §5, §10.7).
 
 Adds `mock.score`, derived deterministically from the identity key so repeated

@@ -87,7 +87,7 @@ func (p Projection) window(field string) time.Duration {
 // expressed exactly once, as the field_value_ranks SQL view (migration
 // 0004). This method reads every ranked row for a field, in order, and takes
 // the first one inside the window — falling through a stale top-ranked row
-// to the next-best one, exactly as the rule requires. `gtm query`'s
+// to the next-best one, exactly as the rule requires. `gtme query`'s
 // current_fields view is the same ranking with no window applied (rank = 1);
 // the two can never disagree about *what outranks what*, only about whether a
 // window trims the answer.

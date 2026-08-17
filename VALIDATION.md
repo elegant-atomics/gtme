@@ -44,7 +44,7 @@ pipeline shape against the `mock/deliver` fixture in
   needs derive from `variables:` exactly as an AI step's derive from
   `uses:`, validated at plan time.
 - The runner enforces `on_missing: skip | fail` (default skip with a
-  recorded verdict; blank merge fields never send) and `gtm run --dry-run`
+  recorded verdict; blank merge fields never send) and `gtme run --dry-run`
   renders each record's resolved variables in the receipt — the artifact
   the "review before arming" gate below reviews (SPEC §8).
 
@@ -77,7 +77,7 @@ deliver:
 
 ### Enactment script
 
-1. **Guard.** `gtm plan campaign-zero.yaml` against a CSV missing an email
+1. **Guard.** `gtme plan campaign-zero.yaml` against a CSV missing an email
    column entirely — confirm the plan fails (exit 2) before any row is
    read. With name columns still present the failure comes from the deliver
    adapter's `email` floor ("needs email, which no earlier step provides"),
@@ -86,7 +86,7 @@ deliver:
    columns too and ADR-018's "no identity-key path" rule fires at the
    source instead. Either way: a plan error, not a runtime surprise
    partway through.
-2. **Dry run.** `gtm run campaign-zero.yaml --dry-run` against the real
+2. **Dry run.** `gtme run campaign-zero.yaml --dry-run` against the real
    ~10-record CSV. Capture: the receipt renders each record's *resolved*
    `variables:` values (and lists any record held back by `on_missing`,
    with its reason) — this is the artifact a human actually reviews, per
@@ -103,14 +103,14 @@ deliver:
 
 ### Prerequisites
 
-- `gtm secret set APOLLO_API_KEY`, `HARVEST_API_KEY`, `ANTHROPIC_API_KEY`,
+- `gtme secret set APOLLO_API_KEY`, `HARVEST_API_KEY`, `ANTHROPIC_API_KEY`,
   `INSTANTLY_API_KEY` — real keys, human-provided.
 - A real Instantly campaign created ahead of time, scoped so a mistaken send
   is cheap and reversible (a throwaway/internal test campaign, not a real
   prospect list). `instantly/add-to-campaign` resolves the campaign by
   name (SPEC §10.6) — name it something unambiguous, e.g.
-  `gtm-validation-<date>`.
-- `make build`, so `./bin/gtm` is the binary under test (not `go run`).
+  `gtme-validation-<date>`.
+- `make build`, so `./bin/gtme` is the binary under test (not `go run`).
 - A query small enough to cap around 50 records: use `apollo/search`'s
   `limit` config, not a broad query then a manual trim, so the plan's cost
   estimate (§7) is honest about what will actually run.
@@ -153,7 +153,7 @@ steps:
 deliver:
   use: instantly/add-to-campaign
   with:
-    campaign: "gtm-validation-<date>"
+    campaign: "gtme-validation-<date>"
   idempotency: email
 ```
 
@@ -162,43 +162,43 @@ deliver:
 Run in this order; each step names which story it enacts and what to
 capture as evidence.
 
-1. **Guard.** Before touching real data: `gtm plan validation-campaign.yaml`
+1. **Guard.** Before touching real data: `gtme plan validation-campaign.yaml`
    with one field deliberately mistyped in `uses:` (e.g. `full_nmae`).
    Confirm the error names the step and field, exit 2, zero network calls
-   (no cost rows). Fix the typo. Run `gtm plan` again clean — confirm the
+   (no cost rows). Fix the typo. Run `gtme plan` again clean — confirm the
    printed cost estimate is `?` for the AI steps (unpriced without a real
    call) and a real number for Harvest, and that all four credentials
    resolve.
 
-2. **Launch.** `gtm run validation-campaign.yaml`. Capture: the run id, the
+2. **Launch.** `gtme run validation-campaign.yaml`. Capture: the run id, the
    terminal receipt (records in/out per step, total cost), and that every
    sourced identity has an `identities` row with `field_values`
-   (`gtm show --run last --limit 5` as a spot check).
+   (`gtme show --run last --limit 5` as a spot check).
 
 3. **Interrogate.** Pick one delivered record's email from the run.
-   `gtm show <email> --provenance`. Capture: every field has a real source
+   `gtme show <email> --provenance`. Capture: every field has a real source
    adapter id, a plausible confidence, and a `run_id` matching this
    campaign's run.
 
 4. **Recover.** Re-run a *second*, separate small campaign (a fresh 5-10
    record `limit`, different campaign name, so this doesn't touch the
-   first run's delivered records) and kill the `gtm run` process (Ctrl-C or
+   first run's delivered records) and kill the `gtme run` process (Ctrl-C or
    `kill`) partway through the `linkedin` step — after at least one Harvest
-   call has completed but before the step finishes. `gtm run
+   call has completed but before the step finishes. `gtme run
    validation-campaign-2.yaml --resume last`. Capture: the receipt shows
    the already-done records were not re-processed (no duplicate Harvest
    cost for them — compare the `costs` table's per-identity rows before
    and after the kill), and the run reaches `status='done'`.
 
-5. **Segment.** `gtm query --save validation-delivered "SELECT i.identity_key
+5. **Segment.** `gtme query --save validation-delivered "SELECT i.identity_key
    FROM identities i JOIN deliveries d ON d.identity_id = i.id
    WHERE d.target = 'instantly/add-to-campaign@1'"`. Capture: the row
    count matches the receipt's delivered count exactly.
 
 6. **Iterate.** Edit the `personalize` step's prompt (a small wording
-   change). `gtm plan` first — confirm it's still valid — then `gtm run`
+   change). `gtme plan` first — confirm it's still valid — then `gtme run`
    against a `limit: 3` subsample of the *same already-sourced* records
-   (a new pipeline pointed at a `gtm query --records`-style narrow slice
+   (a new pipeline pointed at a `gtme query --records`-style narrow slice
    is a v1 idea per ROADMAP.md; for this campaign, simplest is a fresh
    tiny Apollo pull with `limit: 3` and the edited prompt) before deciding
    whether to run the change at full scope. Capture: the cost of the
@@ -211,11 +211,11 @@ capture as evidence.
    the receipt's cache-skip count and `$ avoided` for the `linkedin` step
    (everyone already enriched should skip), and — critically — zero new
    rows in `deliveries` for identities already delivered by the first run
-   (`gtm query "SELECT count(*) FROM deliveries WHERE target =
+   (`gtme query "SELECT count(*) FROM deliveries WHERE target =
    'instantly/add-to-campaign@1'"` before and after must match, unless
    the second pull surfaced genuinely new people).
 
-8. **Report.** `gtm runs` (list) and `gtm runs <first run id>` (receipt).
+8. **Report.** `gtme runs` (list) and `gtme runs <first run id>` (receipt).
    Capture: the receipt's per-step counts and total cost reconstruct
    correctly from the ledger alone, days after the run finished, with no
    other record of what happened.
@@ -257,7 +257,7 @@ real-world effect). Source: a 10-row CSV of operator-controlled plus-alias
 addresses with three deliberate probes (a mixed-case email, a nameless row,
 a caps-duplicate of row 1).
 
-- **Guard:** email column stripped → `gtm plan` exit 2 at the source
+- **Guard:** email column stripped → `gtme plan` exit 2 at the source
   (`columns:` naming a missing header), zero rows read. ✅
 - **Dry run:** 10 rows → 9 identities (caps-duplicate collapsed); receipt
   rendered 8 records' resolved `first_name` values, held the nameless row
@@ -279,7 +279,7 @@ name→id cache in the instantly adapter, with a regression test
 
 **Observation (no action):** Instantly populates its own `company_domain`
 field on each lead, derived server-side from the lead's email — visible in
-API reads, not something gtm sends. Noted so a future read of lead data
+API reads, not something gtme sends. Noted so a future read of lead data
 doesn't get attributed to the pipeline's mapping.
 
 ### 2026-08-15 — Increment: + ai/compose (campaign zero widened one step)
@@ -294,7 +294,7 @@ same dry→review→arm→re-run ritual, fresh operator-controlled aliases.
   twice.
 - **Finding (code bug, fixed):** the API engine read `ANTHROPIC_API_KEY`
   from the *process* env, but a built-in adapter's credentials arrive via
-  the runner-injected session env (SPEC §6) — a key stored with `gtm
+  the runner-injected session env (SPEC §6) — a key stored with `gtme
   secret set` never reached the engine. Every prior test had exported the
   key or used the fixture engine, so only a live run could catch it. Fixed
   (engine resolution now takes the adapter's env view) with a regression
@@ -360,7 +360,7 @@ is recorded there.
 Every piece of the binding-era stack in one pipeline against the real
 ledger and the live Instantly test shell: csv/source → http/enrich
 (markdown mode) → sql/enrich → ai/compose → the instantly deliver
-BINDING, installed the operator way (`~/.gtm/adapters/instantly-add-lead/
+BINDING, installed the operator way (`~/.gtme/adapters/instantly-add-lead/
 binding.yaml`, id rewritten, fixtures alongside). Run up the full ladder:
 simulate → plan → dry → arm → re-run.
 
@@ -369,7 +369,7 @@ simulate → plan → dry → arm → re-run.
   gap, delivery held with all four variables resolved. The agent-rung
   works: behavior validated before any key was exercised.
 - **Plan ($0):** the external YAML binding resolved with credentials
-  from ~/.gtm/secrets; the M9 touch scope printed
+  from ~/.gtme/secrets; the M9 touch scope printed
   (`record: touched → stack-proof`); vendor-coupling notes flagged
   `web.homepage` and `sql.shout`.
 - **Dry ($0.0053):** the grounding loop proved itself — ai/compose's

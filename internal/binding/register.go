@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/spec"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/spec"
 )
 
 // builtinBindings are the embedded bindings registered as built-in adapters.

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/field-registry.schema.json",
+  "$id": "https://gtme.spec/schemas/field-registry.schema.json",
   "title": "Canonical field registry (spec/fields/<entity_type>.json)",
   "description": "The shared vocabulary per entity type (SPEC.md §4a, ADR-017). A field name crossing an adapter boundary must appear here or be vendor-namespaced (<vendor>.<field>). Canonical names must not contain a dot; a dot marks a namespaced name.",
   "type": "object",

@@ -126,8 +126,8 @@ func TestWildcardProvides(t *testing.T) {
 }
 
 func TestResolveUnknownAdapter(t *testing.T) {
-	t.Setenv("GTM_ADAPTER_PATH", t.TempDir())
-	t.Setenv("GTM_HOME", t.TempDir())
+	t.Setenv("GTME_ADAPTER_PATH", t.TempDir())
+	t.Setenv("GTME_HOME", t.TempDir())
 	_, err := Resolve("nope/nothing")
 	if err == nil {
 		t.Fatal("want an error")

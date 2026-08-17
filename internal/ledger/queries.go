@@ -66,7 +66,7 @@ func (l *Ledger) SavedQueries(ctx context.Context) ([]SavedQuery, error) {
 	return out, nil
 }
 
-// OpenReadOnly opens the ledger read-only, for `gtm query`. Two layers keep a
+// OpenReadOnly opens the ledger read-only, for `gtme query`. Two layers keep a
 // query harmless: SQLite itself refuses writes on this handle, and the statement
 // is checked before it runs (see ReadOnlyStatement).
 func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
@@ -78,7 +78,7 @@ func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 		path = p
 	}
 	if _, err := os.Stat(path); err != nil {
-		return nil, fmt.Errorf("ledger: %s does not exist yet — run `gtm init`", path)
+		return nil, fmt.Errorf("ledger: %s does not exist yet — run `gtme init`", path)
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
@@ -107,6 +107,6 @@ func ReadOnlyStatement(query string) error {
 	case "select", "with", "explain":
 		return nil
 	default:
-		return fmt.Errorf("ledger: `gtm query` is read-only; %q is not a SELECT", first)
+		return fmt.Errorf("ledger: `gtme query` is read-only; %q is not a SELECT", first)
 	}
 }

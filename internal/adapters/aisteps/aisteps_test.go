@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/ai"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/ai"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // scriptEngine returns canned answers and records the prompts it was asked.

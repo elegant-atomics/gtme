@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // drive runs the adapter over a pair of in-memory pipes, exactly as the runner

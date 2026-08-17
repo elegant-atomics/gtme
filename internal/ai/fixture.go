@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// fixtureEngine replays scripted responses from a file named by GTM_AI_FIXTURE.
+// fixtureEngine replays scripted responses from a file named by GTME_AI_FIXTURE.
 // It is how the AI steps are tested offline (SPEC §11 M5: "tests use a fake
 // engine"), including the malformed-output-then-retry path.
 //
@@ -37,9 +37,9 @@ func newFixtureEngine(getenv func(string) string) (Engine, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	path := envOverride(getenv, "GTM_AI_FIXTURE")
+	path := envOverride(getenv, "GTME_AI_FIXTURE")
 	if path == "" {
-		return nil, fmt.Errorf("ai: engine fixture needs GTM_AI_FIXTURE to point at a responses file")
+		return nil, fmt.Errorf("ai: engine fixture needs GTME_AI_FIXTURE to point at a responses file")
 	}
 
 	fixturesMu.Lock()

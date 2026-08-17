@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/schemas/msg-cost.schema.json",
+  "$id": "https://gtme.spec/schemas/msg-cost.schema.json",
   "title": "COST (adapter → runner)",
   "description": "What a record (or, with key null/absent, a whole step) cost (SPEC.md §5). Best-effort, but every v0 built-in that spends money or tokens MUST emit it.\n\n`amount_usd` is NOT required: Go's `omitempty` on the float64 field drops a zero amount from the wire, so a free adapter written in Go emits COST with no amount_usd at all. Absent means 0.\n\n`key` may be JSON null for a step-level cost.",
   "type": "object",

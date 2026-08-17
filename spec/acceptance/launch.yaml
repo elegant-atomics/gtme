@@ -8,7 +8,7 @@ invariant: >
 given: >
   A valid pipeline.yaml and a source with records the ledger has never seen.
 when: >
-  The operator runs `gtm plan` then `gtm run pipeline.yaml`.
+  The operator runs `gtme plan` then `gtme run pipeline.yaml`.
 then: >
   The run completes with status `done`, every sourced identity exists in
   `identities` with at least one `field_values` row, and the terminal receipt

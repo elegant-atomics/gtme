@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/secrets"
+	"github.com/elegant-atomics/gtme/internal/secrets"
 	"golang.org/x/term"
 )
 
-// cmdSecret manages ~/.gtm/secrets (SPEC §8). Values are never echoed and never
+// cmdSecret manages ~/.gtme/secrets (SPEC §8). Values are never echoed and never
 // printed back.
 func cmdSecret(ctx context.Context, env Env, args []string) error {
 	fs := flag.NewFlagSet("secret", flag.ContinueOnError)
@@ -22,13 +22,13 @@ func cmdSecret(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	if len(positional) == 0 {
-		return fail(ExitValidation, "usage: gtm secret set KEY [VALUE] | gtm secret list")
+		return fail(ExitValidation, "usage: gtme secret set KEY [VALUE] | gtme secret list")
 	}
 
 	switch positional[0] {
 	case "set":
 		if len(positional) < 2 {
-			return fail(ExitValidation, "usage: gtm secret set KEY [VALUE]")
+			return fail(ExitValidation, "usage: gtme secret set KEY [VALUE]")
 		}
 		key := positional[1]
 		var value string
@@ -57,7 +57,7 @@ func cmdSecret(ctx context.Context, env Env, args []string) error {
 			return fail(ExitOther, "%v", err)
 		}
 		if len(names) == 0 {
-			fmt.Fprintln(env.Stderr, "no secrets stored — add one with `gtm secret set KEY`")
+			fmt.Fprintln(env.Stderr, "no secrets stored — add one with `gtme secret set KEY`")
 			return nil
 		}
 		for _, name := range names {
@@ -72,7 +72,7 @@ func cmdSecret(ctx context.Context, env Env, args []string) error {
 }
 
 // readSecret reads a value without echoing it when stdin is a terminal, and
-// straight from stdin when it is piped (`echo "$KEY" | gtm secret set NAME`).
+// straight from stdin when it is piped (`echo "$KEY" | gtme secret set NAME`).
 func readSecret(env Env, key string) (string, error) {
 	if f, ok := env.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 		fmt.Fprintf(env.Stderr, "%s: ", key)

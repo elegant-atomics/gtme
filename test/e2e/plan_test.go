@@ -59,7 +59,7 @@ steps:
 	contains(t, res.stderr, "needs linkedin_url", "stderr")
 	contains(t, res.stderr, "available: email, full_name", "stderr")
 
-	// gtm run must refuse for the same reason, without minting a run.
+	// gtme run must refuse for the same reason, without minting a run.
 	res = h.run("run", "pipeline.yaml")
 	if res.code != 2 {
 		t.Errorf("run exit = %d, want 2", res.code)
@@ -212,7 +212,7 @@ steps:
 		t.Fatalf("exit = %d, want 3 for a missing credential\nstderr:\n%s", res.code, res.stderr)
 	}
 	contains(t, res.stderr, "missing credential FIXTURE_API_KEY", "stderr")
-	contains(t, res.stderr, "gtm secret set FIXTURE_API_KEY", "stderr")
+	contains(t, res.stderr, "gtme secret set FIXTURE_API_KEY", "stderr")
 
 	// With the credential in the environment, the same plan is fine.
 	res = h.runWithEnv([]string{"FIXTURE_API_KEY=abc123"}, "", "plan", "pipeline.yaml")

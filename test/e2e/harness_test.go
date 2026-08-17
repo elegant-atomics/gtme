@@ -1,4 +1,4 @@
-// Package e2e drives the built gtm binary the way an operator would: no network,
+// Package e2e drives the built gtme binary the way an operator would: no network,
 // no real keys, fixture adapters only (SPEC §11).
 package e2e
 
@@ -14,25 +14,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 var gtmBin string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "gtm-e2e-bin")
+	dir, err := os.MkdirTemp("", "gtme-e2e-bin")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: temp dir:", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(dir)
 
-	gtmBin = filepath.Join(dir, "gtm")
-	build := exec.Command("go", "build", "-o", gtmBin, "./cmd/gtm")
+	gtmBin = filepath.Join(dir, "gtme")
+	build := exec.Command("go", "build", "-o", gtmBin, "./cmd/gtme")
 	build.Dir = repoRoot()
 	build.Stdout, build.Stderr = os.Stderr, os.Stderr
 	if err := build.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: building gtm:", err)
+		fmt.Fprintln(os.Stderr, "e2e: building gtme:", err)
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
@@ -46,7 +46,7 @@ func repoRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-// harness is one isolated gtm installation: its own home, ledger and workspace.
+// harness is one isolated gtme installation: its own home, ledger and workspace.
 type harness struct {
 	t      *testing.T
 	home   string
@@ -61,7 +61,7 @@ func newHarness(t *testing.T) *harness {
 		t:      t,
 		home:   filepath.Join(root, "home"),
 		work:   filepath.Join(root, "work"),
-		ledger: filepath.Join(root, "home", ".gtm", "ledger.db"),
+		ledger: filepath.Join(root, "home", ".gtme", "ledger.db"),
 	}
 	for _, d := range []string{h.home, h.work} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -72,14 +72,14 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// env is the process environment for a gtm invocation: an isolated HOME, the
+// env is the process environment for a gtme invocation: an isolated HOME, the
 // repo's external adapters on the search path, and nothing else.
 func (h *harness) env() []string {
 	return []string{
 		"HOME=" + h.home,
 		"PATH=" + os.Getenv("PATH"),
-		"GTM_LEDGER=" + h.ledger,
-		"GTM_ADAPTER_PATH=" + filepath.Join(repoRoot(), "adapters") + ":" +
+		"GTME_LEDGER=" + h.ledger,
+		"GTME_ADAPTER_PATH=" + filepath.Join(repoRoot(), "adapters") + ":" +
 			filepath.Join(repoRoot(), "test", "fixtures", "adapters"),
 	}
 }
@@ -99,7 +99,7 @@ func (h *harness) run(args ...string) result {
 // whole suite; nothing here should take more than a second or two.
 const commandTimeout = 60 * time.Second
 
-// runWithEnv runs gtm with extra environment entries and optional stdin.
+// runWithEnv runs gtme with extra environment entries and optional stdin.
 func (h *harness) runWithEnv(extraEnv []string, stdin string, args ...string) result {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
@@ -120,7 +120,7 @@ func (h *harness) runWithEnv(extraEnv []string, stdin string, args ...string) re
 		if ok := asExitError(err, &ee); ok {
 			code = ee.ExitCode()
 		} else {
-			h.t.Fatalf("running gtm %s: %v", strings.Join(args, " "), err)
+			h.t.Fatalf("running gtme %s: %v", strings.Join(args, " "), err)
 		}
 	}
 	return result{stdout: out.String(), stderr: errb.String(), code: code}
@@ -138,7 +138,7 @@ func (h *harness) mustRun(args ...string) result {
 	h.t.Helper()
 	res := h.run(args...)
 	if res.code != 0 {
-		h.t.Fatalf("gtm %s failed with %d\nstderr:\n%s", strings.Join(args, " "), res.code, res.stderr)
+		h.t.Fatalf("gtme %s failed with %d\nstderr:\n%s", strings.Join(args, " "), res.code, res.stderr)
 	}
 	return res
 }
@@ -217,10 +217,10 @@ func nonEmptyLines(s string) []string {
 }
 
 // writeAdapter installs an external adapter into the harness home, the way an
-// operator would drop one into ~/.gtm/adapters/<name>/.
+// operator would drop one into ~/.gtme/adapters/<name>/.
 func (h *harness) writeAdapter(name, manifest, script string) string {
 	h.t.Helper()
-	dir := filepath.Join(h.home, ".gtm", "adapters", name)
+	dir := filepath.Join(h.home, ".gtme", "adapters", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		h.t.Fatalf("mkdir %s: %v", dir, err)
 	}

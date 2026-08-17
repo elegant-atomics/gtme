@@ -1,6 +1,6 @@
 package cli
 
-// gtm groups — the ADR-021 verb set (SPEC §8): list groups with their derived
+// gtme groups — the ADR-021 verb set (SPEC §8): list groups with their derived
 // character, inspect one, and hand-edit membership by key or by snapshotting
 // an intensional definition (--from-segment / --query) into extensional
 // membership. Everything is events; membership edits are append-only.
@@ -12,7 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 func cmdGroups(ctx context.Context, env Env, args []string) error {
@@ -23,7 +23,7 @@ func cmdGroups(ctx context.Context, env Env, args []string) error {
 	switch sub {
 	case "show":
 		if len(rest) != 1 {
-			return fail(ExitValidation, "usage: gtm groups show NAME")
+			return fail(ExitValidation, "usage: gtme groups show NAME")
 		}
 		return groupsShow(ctx, env, rest[0])
 	case "add":
@@ -32,7 +32,7 @@ func cmdGroups(ctx context.Context, env Env, args []string) error {
 		return groupsEdit(ctx, env, rest, ledger.GroupRemoved)
 	default:
 		return fail(ExitValidation,
-			"usage: gtm groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]")
+			"usage: gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]")
 	}
 }
 
@@ -47,7 +47,7 @@ func groupsList(ctx context.Context, env Env) error {
 		return err
 	}
 	if len(groups) == 0 {
-		fmt.Fprintln(env.Stderr, "no groups yet — `gtm groups add NAME KEY...`, a pipeline terminus (group:), or a deliver record: creates one")
+		fmt.Fprintln(env.Stderr, "no groups yet — `gtme groups add NAME KEY...`, a pipeline terminus (group:), or a deliver record: creates one")
 		return nil
 	}
 	tw := tabwriter.NewWriter(env.Stderr, 0, 4, 2, ' ', 0)
@@ -107,7 +107,7 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 		return err
 	}
 	if len(positional) < 1 {
-		return fail(ExitValidation, "usage: gtm groups %s NAME [KEY...] [--from-segment NAME | --query SQL]", verbFor(event))
+		return fail(ExitValidation, "usage: gtme groups %s NAME [KEY...] [--from-segment NAME | --query SQL]", verbFor(event))
 	}
 	name, keys := positional[0], positional[1:]
 	if event == ledger.GroupRemoved && (*fromSegment != "" || *query != "") {

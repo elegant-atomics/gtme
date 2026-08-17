@@ -4,11 +4,11 @@ invariant: >
 given: >
   A pipeline.yaml edited to add or change a step.
 when: >
-  The operator runs `gtm plan` before `gtm run`.
+  The operator runs `gtme plan` before `gtme run`.
 then: >
   Any unsatisfiable `needs`/`uses` or missing credential is reported as a plan
   error naming the step and the missing field (§7) before any adapter is
-  invoked; and, once `gtm plan` succeeds, a `gtm run` scoped to a small source
+  invoked; and, once `gtme plan` succeeds, a `gtme run` scoped to a small source
   (e.g. a low `limit` in `source.with`) exercises the full step chain
   end-to-end at minimal cost before a full-size run.
 spec_refs: ["§7", "§8", "ADR-004"]

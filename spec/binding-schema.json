@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://gtm.spec/binding-schema.json",
+  "$id": "https://gtme.spec/binding-schema.json",
   "title": "Declarative binding",
   "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md §10a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter — no expression language may ever grow in here. Templating: '{{config.x}}', '{{record.field}}', '{{variables.name}}', '{{session}}'. A leaf that is exactly one placeholder substitutes the typed value; placeholders may list alternatives separated by '|' (first non-empty wins); leaves resolving to empty/null are omitted from the request (omitempty). In a deliver body, an object may carry the key '$variables': true — the resolved variables: mapping (minus any variable referenced individually elsewhere in the body) is spliced into that object. The engine pre-fills config defaults declared in config_schema.",
   "type": "object",

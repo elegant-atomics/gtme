@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/trevorfox/gtm/internal/identity"
-	"github.com/trevorfox/gtm/spec"
+	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/spec"
 )
 
 // Field is one registry entry (spec/schemas/field-registry.schema.json).

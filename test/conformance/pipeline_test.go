@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/trevorfox/gtm/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
 )
 
 // yamlToJSON re-encodes a YAML document as JSON so a JSON Schema validator can
@@ -67,7 +67,7 @@ func TestSpecExamplePipelineParses(t *testing.T) {
 	}
 	if _, err := pipeline.Parse(m[1]); err != nil {
 		t.Errorf("internal/pipeline rejects the SPEC.md §9 example pipeline: %v\n"+
-			"  SPEC.md §9 is DECIDED; the example there must be a pipeline gtm can run.\n\n%s", err, m[1])
+			"  SPEC.md §9 is DECIDED; the example there must be a pipeline gtme can run.\n\n%s", err, m[1])
 	}
 }
 

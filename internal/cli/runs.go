@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // cmdRuns lists runs, or prints one run's receipt (SPEC §8).
@@ -22,7 +22,7 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 		return err
 	}
 	if len(positional) > 1 {
-		return fail(ExitValidation, "usage: gtm runs [RUN_ID|last]")
+		return fail(ExitValidation, "usage: gtme runs [RUN_ID|last]")
 	}
 
 	l, err := openLedger(ctx)
@@ -136,7 +136,7 @@ func printReceipt(ctx context.Context, env Env, l *ledger.Ledger, run ledger.Run
 	var config map[string]any
 	if json.Unmarshal([]byte(run.ConfigJSON), &config) == nil {
 		if steps, ok := config["steps"].([]any); ok {
-			fmt.Fprintf(env.Stderr, "config:  %d steps recorded (`gtm freeze %s` rebuilds the pipeline)\n",
+			fmt.Fprintf(env.Stderr, "config:  %d steps recorded (`gtme freeze %s` rebuilds the pipeline)\n",
 				len(steps), run.ID)
 		}
 	}

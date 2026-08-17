@@ -7,15 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
-// cmdInit creates ~/.gtm and the ledger, applying migrations. It is safe to run
+// cmdInit creates ~/.gtme and the ledger, applying migrations. It is safe to run
 // repeatedly.
 func cmdInit(ctx context.Context, env Env, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
-	path := fs.String("ledger", "", "ledger path (default $GTM_LEDGER or ~/.gtm/ledger.db)")
+	path := fs.String("ledger", "", "ledger path (default $GTME_LEDGER or ~/.gtme/ledger.db)")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
 		return err
@@ -56,6 +56,6 @@ func cmdInit(ctx context.Context, env Env, args []string) error {
 		verb = "up to date"
 	}
 	fmt.Fprintf(env.Stderr, "ledger %s: %s\n", verb, l.Path())
-	fmt.Fprintf(env.Stderr, "gtm home: %s\n", home)
+	fmt.Fprintf(env.Stderr, "gtme home: %s\n", home)
 	return nil
 }

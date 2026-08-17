@@ -1,5 +1,5 @@
 // Package secrets resolves adapter credentials: the OS environment first, then
-// ~/.gtm/secrets (a KEY=value file, mode 0600) (SPEC §6).
+// ~/.gtme/secrets (a KEY=value file, mode 0600) (SPEC §6).
 package secrets
 
 import (
@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // Path returns the secrets file path.
@@ -78,7 +78,7 @@ func Set(name, value string) error {
 	sort.Strings(keys)
 
 	var buf strings.Builder
-	buf.WriteString("# gtm secrets — written by `gtm secret set`. Mode 0600.\n")
+	buf.WriteString("# gtme secrets — written by `gtme secret set`. Mode 0600.\n")
 	for _, k := range keys {
 		buf.WriteString(k + "=" + current[k] + "\n")
 	}

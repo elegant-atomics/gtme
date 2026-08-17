@@ -15,14 +15,14 @@ import (
 
 	"strings"
 
-	"github.com/trevorfox/gtm/internal/adapters"
-	"github.com/trevorfox/gtm/internal/ai"
-	"github.com/trevorfox/gtm/internal/binding"
-	"github.com/trevorfox/gtm/internal/identity"
-	"github.com/trevorfox/gtm/internal/ledger"
-	"github.com/trevorfox/gtm/internal/planner"
-	"github.com/trevorfox/gtm/internal/protocol"
-	"github.com/trevorfox/gtm/internal/registry"
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/ai"
+	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/registry"
 )
 
 // DefaultConcurrency is the per-step worker pool size (SPEC §9).
@@ -111,13 +111,13 @@ type Result struct {
 	TerminusWould int
 }
 
-// Concurrency resolves the worker pool size: the option, else GTM_CONCURRENCY,
+// Concurrency resolves the worker pool size: the option, else GTME_CONCURRENCY,
 // else the default.
 func Concurrency(opt int) int {
 	if opt > 0 {
 		return opt
 	}
-	if v := os.Getenv("GTM_CONCURRENCY"); v != "" {
+	if v := os.Getenv("GTME_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
@@ -138,7 +138,7 @@ type runner struct {
 	aiFixture string
 	reg       *registry.Registry
 	now       func() time.Time
-	// out is the downstream NDJSON stream in pipe mode, nil for `gtm run`.
+	// out is the downstream NDJSON stream in pipe mode, nil for `gtme run`.
 	out *protocol.Writer
 
 	mu    sync.Mutex
@@ -242,7 +242,7 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 // visibly synthetic answer (SPEC §8; the fixture engine marks its output with
 // model "fixture", which the ai/* provenance carries).
 func writeAutoFixture() (string, error) {
-	f, err := os.CreateTemp("", "gtm-simulate-ai-*.json")
+	f, err := os.CreateTemp("", "gtme-simulate-ai-*.json")
 	if err != nil {
 		return "", err
 	}
@@ -377,7 +377,7 @@ func (r *runner) openSession(ctx context.Context, st *planner.Step) (*adapters.S
 
 // sessionEnv is a step's Ports environment: its resolved credentials, plus the
 // simulate signals (SPEC §8) — bindings switch to fixture-served mode, AI
-// steps to the fixture engine (an operator-recorded GTM_AI_FIXTURE in the
+// steps to the fixture engine (an operator-recorded GTME_AI_FIXTURE in the
 // process env still wins over the synthesized $auto script).
 func (r *runner) sessionEnv(st *planner.Step) map[string]string {
 	if !r.simulate {
@@ -389,9 +389,9 @@ func (r *runner) sessionEnv(st *planner.Step) map[string]string {
 	}
 	env[binding.SimulateEnv] = "1"
 	if isAIStep(st) {
-		env["GTM_AI_ENGINE"] = ai.EngineFixture
-		if os.Getenv("GTM_AI_FIXTURE") == "" {
-			env["GTM_AI_FIXTURE"] = r.aiFixture
+		env["GTME_AI_ENGINE"] = ai.EngineFixture
+		if os.Getenv("GTME_AI_FIXTURE") == "" {
+			env["GTME_AI_FIXTURE"] = r.aiFixture
 		}
 	}
 	return env
