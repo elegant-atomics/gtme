@@ -145,6 +145,21 @@ bindings are reviewable, diffable data — which is what makes hosting
 third-party adapters safe at all. Recorded here so the marketplace
 conversation starts from that framing rather than rediscovering it.
 
+## Run-lifecycle notification hook
+
+Named in the ADR-031 design conversation, deliberately not a step: a
+"notify Slack/email when the run finishes" surface operates on run
+metadata (the terminal receipt), not on records — it answers none of a
+step's contract questions (per-record needs, idempotency key,
+`on_missing`), which is the test ADR-031 applied. v0's answer is the
+receipt on stderr plus the cron/webhook wrapper recipe (SPEC §8): pipe
+`gtme run` output wherever you like. If demand shows up, it enters as a
+top-level `notify:` run hook (or a receipt sink), never as a step role.
+Aggregate record delivery (Google Sheet, CSV export) needs no hook at
+all — it's a `batch: true` deliver adapter; if one invocation must see
+every surviving record, the missing piece is at most a `batch_size: all`
+idiom, not a new cardinality.
+
 ## MCP as a control-plane doorway
 
 Standing position (DECISIONS-SEED.md, not an ADR): MCP is a later doorway,

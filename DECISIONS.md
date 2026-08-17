@@ -753,6 +753,66 @@ Acceptance: a run with retention on stores payloads and a re-run after a
 binding improvement back-fills a new field with zero vendor calls;
 `gtme vacuum` removes expired payloads and nothing else.
 
+### ADR-031: Deliver is a role, not a position — deliver steps join `steps:`
+**Status:** Accepted (2026-08-17 — design conversation; human-approved
+same day)
+**Context:** pipeline.yaml carried a singular top-level `deliver:` block
+beside `source:` and `steps:` — a shape inherited from the original
+pipeline sketch and never defended by an ADR. The manifest layer already
+treats deliver as one of six roles (§6), and every deliver-special
+mechanism keys off role or target, never position: the dry-run/armed gate
+withholds *deliver steps* (§8), `deliveries` idempotency is keyed
+`(target, idempotency)` (§3), and `variables:`/`on_missing:`/`record:`/
+`suppress:` are role-gated config the planner validates the same way it
+validates `uses:` on filter/compose steps. The block bought one thing —
+the send point is obvious at a glance — and cost real expressiveness:
+one delivery per pipeline, always last. Multi-target sends (campaign +
+CRM upsert + notification egress), segmented sends gated per deliver
+step, and mid-pipeline delivery ordering were all inexpressible.
+**Decision:** The top-level `deliver:` block is removed. Deliver adapters
+are ordinary entries in `steps:`; a pipeline MAY carry zero, one, or many,
+at any position, and "steps execute strictly in order" (§9) is the whole
+sequencing story — a deliver step sends exactly the records that survived
+everything before it. `variables:`, `on_missing:`, `idempotency:`,
+`record:`, and `suppress:` become keys valid only on steps whose adapter
+role is `deliver`, rejected by the planner elsewhere — the `uses:`
+pattern, second instance. Per-step semantics are unchanged and now simply
+apply per deliver step: each keeps its own `deliveries` idempotency scope
+(per target), its own `on_missing` policy, its own `record:` touch scope
+(still defaulting to the pipeline name — two deliver steps sharing the
+default share the scope, which is the correct reading of "this pipeline
+touched them"; distinct scopes are an explicit per-step `record:`).
+`--dry-run` withholds every deliver step and the receipt renders resolved
+variables per deliver step; arming arms them all. The terminus (`group:`)
+is untouched: it admits records that complete the run's *final* step, so
+a record that delivered mid-pipeline and then failed a later step has
+delivered but does not join — the terminus captures completers, not
+touchees, and `record:` already remembers the touch. The at-a-glance
+property moves to `gtme plan`, which knows every step's role and MUST
+call out each deliver step (target and touch scope) in its output —
+validated truth instead of YAML position.
+Considered and rejected alongside: a per-run step cardinality ("runs once
+for the whole run" — the Slack-summary / Google-Sheet case). The test
+that killed it: a step's contract questions — what does it need per
+record, what keys its idempotency, what happens on a missing field —
+must have answers. An aggregate export (sheet, CSV) answers all of them
+and is just a `batch: true` deliver (§6); a run-summary notification
+answers none and is therefore not a step but a run-lifecycle hook,
+parked in ROADMAP.md.
+**Consequences:** Multi-delivery pipelines with zero new machinery — the
+planner, the gate ladder, idempotency, and groups semantics all already
+operate per step. The YAML format changes pre-publication with no
+compatibility shim (the ADR-005/v0.12 stance): a document carrying
+top-level `deliver:` fails schema validation and `KnownFields` decoding.
+Campaign-zero, the examples, and e2e fixtures move the block into
+`steps:` when M13 builds.
+**Spec impact:** AMEND (applied, changelog v0.13; build queued as M13) —
+§7 plan-output wording; §8 deliver idempotency / `on_missing` / dry-run /
+groups sections re-worded per deliver step, terminus clarification; §9
+example and schema rules; `spec/schemas/pipeline.schema.json` (top-level
+`deliver` removed, role-gated key descriptions); §11 milestone M13;
+ROADMAP.md gains the run-lifecycle notification hook entry.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
