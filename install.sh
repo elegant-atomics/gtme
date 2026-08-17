@@ -49,4 +49,4 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo "note: $BIN_DIR is not on your PATH — add it to your shell profile" ;;
 esac
-echo "next: gtme plan examples/apollo-to-instantly.yaml"
+echo "next: gtme run examples/demo.yaml --simulate   # a whole campaign, offline, zero keys"

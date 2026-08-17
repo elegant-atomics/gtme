@@ -167,6 +167,23 @@ enrichment while it's fresh. Raw vendor responses are retained (bounded,
 TTL'd, evictable) so improving an extraction back-fills from payloads
 you already paid for — at zero vendor spend.
 
+## The adapters
+
+What ships today — see **[ADAPTERS.md](ADAPTERS.md)** for each one's
+config and behavior, or `gtme help --agent` for the machine-generated,
+always-current surface:
+
+| | |
+|---|---|
+| **In** | `csv/source` · `webhook/source` · group-as-source · `apollo/search` *(binding)* |
+| **Enrich** | `harvest/profile` · `http/enrich` (any URL → markdown or JSON) · `sql/enrich` |
+| **Judge** | `ai/filter` · `sql/filter` |
+| **Write** | `ai/compose` |
+| **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` |
+
+Adding your own doesn't require touching this repo: drop a `binding.yaml`
+into `~/.gtme/adapters/<name>/` and the id resolves immediately.
+
 ## A campaign is a folder
 
 Everything that defines a campaign is text, so a campaign works the way
@@ -202,13 +219,20 @@ handoff, or a per-client repo.
 
 ```sh
 git clone https://github.com/elegant-atomics/gtme && cd gtme
-make build && ./bin/gtme init
+./install.sh        # builds gtme, installs it to ~/.local/bin, runs gtme init
 ```
+
+`install.sh` is deliberately boring: it compiles from the checkout and
+copies one static binary into place — no curl-pipe-to-shell, no network
+fetch. It warns you if `~/.local/bin` isn't on your PATH (add it to your
+shell profile, or run `PREFIX=/usr/local ./install.sh` instead). Prefer
+not to install? `make build` gives you `./bin/gtme` and every command
+below works with that path.
 
 **The zero-key demo** — run a whole campaign, offline, right now:
 
 ```sh
-./bin/gtme run examples/demo.yaml --simulate
+gtme run examples/demo.yaml --simulate
 ```
 
 The Apollo source serves its conformance fixtures, the AI steps answer
@@ -221,21 +245,21 @@ honest here; that's the point.
 **Then with real keys**, the same file climbs the ladder:
 
 ```sh
-./bin/gtme secret set APOLLO_API_KEY        # prompts, no echo
-./bin/gtme secret set ANTHROPIC_API_KEY
-./bin/gtme plan examples/demo.yaml          # contracts + cost, still $0
-./bin/gtme run  examples/demo.yaml --dry-run  # everything but delivery
-./bin/gtme run  examples/demo.yaml          # armed
-./bin/gtme run  examples/demo.yaml          # again: cache skips, zero re-delivery
+gtme secret set APOLLO_API_KEY        # prompts, no echo
+gtme secret set ANTHROPIC_API_KEY
+gtme plan examples/demo.yaml          # contracts + cost, still $0
+gtme run  examples/demo.yaml --dry-run  # everything but delivery
+gtme run  examples/demo.yaml          # armed
+gtme run  examples/demo.yaml          # again: cache skips, zero re-delivery
 ```
 
 Then interrogate what happened — no log spelunking:
 
 ```sh
-./bin/gtme show jane.doe@acme.com --provenance   # every fact, who wrote it, when
-./bin/gtme runs last                             # the receipt, reconstructed
-./bin/gtme query "SELECT field, value FROM current_fields ..."
-./bin/gtme groups                                # decisions about sets, with tallies
+gtme show jane.doe@acme.com --provenance   # every fact, who wrote it, when
+gtme runs last                             # the receipt, reconstructed
+gtme query "SELECT field, value FROM current_fields ..."
+gtme groups                                # decisions about sets, with tallies
 ```
 
 ## Further exploration
@@ -248,6 +272,8 @@ Then interrogate what happened — no log spelunking:
   tier answer both causes.
 - **[VALIDATION.md](VALIDATION.md)** — the receipts: real campaigns, real
   API drift absorbed, real dollar amounts, findings logged honestly.
+- **[ADAPTERS.md](ADAPTERS.md)** — every shipped adapter, what it does,
+  and the config that matters.
 - **[spec/bindings/](spec/bindings/)** — vendor adapters as reviewable,
   diffable YAML, with the conformance fixtures that double as simulation.
 - **[PROCESS.md](PROCESS.md)** — how design conversations become spec, and
