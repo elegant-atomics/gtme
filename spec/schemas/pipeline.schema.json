@@ -28,16 +28,12 @@
     "steps": {
       "type": "array",
       "items": {"$ref": "#/definitions/step"},
-      "description": "Middle steps, executed strictly in order."
-    },
-    "deliver": {
-      "$ref": "#/definitions/step",
-      "description": "The optional delivery step."
+      "description": "The pipeline's steps, executed strictly in order. Deliver-role adapters are ordinary entries (ADR-031) — any number, any position; there is no top-level deliver block."
     },
     "group": {
       "type": "string",
       "minLength": 1,
-      "description": "ADR-021: the membership terminus. Records completing the run's final step are `added` to this group (created on demand). Valid with or without deliver:."
+      "description": "ADR-021: the membership terminus. Records completing the run's final step are `added` to this group (created on demand). Valid with or without deliver steps; captures completers, not sends (ADR-031)."
     },
     "waterfall": {
       "description": "Reserved (SPEC.md §9). Present only so v1 can add it without a format break; any value here MUST be rejected in v0."
@@ -59,7 +55,7 @@
         "id": {
           "type": "string",
           "minLength": 1,
-          "description": "Step id, unique within the pipeline. Defaults to 'source' / 'step-N' / 'deliver'."
+          "description": "Step id, unique within the pipeline. Defaults to 'source' / 'step-N'."
         },
         "use": {
           "type": "string",
@@ -74,17 +70,17 @@
         "require": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},
-          "description": "ADR-021: process only records currently members of EVERY listed group. Valid on interior steps and deliver, not the source. Referenced groups must exist at plan time."
+          "description": "ADR-021: process only records currently members of EVERY listed group. Valid on any non-source step, deliver steps included. Referenced groups must exist at plan time."
         },
         "exclude": {
           "type": "array",
           "items": {"type": "string", "minLength": 1},
-          "description": "ADR-021: skip records currently members of ANY listed group — the judgment-memory mechanism. Valid on interior steps and deliver, not the source. Referenced groups must exist at plan time."
+          "description": "ADR-021: skip records currently members of ANY listed group — the judgment-memory mechanism. Valid on any non-source step, deliver steps included. Referenced groups must exist at plan time."
         },
         "record": {
           "type": "string",
           "minLength": 1,
-          "description": "ADR-021, deliver only: the group successful deliveries append `touched` events to. Defaults to the pipeline name; created on demand."
+          "description": "ADR-021/031, deliver steps only: the group this step's successful deliveries append `touched` events to. Defaults to the pipeline name per deliver step (steps sharing the default share the scope); created on demand."
         },
         "suppress": {
           "type": "object",
@@ -94,7 +90,7 @@
             "group": {"type": "string", "minLength": 1},
             "within": {"type": "string", "pattern": "^[0-9]+d$"}
           },
-          "description": "ADR-021, deliver only: skip records with a `touched` event in the group within the window; skips are receipted with reasons. Layers above the idempotency floor."
+          "description": "ADR-021/031, deliver steps only: skip records with a `touched` event in the group within the window; skips are receipted with reasons and the record advances past the step. Layers above the idempotency floor."
         },
         "with": {
           "type": "object",
@@ -117,16 +113,16 @@
         },
         "idempotency": {
           "type": "string",
-          "description": "Deliver steps: the field whose value keys a delivery. Defaults to the identity key (SPEC.md §8)."
+          "description": "Deliver steps only (ADR-031: the planner rejects it elsewhere): the field whose value keys a delivery. Defaults to the identity key (SPEC.md §8); REQUIRED on http/deliver (ADR-023)."
         },
         "variables": {
           "type": "object",
           "additionalProperties": {"type": "string", "minLength": 1},
-          "description": "Deliver steps only (ADR-018/019): egress mapping of target merge-field name → canonical or namespaced ledger field. Its values are the step's dynamic needs (SPEC.md §6, §7); the planner validates each against upstream provides and rejects the key on any other step."
+          "description": "Deliver steps only (ADR-018/019/031): egress mapping of target merge-field name → canonical or namespaced ledger field. Its values are the step's dynamic needs (SPEC.md §6, §7); the planner validates each against upstream provides and rejects the key on any other step."
         },
         "on_missing": {
           "enum": ["skip", "fail"],
-          "description": "Deliver steps only (ADR-019, SPEC.md §8): per-record policy when a variables: target does not resolve to a non-empty value. Default skip (with a recorded verdict); blank merge fields never send."
+          "description": "Deliver steps only (ADR-019/031, SPEC.md §8): per-record policy when a variables: target does not resolve to a non-empty value. Default skip (with a recorded verdict, and the record advances past the step); fail freezes the record. Blank merge fields never send."
         },
         "waterfall": {
           "description": "Reserved (SPEC.md §9); rejected in v0."

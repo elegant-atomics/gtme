@@ -711,7 +711,10 @@ group named by `require:`, `exclude:`, `suppress:`, or a group source
 pre-exist would make every new pipeline a two-step dance), so plan only
 checks their names are non-empty. A `suppress.within` window MUST parse
 as `Nd` (§9's cache grammar). The plan output lists each step's
-membership gates and the deliver step's touch scope.
+membership gates, and MUST call out each deliver step — target adapter
+and touch scope — so the pipeline's full send surface is reviewable in
+one place (ADR-031: with delivers as ordinary steps, plan output is
+where the send points are obvious at a glance, not YAML position).
 
 At execution time, per step, per record:
 - **Membership gates (ADR-021):** a step with `require:` processes only
@@ -814,22 +817,26 @@ low latency is explicitly out of scope for v0.
 
 ### deliver idempotency
 
-Idempotency key = the value of the field named by `idempotency` config
-(default: the identity key). Before calling the adapter for a record, the
-runner MUST check `deliveries`; on hit, it MUST skip (`skipped_cache`
-semantics, reason `already_delivered`). On successful adapter RECORD/END
-for that record, the runner MUST insert into `deliveries`.
+Per deliver step: idempotency key = the value of the field named by the
+step's `idempotency` config (default: the identity key). Before calling
+the adapter for a record, the runner MUST check `deliveries`; on hit, it
+MUST skip (`skipped_cache` semantics, reason `already_delivered`). On
+successful adapter RECORD/END for that record, the runner MUST insert
+into `deliveries`. The `(target, idempotency)` key means each deliver
+step's dedupe scope is its own target (ADR-031): a pipeline delivering
+to a campaign and to a CRM dedupes each independently.
 
 ### deliver completeness — `on_missing` (ADR-019)
 
 Per-record completeness at deliver time is a runtime contract: every
 `variables:` target (§9) MUST resolve to a non-empty value for a record
 before that record may deliver — blank merge fields MUST never send. The
-policy when one does not resolve is `on_missing: skip | fail` on the
-deliver step, default **skip**:
+policy when one does not resolve is `on_missing: skip | fail`, declared
+per deliver step, default **skip**:
 
-- `skip`: the record does not deliver; the runner records a fail verdict
-  for the deliver step in `run_records.verdicts` with the missing field
+- `skip`: the record does not deliver at this step (later steps,
+  including later deliver steps, still see it); the runner records a fail
+  verdict for that deliver step in `run_records.verdicts` with the missing field
   names as the reason, and the terminal receipt lists every skipped record
   with its reason.
 - `fail`: the record fails (`step_events.event='failed'`, naming the
@@ -837,6 +844,14 @@ deliver step, default **skip**:
 
 A record missing a *floor* field (§6 dynamic needs) fails needs validation
 as any record would; `on_missing` governs the `variables:`-derived fields.
+
+With delivers as ordinary steps (ADR-031), the skip/fail distinction is
+also an advancement distinction: `skip` withholds *this step's send* but
+the record advances (a later deliver step with its own `variables:` may
+still deliver it); `fail` fails the *record* (§5 semantics — state
+freezes, it does not advance). Deliver-step fail verdicts in
+`run_records.verdicts` record withheld sends; unlike a filter's
+`pass=false` (§7), they do not stop the record.
 
 ### Dry-run and the armed gate (ADR-019)
 
@@ -846,7 +861,9 @@ step's `variables:` per record, applies the `on_missing` policy, and
 records `step_events.event='dry_run'` with the fully RESOLVED variable
 values in `detail` — but MUST NOT invoke the deliver adapter and MUST NOT
 write to `deliveries`. The terminal receipt renders each record's resolved
-variables: this is the approval artifact a human reviews before arming.
+variables per deliver step: this is the approval artifact a human reviews
+before arming. Arming is all-or-nothing — the armed run arms every
+deliver step in the pipeline (ADR-031).
 Non-deliver steps run normally under `--dry-run` — delivery is the gated
 destructive edge (§0 principle 9); everything upstream is replayable and
 cache-covered, and its spend is already visible in `gtme plan`. Arming is
@@ -861,25 +878,36 @@ Groups are runner-owned semantics: adapters see only projections, never
 the ledger, and nothing below changes the wire protocol.
 
 **Touch scoping — `record:`.** On a successful delivery, the runner MUST
-append a `touched` event to the group named by the deliver step's
+append a `touched` event to the group named by that deliver step's
 `record:` — **defaulting to the pipeline name** — creating the group on
 demand. Every pipeline is thereby safely scoped by default; sharing a
-scope across pipelines is an explicit override. The event's `detail`
-carries the target adapter and run id.
+scope across pipelines is an explicit override. Multiple deliver steps
+sharing the default share the scope — the correct reading of "this
+pipeline touched them" — and distinct scopes are explicit per-step
+`record:` overrides (ADR-031). The event's `detail` carries the target
+adapter and run id.
 
 **Suppression — `suppress: {group: G, within: Nd}`.** Before delivering
-a record, the runner MUST skip it when the record has a `touched` event
-in G within the window. A suppressed record records a fail verdict for
-the deliver step with reason `suppressed` (the `on_missing` pattern),
-and the terminal receipt lists every suppressed record with the group
-and the age of the blocking touch. Suppression layers above the §8
+a record at a deliver step carrying the key, the runner MUST skip it
+when the record has a `touched` event in G within the window. A
+suppressed record records a fail verdict for that deliver step with
+reason `suppressed` (the `on_missing` pattern — and, like `on_missing:
+skip`, the record advances: suppression gates this step's send, not the
+record), and the terminal receipt lists every suppressed record with the
+group and the age of the blocking touch. Suppression layers above the §8
 idempotency floor: idempotency stops the *same* delivery twice;
 suppression enforces a *chosen* contact policy across deliveries.
 
 **Terminus — top-level `group: <name>`.** A pipeline MAY end in group
-membership instead of (or in addition to) a deliver step: every record
+membership instead of (or in addition to) deliver steps: every record
 that completes the run's final step is `added` to the named group
-(created on demand), with the pipeline and run id as provenance. This is
+(created on demand), with the pipeline and run id as provenance. The
+terminus captures *completers*, not sends (ADR-031): a record that
+delivered at a mid-pipeline deliver step and then failed a later step
+has delivered but does not join, and a record whose send was withheld
+(`on_missing` skip, suppression) but that completed the run does join —
+`record:`'s `touched` events, not the terminus, are what remember actual
+sends. This is
 the recommended campaign decomposition: a qualify pipeline
 (source → enrich → filter ⇒ group) runs cheaply and often; the group is
 a durable, reviewable, hand-editable artifact; a separate send pipeline
@@ -988,28 +1016,34 @@ steps:
         Write first_line and ps_line using recent_posts and role_history.
       batch_size: 25
 
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "Q3 VP Marketing"
-  variables:            # ADR-018/019: egress mapping, and the step's dynamic needs
-    first_line: first_line
-    ps_line: ps_line
-  idempotency: email
+  - id: send              # ADR-031: a deliver adapter is an ordinary step
+    use: instantly/add-to-campaign
+    with:
+      campaign: "Q3 VP Marketing"
+    variables:            # ADR-018/019: egress mapping, and the step's dynamic needs
+      first_line: first_line
+      ps_line: ps_line
+    idempotency: email
 ```
 
 Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
-it exactly as `needs.required` (§7). `variables:` (ADR-018/019) is valid
-only on the deliver step: a map of *target merge-field name* → *canonical
+it exactly as `needs.required` (§7). Deliver adapters are ordinary
+`steps:` entries (ADR-031): a pipeline MAY carry zero, one, or many, at
+any position — steps execute strictly in order, so a deliver step sends
+exactly the records that survived everything before it. `variables:`
+(ADR-018/019) is valid only on steps whose adapter role is `deliver`: a
+map of *target merge-field name* → *canonical
 or namespaced ledger field*; its values are the step's dynamic needs (§6,
 §7), and the mapping is the egress half of ADR-018 — the only place the
 target's foreign vocabulary appears. The runner hands the mapping to the
 deliver adapter as `variables` in OPEN `config` (§5) — the adapter owns
 applying it; the runner owns projecting and completeness-checking the
 fields it references (§8). `on_missing: skip | fail` (default
-`skip`) is valid only on the deliver step (§8). The ingress half is
+`skip`) and `idempotency:` are likewise valid only on deliver steps
+(§8); the planner MUST reject any of these keys elsewhere, exactly as it
+rejects `uses:` outside filter/compose. The ingress half is
 `columns:` inside `csv/source`'s `with:` (§10.1): a map of *canonical field
 name* → *CSV header as written*. Both mapping keys read
 destination-vocabulary → source-vocabulary. No interior step may carry a
@@ -1052,13 +1086,14 @@ group: q3-qualified         # terminus: records completing the run are added
   provides: the plan treats the available-field set as open, and each
   step's needs are enforced per record at run time, exactly like the
   needs-all wildcard.
-- `require: [<group>, …]` / `exclude: [<group>, …]` are valid on interior
-  steps and the deliver step (not the source): membership gates, checked
+- `require: [<group>, …]` / `exclude: [<group>, …]` are valid on any
+  non-source step, deliver steps included: membership gates, checked
   per record against current membership (§7).
 - `record: <name>` and `suppress: {group: <name>, within: Nd}` are valid
-  only on the deliver step (§8). `record:` defaults to the pipeline name.
+  only on deliver steps (§8). `record:` defaults to the pipeline name,
+  per deliver step (ADR-031: steps sharing the default share the scope).
 - Top-level `group: <name>` is the membership terminus (§8), valid with
-  or without a `deliver:` block; a pipeline with neither simply enriches.
+  or without deliver steps; a pipeline with neither simply enriches.
 
 ---
 
@@ -1451,6 +1486,25 @@ decided contract, not shipped behavior.
   without its `idempotency:` key fails naming the rule; `csv/deliver`
   writes header + rows, appends nothing on a re-run, and the file is
   reviewable as written.
+- **M13 — delivers as steps (ADR-031; §7, §8, §9).** Remove the top-level
+  `deliver:` block from `internal/pipeline` and the schema; accept
+  deliver-role adapters as ordinary `steps:` entries, any number, any
+  position; role-gate `variables:`/`on_missing:`/`idempotency:`/`record:`/
+  `suppress:` at plan time; dry-run withholding, resolved-variables
+  receipts, `deliveries` idempotency, touch scoping, and suppression per
+  deliver step, with `skip`/suppression advancing the record and `fail`
+  freezing it (§8); `gtme plan` calls out every deliver step; migrate
+  `examples/`, README.md's quickstart, VALIDATION.md's pipelines, and
+  e2e fixtures off the block (they stay on the old shape until this
+  milestone so every committed YAML runs against the shipped binary).
+  ✅ E2E, offline: a pipeline with a mid-list deliver step and a final
+  deliver step dry-runs to resolved variables for both with zero
+  `deliveries` writes; armed, it delivers to both, and a re-run delivers
+  nothing twice on either; a record failing between the two delivers to
+  the first only and is absent from the terminus group, while a record
+  suppressed at the final deliver step completes and joins it;
+  `variables:` on a non-deliver step fails plan naming step and key; a
+  document with a top-level `deliver:` block fails validation.
 
 Repo layout:
 ```
@@ -1591,6 +1645,25 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.13 — 2026-08-17 (ADR-031: delivers as steps)
+**Changed:** The top-level `deliver:` block is gone; deliver adapters
+are ordinary `steps:` entries — any number, any position (§9) — with
+`variables:`/`on_missing:`/`idempotency:`/`record:`/`suppress:`
+role-gated to deliver steps and every §8 deliver semantic (idempotency
+scope, dry-run withholding, resolved-variables receipt, touch scope,
+suppression) applying per step. New advancement rule made explicit:
+`on_missing: skip` and suppression withhold the step's send but the
+record advances; `fail` freezes it. Terminus clarified as completers-only
+— a mid-pipeline delivery followed by a later failure does not join;
+`record:`'s `touched` events remember sends. §7: `gtme plan` MUST call
+out each deliver step (target, touch scope) — the at-a-glance send
+surface moves from YAML position to plan output.
+`spec/schemas/pipeline.schema.json` updated; milestone M13 queues the
+build (until it lands, decided contract, not shipped behavior). Rejected
+alongside (recorded in ADR-031): a run-scoped step cardinality —
+aggregate exports are `batch: true` delivers; run-summary notifications
+are a run-lifecycle hook, parked in ROADMAP.md.
 
 ### v0.12 — 2026-08-16 (the name: gtme)
 **Changed:** The project, binary, and every surface derived from them are
