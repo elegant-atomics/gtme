@@ -35,6 +35,88 @@ Three kinds appear below:
 | `csv/deliver` | deliver | process (built-in) | append delivered records to a reviewable CSV |
 | `mock-enrich-py` | enrich | process (external, Python) | example proving the any-language adapter boundary |
 
+## How adapters work
+
+Every adapter — binding or process — presents the same three things to the
+runner: a **contract** (`needs`/`provides` as JSON Schema over canonical
+field names), a **config schema** (what its `with:` block accepts), and a
+**role** (source, enrich, filter, verify, compose, deliver). That's all
+`gtme plan` sees, which is why it can validate a whole pipeline without
+caring how any step is implemented. At run time the runner projects
+exactly the declared fields into the adapter, validates whatever comes
+back against `provides` and the registry, and writes it to the ledger —
+adapters never touch storage and never see more than their projection.
+
+Most adapters are **bindings**: the entire implementation is a YAML
+document the engine interprets. Here's a complete, working one — the
+source adapter from the
+[getting-started tutorial](https://www.elegantatomics.com/blog/getting-started-with-gtme),
+annotated:
+
+```yaml
+id: jsonplaceholder/users     # how pipelines name it: use: jsonplaceholder/users
+version: 1
+role: source                  # source | enrich | deliver
+entity_type: person
+
+provides:                     # the contract — plan validates downstream
+  type: object                # steps against exactly these fields
+  additionalProperties: false
+  properties:
+    full_name: { type: string }
+    email: { type: string }
+    company_name: { type: string }
+    company_domain: { type: string }
+    jsonplaceholder.username: { type: string }   # vendor-namespaced: not canonical
+
+config_schema:                # what `with:` accepts, validated at plan time
+  type: object
+  properties:
+    limit: { type: integer, minimum: 1 }
+    base_url: { type: string, default: "https://jsonplaceholder.typicode.com" }
+
+request:                      # templated from config + (for enrich/deliver)
+  method: GET                 # the record's own fields: {{record.email}} etc.
+  url: "{{config.base_url}}/users"
+
+extract:                      # response → canonical records
+  records: "."                # dotted path to the record array
+  fields:
+    full_name: name                                    # plain path
+    email: { path: email, transform: email }           # registry rule: lowercase + validate
+    company_name: company.name                         # paths walk nested objects
+    company_domain: { path: website, transform: domain } # rule: reduce to eTLD+1
+    jsonplaceholder.username: username
+```
+
+Real vendors add the remaining primitives, declared the same way: `auth`
+(where the credential goes and which env var holds it), `pagination`
+(strategy, termination, page size), `errors` (status → verdict),
+`idempotency: native | ledger` for deliver bindings, `cost`, and `retry`.
+That's the whole vocabulary — about eight primitives, pinned by
+[`spec/binding-schema.json`](spec/binding-schema.json). What a binding
+deliberately *cannot* do is express logic: no conditionals, no
+expressions, no multi-call flows. The `transform:` hook only accepts
+named registry rules, so all judgment is frozen at authoring time and a
+binding is safe to review by reading it.
+
+The lifecycle: drop the file (plus `fixtures/conformance.json`, a saved
+real response) into `~/.gtme/adapters/<name>/` and the id resolves
+immediately — no build, no restart. The fixtures are the adapter's
+conformance test *and* what `--simulate` serves, so a new adapter is
+provable offline before its first live call.
+
+When an integration genuinely needs logic — HarvestAPI's second
+posts-call, Instantly's campaign-name resolution — it **graduates to a
+process adapter**: an executable in any language reading NDJSON on stdin
+and writing it on stdout (`OPEN` → `RECORD`s → `END`, spec'd in SPEC §5
+with schemas in `spec/schemas/`), with a `manifest.json` declaring the
+same contract surface. Same protocol as the built-ins, same conformance
+bar, ~40 lines in Python for the shipped example
+([`adapters/mock-enrich-py/`](adapters/mock-enrich-py/)).
+
+## Universal per-step knobs
+
 Universal knobs that work on (nearly) every step, regardless of adapter:
 `cache: Nd` overrides the freshness window; `when: <step>.passed` gates on
 a filter; `require:`/`exclude:` gate on group membership; deliver steps
