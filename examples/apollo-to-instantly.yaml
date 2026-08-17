@@ -49,11 +49,11 @@ steps:
         short, low-pressure sentence. No flattery, no exclamation marks.
       batch_size: 25
 
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "Q3 VP Marketing"
-  variables:            # ADR-018/019: egress mapping, and the step's dynamic needs
-    first_line: first_line
-    ps_line: ps_line
-  idempotency: email
+  - id: send            # ADR-031: a deliver adapter is an ordinary step
+    use: instantly/add-to-campaign
+    with:
+      campaign: "Q3 VP Marketing"
+    variables:          # ADR-018/019: egress mapping, and the step's dynamic needs
+      first_line: first_line
+      ps_line: ps_line
+    idempotency: email

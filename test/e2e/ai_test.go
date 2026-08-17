@@ -31,11 +31,11 @@ steps:
       prompt: Write first_line and ps_line from what you know.
       batch_size: 25
 
-deliver:
-  use: mock/deliver
-  with:
-    campaign: Q3 VP Marketing
-  idempotency: email
+  - id: deliver
+    use: mock/deliver
+    with:
+      campaign: Q3 VP Marketing
+    idempotency: email
 `
 
 // fixtureScript writes an AI engine script and returns the env entries that

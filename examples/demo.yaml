@@ -34,9 +34,9 @@ steps:
       prompt: >
         Write first_line and ps_line for a short, honest intro email.
 
-deliver:
-  use: attio/assert         # also pure YAML; assert = idempotent upsert
-  variables:
-    name: full_name
-    first_line: first_line
-  idempotency: email
+  - id: send                # a deliver adapter is an ordinary step (ADR-031)
+    use: attio/assert       # also pure YAML; assert = idempotent upsert
+    variables:
+      name: full_name
+      first_line: first_line
+    idempotency: email

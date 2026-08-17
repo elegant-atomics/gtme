@@ -152,15 +152,15 @@ steps:
       prompt: >
         Write first_line and ps_line using recent_posts and role_history.
       batch_size: 25
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "Q3 VP Marketing"
-  variables:
-    first_name: first_name
-    personalization: first_line
-    ps_line: ps_line
-  idempotency: email
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: "Q3 VP Marketing"
+    variables:
+      first_name: first_name
+      personalization: first_line
+      ps_line: ps_line
+    idempotency: email
 `,
 	},
 	{
@@ -183,16 +183,16 @@ steps:
       prompt: >
         Write first_line and ps_line using recent_posts and role_history.
       batch_size: 25
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "CSV import"
-  variables:
-    first_name: first_name
-    personalization: first_line
-    ps_line: ps_line
-  on_missing: skip
-  idempotency: email
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: "CSV import"
+    variables:
+      first_name: first_name
+      personalization: first_line
+      ps_line: ps_line
+    on_missing: skip
+    idempotency: email
 `,
 	},
 }

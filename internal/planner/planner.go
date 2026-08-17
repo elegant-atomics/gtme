@@ -175,17 +175,16 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 
 	available := map[string]bool{}
 	steps := p.AllSteps()
-	nSteps := len(steps)
 
 	for i, s := range steps {
 		isSource := i == 0
-		isDeliver := p.Deliver != nil && i == nSteps-1
 
-		ps, stepProblems := ResolveStep(s, isSource, isDeliver)
+		ps, stepProblems := ResolveStep(s, isSource)
 		problems = append(problems, stepProblems...)
-		// The deliver step's touch scope defaults to the pipeline name
-		// (SPEC §8): every pipeline is safely scoped unless it opts to share.
-		if isDeliver && ps.RecordGroup == "" {
+		// A deliver step's touch scope defaults to the pipeline name (SPEC §8,
+		// ADR-031: per deliver step — steps sharing the default share the
+		// scope): every pipeline is safely scoped unless it opts to share.
+		if ps.IsDeliver && ps.RecordGroup == "" {
 			ps.RecordGroup = p.Name
 		}
 
@@ -260,8 +259,10 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 }
 
 // ResolveStep resolves one step's adapter, config, credentials, cache window and
-// schemas.
-func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
+// schemas. Whether a step is a deliver step is a role fact read from its
+// resolved manifest (ADR-031), never a position: a pipeline may carry any
+// number of deliver steps, anywhere after the source.
+func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	var problems []Problem
 	ps := Step{
 		ID:        s.ID,
@@ -270,7 +271,6 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		When:      s.When,
 		WhenStep:  s.WhenStep(),
 		IsSource:  isSource,
-		IsDeliver: isDeliver,
 		BatchSize: DefaultBatchSize,
 	}
 	if ps.Config == nil {
@@ -278,15 +278,25 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	}
 	ps.Require = append([]string(nil), s.Require...)
 	ps.Exclude = append([]string(nil), s.Exclude...)
-	if isDeliver {
-		ps.RecordGroup = strings.TrimSpace(s.Record)
-		if s.Suppress != nil {
-			ps.SuppressGroup = strings.TrimSpace(s.Suppress.Group)
-			d, err := pipeline.ParseCache(s.Suppress.Within)
-			if err != nil {
-				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "suppress.within: " + err.Error()})
+
+	// gateDeliverKeys rejects the deliver-only keys on a step whose role is
+	// not deliver (SPEC §9, ADR-031) — the uses: pattern, second instance.
+	// Called once the step's role is known.
+	gateDeliverKeys := func() {
+		for _, k := range []struct {
+			key string
+			set bool
+		}{
+			{"variables:", len(s.Variables) > 0},
+			{"on_missing:", s.OnMissing != ""},
+			{"idempotency:", strings.TrimSpace(s.Idempotency) != ""},
+			{"record:", strings.TrimSpace(s.Record) != ""},
+			{"suppress:", s.Suppress != nil},
+		} {
+			if k.set {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+					Msg: fmt.Sprintf("%s is only valid on deliver steps (%s has role %q) — ADR-031", k.key, ps.Use, ps.Role)})
 			}
-			ps.SuppressWithin = d
 		}
 	}
 
@@ -328,14 +338,11 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 				}
 			}
 		}
-		switch {
-		case isSource:
+		if isSource {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
 				Msg: s.Use + " cannot be the source"})
-		case isDeliver:
-			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-				Msg: s.Use + " cannot be the deliver step"})
 		}
+		gateDeliverKeys()
 		return ps, problems
 	}
 
@@ -349,6 +356,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
+		gateDeliverKeys()
 		return ps, problems
 	}
 
@@ -359,12 +367,29 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	ps.Adapter = resolved
 	ps.Manifest = resolved.Manifest
 	ps.Role = resolved.Manifest.Role
+	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
 	ps.Needs = resolved.Manifest.NeedsFields()
 	ps.Required = resolved.Manifest.RequiredNeeds()
 	ps.CostEstimate = resolved.Manifest.CostEstimate
 	ps.Batch = resolved.Manifest.Batch
 	ps.NeedsAll = len(ps.Needs) == 0 && adapters.Wildcard(resolved.Manifest.Needs)
+
+	// The deliver-only keys are role-gated (ADR-031); a deliver step reads
+	// them, everything else rejects them.
+	if ps.IsDeliver {
+		ps.RecordGroup = strings.TrimSpace(s.Record)
+		if s.Suppress != nil {
+			ps.SuppressGroup = strings.TrimSpace(s.Suppress.Group)
+			d, err := pipeline.ParseCache(s.Suppress.Within)
+			if err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "suppress.within: " + err.Error()})
+			}
+			ps.SuppressWithin = d
+		}
+	} else {
+		gateDeliverKeys()
+	}
 
 	reg, regErr := registry.Load()
 	if regErr != nil {
@@ -401,13 +426,8 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		ps.Required = append([]string(nil), refs...)
 		ps.NeedsAll = false
 	}
-	if len(s.Variables) > 0 {
-		if !isDeliver {
-			// pipeline.Parse already rejects this; belt and braces for callers
-			// constructing pipelines programmatically.
-			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: "variables: is only valid on the deliver step (ADR-018)"})
-		} else if !dynamic {
+	if ps.IsDeliver && len(s.Variables) > 0 {
+		if !dynamic {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 				Msg: fmt.Sprintf("%s does not declare dynamic needs, so variables: has nothing to derive (SPEC §6)", s.Use)})
 		} else {
@@ -424,7 +444,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 			sort.Strings(ps.Required)
 		}
 	}
-	if isDeliver {
+	if ps.IsDeliver {
 		ps.OnMissing = s.OnMissing
 		if ps.OnMissing == "" {
 			ps.OnMissing = "skip"
@@ -468,7 +488,8 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		}
 	}
 
-	// Role must match position: a source at the head, a deliver at the tail.
+	// Only the head is position-bound: a source at the head and nowhere else.
+	// A deliver adapter is an ordinary step, any position after it (ADR-031).
 	switch {
 	case isSource && ps.Role != adapters.RoleSource:
 		problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
@@ -476,12 +497,6 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 	case !isSource && ps.Role == adapters.RoleSource:
 		problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
 			Msg: fmt.Sprintf("%s is a source adapter and can only be the pipeline source", s.Use)})
-	case isDeliver && ps.Role != adapters.RoleDeliver:
-		problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-			Msg: fmt.Sprintf("%s has role %q but is used as the deliver step", s.Use, ps.Role)})
-	case !isDeliver && ps.Role == adapters.RoleDeliver:
-		problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-			Msg: fmt.Sprintf("%s is a deliver adapter; put it under deliver:", s.Use)})
 	}
 
 	if err := resolved.Manifest.ValidateConfig(ps.Config); err != nil {
@@ -570,7 +585,7 @@ func ResolveStep(s pipeline.Step, isSource, isDeliver bool) (Step, []Problem) {
 		}
 	}
 
-	if isDeliver {
+	if ps.IsDeliver {
 		ps.Idempotency = s.Idempotency
 		// http/deliver MUST be told its idempotency key (ADR-023, SPEC §10a):
 		// even the trivial case cannot infer delivery semantics.

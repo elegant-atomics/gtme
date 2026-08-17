@@ -123,6 +123,22 @@ func Print(w io.Writer, p *Plan) {
 		fmt.Fprintf(w, "     est/record: %s\n", est)
 	}
 
+	// The at-a-glance send surface (SPEC §7, ADR-031): every deliver step —
+	// target adapter and touch scope — reviewable in one place, since YAML
+	// position no longer marks the send points.
+	var delivers []*Step
+	for i := range p.Steps {
+		if p.Steps[i].IsDeliver {
+			delivers = append(delivers, &p.Steps[i])
+		}
+	}
+	if len(delivers) > 0 {
+		fmt.Fprintf(w, "\nsend surface: %d deliver step(s) (ADR-031)\n", len(delivers))
+		for _, s := range delivers {
+			fmt.Fprintf(w, "  %s → %s (touch scope: %s)\n", s.ID, s.Use, s.RecordGroup)
+		}
+	}
+
 	if p.Pipeline.Group != "" {
 		fmt.Fprintf(w, "\nterminus: records completing the run are added to group %q (ADR-021)\n", p.Pipeline.Group)
 	}

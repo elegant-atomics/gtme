@@ -29,11 +29,12 @@ source:
     query: vp marketing
     base_url: `+jsonString(srv.URL)+`
 
-deliver:
-  use: attio/assert
-  variables:
-    name: full_name
-  idempotency: email
+steps:
+  - id: deliver
+    use: attio/assert
+    variables:
+      name: full_name
+    idempotency: email
 `)
 	res := a.runWithEnv(keys, "", "run", "p.yaml", "--dry-run")
 	if res.code != 0 {

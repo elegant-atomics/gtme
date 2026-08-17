@@ -278,13 +278,14 @@ source:
       email: Email
       company_domain: Company Website
 
-deliver:
-  use: %s
-  with:
-    campaign: 7d467891-4257-4a62-a8b2-08d3837f5714
-  variables:
-    first_name: full_name
-  idempotency: email
+steps:
+  - id: deliver
+    use: %s
+    with:
+      campaign: 7d467891-4257-4a62-a8b2-08d3837f5714
+    variables:
+      first_name: full_name
+    idempotency: email
 `, use)
 	}
 

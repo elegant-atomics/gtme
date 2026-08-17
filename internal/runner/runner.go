@@ -137,7 +137,10 @@ type runner struct {
 	// --simulate when the operator has no recorded one (SPEC §8).
 	aiFixture string
 	reg       *registry.Registry
-	now       func() time.Time
+	// deliverSteps holds the plan's deliver step ids: a fail verdict at one of
+	// these records a withheld send, not a stopped record (SPEC §8, ADR-031).
+	deliverSteps map[string]bool
+	now          func() time.Time
 	// out is the downstream NDJSON stream in pipe mode, nil for `gtme run`.
 	out *protocol.Writer
 
@@ -164,15 +167,21 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("runner: %w", err)
 	}
 	r := &runner{
-		l:        o.Ledger,
-		plan:     o.Plan,
-		stderr:   o.Stderr,
-		conc:     Concurrency(o.Concurrency),
-		dry:      o.DryRun || o.Simulate,
-		simulate: o.Simulate,
-		reg:      reg,
-		now:      time.Now,
-		stats:    map[string]*StepStat{},
+		l:            o.Ledger,
+		plan:         o.Plan,
+		stderr:       o.Stderr,
+		conc:         Concurrency(o.Concurrency),
+		dry:          o.DryRun || o.Simulate,
+		simulate:     o.Simulate,
+		reg:          reg,
+		deliverSteps: map[string]bool{},
+		now:          time.Now,
+		stats:        map[string]*StepStat{},
+	}
+	for i := range o.Plan.Steps {
+		if o.Plan.Steps[i].IsDeliver {
+			r.deliverSteps[o.Plan.Steps[i].ID] = true
+		}
 	}
 	switch {
 	case r.simulate:
@@ -305,9 +314,12 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A withheld send (on_missing skip, suppression) leaves a deliver-step fail
+	// verdict but the record advanced — it completes and joins; the terminus
+	// captures completers, not sends (SPEC §8, ADR-031).
 	var completers []string
 	for _, rr := range records {
-		if rr.State == final && !rr.AnyFailed() {
+		if rr.State == final && !r.stopped(rr) {
 			completers = append(completers, rr.IdentityID)
 		}
 	}
@@ -335,6 +347,19 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 		r.terminusAdded++
 	}
 	return nil
+}
+
+// stopped reports whether a verdict froze this record. A filter's fail stops
+// it from advancing (SPEC §7); a deliver step's fail verdict records a
+// withheld send and the record advances (SPEC §8, ADR-031), so those do not
+// count.
+func (r *runner) stopped(rr ledger.RunRecord) bool {
+	for step, v := range rr.Verdicts {
+		if v == "fail" && !r.deliverSteps[step] {
+			return true
+		}
+	}
+	return false
 }
 
 // stat returns the mutable stat block for a step.

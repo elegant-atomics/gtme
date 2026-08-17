@@ -86,12 +86,13 @@ func TestGroupsQualifyJudgeOnceSendSuppress(t *testing.T) {
 	h.write("send.yaml", `name: q3-send
 source:
   group: q3-qualified
-deliver:
-  use: mock/deliver
-  with:
-    campaign: q3
-  record: q3-touch
-  idempotency: email
+steps:
+  - id: deliver
+    use: mock/deliver
+    with:
+      campaign: q3
+    record: q3-touch
+    idempotency: email
 `)
 	res = h.runWithEnv([]string{"MOCK_DELIVER_LOG=" + deliverLog}, "", "run", "send.yaml")
 	if res.code != 0 {
@@ -110,13 +111,14 @@ deliver:
 	h.write("send2.yaml", `name: q3-send-again
 source:
   group: q3-qualified
-deliver:
-  use: mock/deliver
-  with:
-    campaign: q3
-  record: q3-touch
-  suppress: { group: q3-touch, within: 30d }
-  idempotency: full_name
+steps:
+  - id: deliver
+    use: mock/deliver
+    with:
+      campaign: q3
+    record: q3-touch
+    suppress: { group: q3-touch, within: 30d }
+    idempotency: full_name
 `)
 	res = h.runWithEnv([]string{"MOCK_DELIVER_LOG=" + deliverLog}, "", "run", "send2.yaml")
 	if res.code != 0 {

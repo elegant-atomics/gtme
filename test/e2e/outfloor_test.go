@@ -24,14 +24,15 @@ source:
       full_name: Full Name
       email: Email
 
-deliver:
-  use: %s
-  with:
+steps:
+  - id: deliver
+    use: %s
+    with:
 %s
-  variables:
-    first_name: full_name
-    contact_email: email
-  idempotency: email
+    variables:
+      first_name: full_name
+      contact_email: email
+    idempotency: email
 `
 
 func TestHTTPDeliver(t *testing.T) {
@@ -53,8 +54,8 @@ func TestHTTPDeliver(t *testing.T) {
 	h := newHarness(t)
 	h.write("contacts.csv", campaignZeroCSV)
 	yaml := strings.Replace(outFloorYAML, "%s\n", "http/deliver\n", 1)
-	yaml = strings.Replace(yaml, "%s", `    url: "`+srv.URL+`/hook"
-    auth: { type: bearer, env: HOOK_TOKEN }`, 1)
+	yaml = strings.Replace(yaml, "%s", `      url: "`+srv.URL+`/hook"
+      auth: { type: bearer, env: HOOK_TOKEN }`, 1)
 	h.write("p.yaml", yaml)
 	env := []string{"HOOK_TOKEN=hook-secret"}
 
@@ -96,7 +97,7 @@ func TestHTTPDeliver(t *testing.T) {
 
 	// The required idempotency key: a plan without it fails naming the rule.
 	h.write("p2.yaml", strings.Replace(readFile(t, filepath.Join(h.work, "p.yaml")),
-		"  idempotency: email\n", "", 1))
+		"    idempotency: email\n", "", 1))
 	res = h.run("plan", "p2.yaml")
 	if res.code != 2 {
 		t.Fatalf("plan without idempotency exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
@@ -109,7 +110,7 @@ func TestCSVDeliver(t *testing.T) {
 	h.write("contacts.csv", campaignZeroCSV)
 	out := filepath.Join(h.work, "reviewed.csv")
 	yaml := strings.Replace(outFloorYAML, "%s\n", "csv/deliver\n", 1)
-	yaml = strings.Replace(yaml, "%s", `    path: `+out, 1)
+	yaml = strings.Replace(yaml, "%s", `      path: `+out, 1)
 	h.write("p.yaml", yaml)
 
 	res := h.run("run", "p.yaml")
