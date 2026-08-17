@@ -1,144 +1,231 @@
-# gtm
+# gtm — GTM as code
 
-A CLI for GTM data pipelines. Unix-pipe ergonomics, an append-only SQLite ledger
-as the data bus, schema contracts between steps, and AI transforms as first-class
-steps.
+**Built for engineers who do GTM — not the other way around.**
 
-Steps don't pass records to each other. They read a projection from the ledger
-and write fields back — the logical record gets wider, the storage never does.
-Every step declares `needs` and `provides` as JSON Schema, so a pipeline is
-validated before it spends anything, and a re-run pays only for what it doesn't
-already know.
+Outbound tooling assumes you want a UI, credits, and someone else's opinion
+of your workflow. If you'd rather have a CLI, a ledger you can query, YAML
+you can diff, and receipts for every dollar — this is that. Campaigns are
+pipelines. Adapters are data. Judgment is versioned. Everything replays.
 
-## 60-second quickstart
-
-No API keys required — this uses the CSV source and the bundled Python adapter.
-
-```sh
-make build && ./bin/gtm init          # creates ~/.gtm and the ledger
-
-cat > people.csv <<'CSV'
-email,full_name,company_domain,linkedin_url,title
-jane.doe@acme.com,Jane Doe,acme.com,https://www.linkedin.com/in/jane-doe/,VP Marketing
-bob@globex.io,Bob Stone,globex.io,linkedin.com/in/bob-stone,Head of Growth
-CSV
-
-cat > pipeline.yaml <<'YAML'
-name: hello-gtm
+```yaml
+name: q3-outbound
 source:
-  use: csv/source
-  with:
-    path: people.csv
+  use: apollo/search              # a vendor adapter that is ~150 lines of YAML
+  with: { query: "vp marketing, saas", limit: 200 }
 steps:
-  - id: score
-    use: mock-enrich-py
-    cache: 30d
-YAML
-
-export GTM_ADAPTER_PATH=$PWD/adapters   # where the bundled Python adapter lives
-
-./bin/gtm plan pipeline.yaml            # validates contracts, spends nothing
-./bin/gtm run  pipeline.yaml            # sources, enriches, writes the ledger
-./bin/gtm run  pipeline.yaml            # again: 100% cache hits, $0 spent
-./bin/gtm query "SELECT i.identity_key, fv.field, fv.value
-                 FROM identities i JOIN field_values fv ON fv.identity_id = i.id"
-./bin/gtm show bob@globex.io --provenance   # what the ledger knows about one record
-./bin/gtm runs last                     # the receipt, rebuilt from the ledger
+  - id: fit
+    use: ai/filter                # AI judgment behind the same contract as any step
+    uses: [full_name, title, company_domain]
+    with: { prompt: Keep people who own outbound tooling decisions. }
+  - id: lines
+    use: ai/compose
+    when: fit.passed
+    uses: [full_name, title, company_name]
+    with: { prompt: Write first_line and ps_line for a short, honest intro. }
+deliver:
+  use: instantly/add-to-campaign
+  with: { campaign: "Q3 VP Marketing" }
+  variables: { first_line: first_line, ps_line: ps_line }
+  idempotency: email              # re-runs deliver nothing twice, ever
 ```
 
-## Writing and running pipelines
+```
+$ gtm run q3-outbound.yaml
+...
+step     adapter                   in   out  cached  cost     avoided
+source   apollo/search             0    200  0       $0       -
+fit      ai/filter                 200  74   0       $0.19    -
+lines    ai/compose                74   74   0       $0.31    -
+deliver  instantly/add-to-campaign 74   74   0       $0       -
+total: $0.50 spent
+```
 
-`pipeline.yaml` is the only pipeline surface (`gtm run pipeline.yaml`) — see
-[`examples/apollo-to-instantly.yaml`](examples/apollo-to-instantly.yaml) for a
-full one, or run `gtm help --agent` for a machine-readable version of this
-whole surface plus every installed adapter's contract, meant for an agent
-authoring a pipeline without any other context.
+Run it again Monday with fresh data: overlapping records cache-skip, the
+receipt shows dollars *avoided*, and nobody gets delivered twice.
+
+## What it is
+
+- **A single static binary** (`gtm`) that executes campaign pipelines
+  defined in YAML. No daemon, no hosted anything, no login.
+- **An append-only SQLite ledger as the data bus.** Steps never pass
+  records to each other — they read a projection of what's known and write
+  facts back, with provenance, confidence, and freshness on every value.
+  What your pipelines learn accumulates; what a run did is receipted.
+- **Contracts everywhere.** Every step declares `needs` and `provides` as
+  JSON Schema against a canonical field registry, so `gtm plan` proves a
+  pipeline coherent — end to end — before a single record moves or a cent
+  is spent. AI steps live behind the same contract as everything else.
+- **Adapters as data.** Most vendor APIs are CRUD over HTTP, so most
+  adapters here are **bindings**: declarative YAML interpreted by one
+  generic engine — auth, pagination, extraction, error mapping,
+  idempotency, cost, all frozen at authoring time. The moment an
+  integration needs real logic, it graduates to a process adapter speaking
+  NDJSON over stdin/stdout, in any language.
+
+## Use cases
+
+- **Outbound campaigns** — source → enrich → AI-judge → AI-compose →
+  deliver, with the send gated behind a human-reviewable receipt.
+- **Enrichment that stops re-billing you** — freshness-windowed caching
+  means top-ups and re-runs pay only for what the ledger doesn't already
+  know; the receipt prints what the cache saved.
+- **Qualify/send decomposition** — a cheap qualify pipeline fills a
+  *group* (a durable, hand-editable set); a separate send pipeline
+  consumes it, records touches, and suppresses re-contacts by window.
+  AI verdicts become recorded decisions: an identity is judged once per
+  scope, not re-rolled on every run.
+- **Research enrichment** — `http/enrich` fetches a page to markdown as a
+  ledger fact (with mandatory freshness — web content rots), and AI steps
+  judge the stored content. Fetch once, judge many.
+- **Deterministic transforms in SQL** — `sql/enrich` and `sql/filter` run
+  declared, read-only queries over the ledger: derive fields, bucket
+  titles, gate on "3+ known contacts at this company" — no AI spend for
+  computable questions.
+- **The universal floor** — CSV in, webhooks in, groups in; any-URL POST
+  out, CSV out. Anything with an export or an import button is wireable
+  today, even before a proper adapter exists.
+- **Portable campaigns** — `gtm freeze --bundle` snapshots a run into a
+  self-contained folder (pipeline + bindings + fixtures + hash manifest)
+  that runs, simulates, and diffs anywhere.
+
+## Architecture
+
+```
+                  pipeline.yaml  (the only authoring surface)
+                        │
+                    gtm plan ──── contracts, credentials, cost — $0
+                        │
+   ┌────────────────────┼─────────────────────────────┐
+   │ runner             ▼                             │
+   │   ┌─────────┐  ┌────────┐  ┌─────────┐  ┌─────────┐
+   │   │ source  │→ │ enrich │→ │ ai/sql  │→ │ deliver │   steps see only
+   │   └────┬────┘  └───┬────┘  └────┬────┘  └────┬────┘   projections,
+   │        │  ▲        │  ▲         │  ▲         │  ▲      never the ledger
+   ├────────┼──┼────────┼──┼─────────┼──┼─────────┼──┼──┐
+   │        ▼  │        ▼  │         ▼  │         ▼  │  │
+   │   ledger (append-only SQLite)                      │
+   │     identities · field_values (facts + provenance) │
+   │     runs · step_events · costs · deliveries        │
+   │     groups · group_events (decisions about sets)   │
+   │     payloads (raw responses — cache, purgeable)    │
+   └────────────────────────────────────────────────────┘
+```
+
+The load-bearing choices:
+
+- **The ledger is the bus.** Cache-aware waterfalls, resume after a crash,
+  cost attribution, and "what do we know about this person" as a SQL query
+  all fall out of one structural decision: facts live in the ledger, not
+  in a stream between steps.
+- **Two adapter tiers.** Bindings (YAML, interpreted, cannot execute code)
+  for anything that sells an API; NDJSON processes for anything that must
+  be fought for. Both speak the same wire protocol and pass the same
+  conformance kit: golden vendor payloads in → canonical records out.
+- **A closed grammar.** The pipeline surface is a small, enumerable set of
+  keys — no expression language, no DSL to hallucinate. Expressivity comes
+  from composing a small vocabulary against a canonical field registry.
+- **The gate ladder:** `simulate → plan → dry-run → armed`. Simulation
+  executes the *whole pipeline* from conformance fixtures — no network, no
+  keys, deterministic. Plan proves contracts. Dry-run does everything but
+  deliver, rendering exactly what *would* send. Arming is the same command
+  without the flag.
+- **Agent-operable by design.** `gtm help --agent` emits the full CLI and
+  adapter surface as one machine-readable document; every error names its
+  fix; every question about state has a deterministic answer path. An
+  agent can author a pipeline and validate its structure *and behavior*
+  before a human reviews one artifact and arms it.
+
+## Why engineers who do GTM
+
+**Speed to deploy.** A new vendor integration is a YAML file — the Apollo
+source adapter shipped here is ~150 lines of declarative binding
+([see it](spec/bindings/apollo-search/binding.yaml)), and the authoring
+loop is generate → conformance-test → done, which is exactly the loop a
+coding agent closes well. APIs that publish OpenAPI are bind-time targets,
+not build projects. The universal floor means day one is never blocked on
+an adapter existing.
+
+**Rapid iteration.** Simulation makes behavior checkable offline before
+credentials exist. The cache makes iteration cheap: change a prompt and
+re-run — enrichments skip, only judgment re-spends. Filter verdicts and
+their *reasons* land in the ledger, so tuning a prompt is a SQL query over
+what the model actually decided, not vibes. Freeze any run back into the
+exact YAML that produced it.
+
+**Safety.** Delivery is the one destructive edge and it is gated three
+ways: the dry-run receipt is a per-record approval artifact a human reads
+before arming; idempotency keys make re-runs structurally unable to
+double-send; suppression windows enforce contact policy across pipelines.
+Everything upstream is replayable because the ledger is append-only.
+Blank merge fields never send. Groups freeze AI judgment into recorded,
+inspectable decisions instead of per-run dice rolls.
+
+**Cost.** Every step's spend lands in the receipt, attributed per record
+and per model. The cache prints what it *saved* you, not just what you
+spent. Fetch-once economics: N AI steps across M runs reuse one paid
+enrichment while it's fresh. Raw vendor responses are retained (bounded,
+TTL'd, evictable) so improving an extraction back-fills from payloads
+you already paid for — at zero vendor spend.
+
+## Get started
 
 ```sh
-gtm plan pipeline.yaml     # resolve, validate, print — no network, no spend
-gtm run  pipeline.yaml
-gtm run  pipeline.yaml --resume last    # finishes what a failed run started
-gtm freeze last > frozen.yaml           # reconstructs the pipeline.yaml a run used
+git clone https://github.com/trevorfox/gtm && cd gtm
+make build && ./bin/gtm init
 ```
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `gtm init` | Create `~/.gtm` and the ledger |
-| `gtm secret set KEY [VALUE]` | Store a credential in `~/.gtm/secrets` (0600, no echo) |
-| `gtm plan pipeline.yaml` | Resolve adapters, check contracts and credentials, print the plan |
-| `gtm run pipeline.yaml [--resume RUN_ID\|last]` | Execute; resume picks up where a failure stopped |
-| `gtm query "SQL" [--save NAME] [--name NAME] [--list]` | Read-only SQL and saved segments |
-| `gtm show <identity-key>\|--run RUN_ID\|last [--fields][--provenance]` | Inspect what the ledger knows |
-| `gtm runs [RUN_ID\|last]` | List runs, or print one run's receipt |
-| `gtm freeze [RUN_ID\|last]` | Reconstruct the `pipeline.yaml` that produced a run |
-| `gtm help --agent` | Machine-readable CLI + adapter surface |
-
-`stdout` is data (NDJSON/JSON: query rows, `gtm show`, `gtm help --agent`,
-`gtm freeze`'s YAML); everything human-facing goes to `stderr`. Exit codes:
-`0` ok, `2` validation/contract, `3` auth/credential, `4` rate-limited,
-`5` network, `1` other.
-
-## What makes a re-run cheap
-
-- **Identity.** A person is one identity however they arrive — email, LinkedIn
-  URL, or name + company domain. A stronger key upgrades the identity in place,
-  and the old key keeps resolving to it.
-- **Cache.** An enrich step skips a record when the ledger already holds fresh
-  answers from that adapter, inside the step's window (`cache: 30d`, or the
-  adapter's `freshness_days`). The receipt shows what that saved.
-- **Idempotency.** A delivery is keyed (by default on the identity key,
-  or on `idempotency: email`) so running twice cannot mail anyone twice.
-- **Append-only.** Nothing is overwritten. The current value of a field is the
-  highest-confidence value inside its freshness window; everything else stays as
-  history, with the adapter and run that produced it.
-
-## Adapters
-
-Built in: `csv/source`, `apollo/search`, `ai/filter`, `ai/compose`,
-`harvest/profile`, `instantly/add-to-campaign`.
-
-External adapters are any executable that speaks the protocol. Drop a directory
-containing `manifest.json` and an executable named `run` into
-`~/.gtm/adapters/<name>/` (or anywhere on `GTM_ADAPTER_PATH`).
-[`adapters/mock-enrich-py/`](adapters/mock-enrich-py/) is a ~90-line Python
-example; the runner talks to it exactly as it talks to the built-ins.
-
-```
-runner → adapter   OPEN, RECORD…, END
-adapter → runner   SCHEMA, RECORD, VERDICT, COST, STATE, LOG, END
-```
-
-`fields` on an inbound RECORD is exactly the projection of the adapter's `needs`
-— nothing more. Output is validated against `provides` before it reaches the
-ledger.
-
-## AI steps
-
-`ai/filter` returns a keep/drop verdict per record; `ai/compose` writes fields.
-Both batch (`batch_size`, default 25 — one model call per batch), validate the
-answer against a strict output contract, and retry once with the validation error
-appended before failing the batch. The engine is the Anthropic API by default, or
-the `claude` CLI with `engine: claude-code`. Token usage becomes COST rows, so
-the receipt and `gtm runs` show what a run actually cost.
-
-## Live providers
-
-Apollo, HarvestAPI, Instantly and Anthropic are exercised offline against
-fixtures in `make check`. Real calls are a deliberate manual gate:
+**The zero-key demo** — run a whole campaign, offline, right now:
 
 ```sh
-make live           # read-only/small calls; each test skips without its key
-make live-deliver   # adds ONE real lead to a real campaign (opt-in)
+./bin/gtm run examples/demo.yaml --simulate
 ```
 
-## Development
+The Apollo source serves its conformance fixtures, the AI steps answer
+synthetically (and are *marked* synthetic in provenance), delivery is held
+with its variables resolved into the receipt — and one record visibly
+fails the delivery floor, because its email is Apollo's locked-email
+placeholder and gtm refuses to key an identity on garbage. Receipts are
+honest here; that's the point.
+
+**Then with real keys**, the same file climbs the ladder:
 
 ```sh
-make check    # gofmt, go vet, unit + e2e tests (all offline)
-make build    # ./bin/gtm
+./bin/gtm secret set APOLLO_API_KEY        # prompts, no echo
+./bin/gtm secret set ANTHROPIC_API_KEY
+./bin/gtm plan examples/demo.yaml          # contracts + cost, still $0
+./bin/gtm run  examples/demo.yaml --dry-run  # everything but delivery
+./bin/gtm run  examples/demo.yaml          # armed
+./bin/gtm run  examples/demo.yaml          # again: cache skips, zero re-delivery
 ```
 
-`SPEC.md` is the design; `DECISIONS.md` records every choice made where the spec
-was silent, and why.
+Then interrogate what happened — no log spelunking:
+
+```sh
+./bin/gtm show jane.doe@acme.com --provenance   # every fact, who wrote it, when
+./bin/gtm runs last                             # the receipt, reconstructed
+./bin/gtm query "SELECT field, value FROM current_fields ..."
+./bin/gtm groups                                # decisions about sets, with tallies
+```
+
+## Further exploration
+
+- **[SPEC.md](SPEC.md)** — the canon. Every observable behavior, DECIDED
+  sections, acceptance criteria. The binary is built *from* this document;
+  code that diverges from it is a bug even when it works.
+- **[DECISIONS.md](DECISIONS.md)** — the why: the ADR log, including the
+  autopsy of why Singer died twice and how the field registry and binding
+  tier answer both causes.
+- **[VALIDATION.md](VALIDATION.md)** — the receipts: real campaigns, real
+  API drift absorbed, real dollar amounts, findings logged honestly.
+- **[spec/bindings/](spec/bindings/)** — vendor adapters as reviewable,
+  diffable YAML, with the conformance fixtures that double as simulation.
+- **[PROCESS.md](PROCESS.md)** — how design conversations become spec, and
+  why nothing is decided until it's in the repo.
+- **[ROADMAP.md](ROADMAP.md)** — named, deliberately deferred: the expand
+  role, payload re-extraction, an OpenAPI→binding codegen skill, and more.
+- `gtm help --agent` — the whole surface, machine-readable, for your
+  agent.
+
+## License
+
+[Apache-2.0](LICENSE)
