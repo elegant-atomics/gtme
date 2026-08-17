@@ -1,0 +1,39 @@
+# CI is exactly the local gate: `make check` (fmt, vet, full test suite).
+# The whole suite — unit, e2e, conformance — runs offline against fixture
+# adapters by design (SPEC §11): no network beyond module download, no keys,
+# nothing sends. The live provider smoke tests (`make live`) are a human
+# gate (SPEC §12) and never run here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # test/e2e shells out to the built binary and the Python fixture
+      # adapters (mock-enrich-py, mock/deliver) — python3 stdlib only.
+      - name: make check
+        run: make check
+
+  # §13 targets darwin and linux; a cross-compile catches darwin-only build
+  # breakage without paying for a macOS runner (pure Go, no cgo — SPEC §2).
+  build-darwin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: cross-compile darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./...

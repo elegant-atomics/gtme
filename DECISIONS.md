@@ -1364,3 +1364,20 @@ the sends delivers to the first only and misses the terminus while a
 suppressed record completes and joins it; the misplaced keys and the old
 shape both fail at plan/validation naming step and key.
 **Spec impact:** None beyond v0.13 (marked built as v0.14).
+
+### 2026-08-17 — CI: the local gate, mechanized
+
+**Question:** The repo went public and PRs merge on local `make check`
+evidence alone — should CI exist, and what should it run?
+**Choice:** One GitHub Actions workflow (`.github/workflows/ci.yml`)
+running exactly `make check` on pushes to main and on PRs — no separate
+CI-only test list to drift from the local gate — plus a
+`GOOS=darwin GOARCH=arm64 go build` cross-compile job, which catches
+darwin-only build breakage on a linux runner (pure Go, no cgo, per §2;
+§13 targets darwin/linux). The live provider smoke tests (`make live`)
+stay a human gate per §12 and never run in CI.
+**Why:** The suite was designed to make this free — every test runs
+offline against fixture adapters, no keys, nothing sends — so CI is the
+existing gate on a runner, not a second quality system to maintain.
+**Spec impact:** None (repo tooling; the gate it runs is already the
+CLAUDE.md rule).
