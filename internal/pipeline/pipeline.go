@@ -13,18 +13,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Pipeline is a frozen, recurring workflow.
+// Pipeline is a frozen, recurring workflow. Deliver adapters are ordinary
+// Steps entries (ADR-031) — any number, any position; there is no top-level
+// deliver block.
 type Pipeline struct {
 	Name    string `yaml:"name" json:"name"`
 	Version int    `yaml:"version" json:"version"`
 
-	Source  *Step  `yaml:"source" json:"source,omitempty"`
-	Steps   []Step `yaml:"steps,omitempty" json:"steps,omitempty"`
-	Deliver *Step  `yaml:"deliver,omitempty" json:"deliver,omitempty"`
+	Source *Step  `yaml:"source" json:"source,omitempty"`
+	Steps  []Step `yaml:"steps,omitempty" json:"steps,omitempty"`
 
 	// Group is the membership terminus (SPEC §8/§9, ADR-021): records that
 	// complete the run's final step are `added` to this group, created on
-	// demand. Valid with or without deliver:.
+	// demand. Valid with or without deliver steps; it captures completers,
+	// not sends (ADR-031).
 	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 
 	// Waterfall is reserved syntax: accepted by the parser and rejected with
@@ -42,7 +44,9 @@ type Step struct {
 	// When gates a step; v0 supports only "<step_id>.passed".
 	When  string `yaml:"when,omitempty" json:"when,omitempty"`
 	Cache string `yaml:"cache,omitempty" json:"cache,omitempty"`
-	// Idempotency names the field whose value keys a delivery (deliver steps).
+	// Idempotency names the field whose value keys a delivery. Valid only on
+	// deliver-role steps; the planner (which knows adapter roles, unlike this
+	// package) enforces that, as it does for every deliver-only key (ADR-031).
 	Idempotency string `yaml:"idempotency,omitempty" json:"idempotency,omitempty"`
 	// Uses declares an AI-backed step's dynamic needs (SPEC §7, §9,
 	// DECISIONS.md ADR-004): a static manifest needs schema cannot enumerate
@@ -52,12 +56,14 @@ type Step struct {
 	// the planner (which knows adapter roles, unlike this package) enforces
 	// that.
 	Uses []string `yaml:"uses,omitempty" json:"uses,omitempty"`
-	// Variables is the deliver step's egress mapping (SPEC §9, ADR-018/019):
+	// Variables is a deliver step's egress mapping (SPEC §9, ADR-018/019):
 	// target merge-field name → canonical or namespaced ledger field. Its
-	// values are the step's dynamic needs. Valid only on the deliver step.
+	// values are the step's dynamic needs. Valid only on deliver steps.
 	Variables map[string]string `yaml:"variables,omitempty" json:"variables,omitempty"`
-	// OnMissing is the deliver step's per-record completeness policy (SPEC §8):
-	// skip (default) or fail when a variables: target does not resolve.
+	// OnMissing is a deliver step's per-record completeness policy (SPEC §8):
+	// skip (default) or fail when a variables: target does not resolve. Skip
+	// withholds this step's send but the record advances; fail freezes it
+	// (ADR-031).
 	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
 	// Group is group-as-source (SPEC §9, ADR-021): valid only on the source
@@ -69,12 +75,13 @@ type Step struct {
 	// Exclude group. Valid on interior steps and deliver, not the source.
 	Require []string `yaml:"require,omitempty" json:"require,omitempty"`
 	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
-	// Record is the deliver step's touch scope (SPEC §8, ADR-021): successful
+	// Record is a deliver step's touch scope (SPEC §8, ADR-021): successful
 	// deliveries append `touched` events to this group. Defaults to the
-	// pipeline name; created on demand.
+	// pipeline name per deliver step (steps sharing the default share the
+	// scope, ADR-031); created on demand.
 	Record string `yaml:"record,omitempty" json:"record,omitempty"`
 	// Suppress skips records touched in a group within a window (SPEC §8,
-	// ADR-021). Deliver only.
+	// ADR-021). Deliver steps only; the suppressed record advances (ADR-031).
 	Suppress *Suppress `yaml:"suppress,omitempty" json:"suppress,omitempty"`
 
 	Waterfall any `yaml:"waterfall,omitempty" json:"-"`
@@ -86,11 +93,8 @@ type Suppress struct {
 	Within string `yaml:"within" json:"within"`
 }
 
-// DefaultSourceID and DefaultDeliverID name the implicit steps.
-const (
-	DefaultSourceID  = "source"
-	DefaultDeliverID = "deliver"
-)
+// DefaultSourceID names the implicit source step.
+const DefaultSourceID = "source"
 
 // Load reads and validates a pipeline file.
 func Load(path string) (*Pipeline, error) {
@@ -111,6 +115,9 @@ func Parse(raw []byte) (*Pipeline, error) {
 	dec.KnownFields(true)
 	var p Pipeline
 	if err := dec.Decode(&p); err != nil {
+		if strings.Contains(err.Error(), "field deliver not found in type pipeline.Pipeline") {
+			return nil, fmt.Errorf("pipeline: the top-level deliver: block was removed (ADR-031) — deliver adapters are ordinary steps: entries; move the block into steps: (%w)", err)
+		}
 		return nil, fmt.Errorf("pipeline: %w", err)
 	}
 	if err := p.normalize(); err != nil {
@@ -190,88 +197,50 @@ func (p *Pipeline) normalize() error {
 			return err
 		}
 	}
-	if p.Deliver != nil {
-		if err := claim(p.Deliver, DefaultDeliverID); err != nil {
-			return err
-		}
-	}
 
-	// variables:/on_missing: are deliver-step contracts (SPEC §9); mapping
-	// blocks on interior steps are exactly what ADR-018 forbids.
-	deliverOnly := func(s *Step, where string) error {
-		if s == p.Deliver {
-			return nil
+	// Value shapes for the deliver-only keys are checked here; WHICH steps may
+	// carry them is a role question this package cannot answer — the planner
+	// role-gates variables:/on_missing:/idempotency:/record:/suppress: to
+	// deliver steps (SPEC §9, ADR-031), the way it gates uses:.
+	wellFormed := func(s *Step) error {
+		switch s.OnMissing {
+		case "", "skip", "fail":
+		default:
+			return fmt.Errorf("pipeline: %s: on_missing must be \"skip\" or \"fail\" (got %q)", s.ID, s.OnMissing)
 		}
-		if len(s.Variables) > 0 {
-			return fmt.Errorf("pipeline: %s: variables: is only valid on the deliver step (ADR-018: no interior mappings)", where)
+		for target, field := range s.Variables {
+			if strings.TrimSpace(target) == "" || strings.TrimSpace(field) == "" {
+				return fmt.Errorf("pipeline: %s: variables: entries need a non-empty target and field", s.ID)
+			}
 		}
-		if s.OnMissing != "" {
-			return fmt.Errorf("pipeline: %s: on_missing: is only valid on the deliver step", where)
+		if s.Suppress != nil {
+			if strings.TrimSpace(s.Suppress.Group) == "" {
+				return fmt.Errorf("pipeline: %s: suppress: needs a group", s.ID)
+			}
+			if _, err := ParseCache(s.Suppress.Within); err != nil {
+				return fmt.Errorf("pipeline: %s: suppress.within: %w", s.ID, err)
+			}
 		}
 		return nil
 	}
-	if err := deliverOnly(p.Source, p.Source.ID); err != nil {
+	if err := wellFormed(p.Source); err != nil {
 		return err
 	}
 	for i := range p.Steps {
-		if err := deliverOnly(&p.Steps[i], p.Steps[i].ID); err != nil {
+		if err := wellFormed(&p.Steps[i]); err != nil {
 			return err
-		}
-	}
-	if p.Deliver != nil {
-		switch p.Deliver.OnMissing {
-		case "", "skip", "fail":
-		default:
-			return fmt.Errorf("pipeline: %s: on_missing must be \"skip\" or \"fail\" (got %q)", p.Deliver.ID, p.Deliver.OnMissing)
-		}
-		for target, field := range p.Deliver.Variables {
-			if strings.TrimSpace(target) == "" || strings.TrimSpace(field) == "" {
-				return fmt.Errorf("pipeline: %s: variables: entries need a non-empty target and field", p.Deliver.ID)
-			}
 		}
 	}
 
 	// Group keys (SPEC §9, ADR-021): group: only on the source (as a source)
-	// or top-level (as the terminus); require:/exclude: never on the source;
-	// record:/suppress: deliver-only.
+	// or top-level (as the terminus); require:/exclude: never on the source.
 	for i := range p.Steps {
 		if strings.TrimSpace(p.Steps[i].Group) != "" {
 			return fmt.Errorf("pipeline: %s: group: is only valid on the source step (as a source) or at the top level (as the terminus)", p.Steps[i].ID)
 		}
 	}
-	if p.Deliver != nil && strings.TrimSpace(p.Deliver.Group) != "" {
-		return fmt.Errorf("pipeline: %s: group: is only valid on the source step or at the top level", p.Deliver.ID)
-	}
 	if len(p.Source.Require) > 0 || len(p.Source.Exclude) > 0 {
 		return fmt.Errorf("pipeline: %s: require:/exclude: are not valid on the source step (SPEC §9)", p.Source.ID)
-	}
-	deliverGroupOnly := func(s *Step, where string) error {
-		if s == p.Deliver {
-			return nil
-		}
-		if strings.TrimSpace(s.Record) != "" {
-			return fmt.Errorf("pipeline: %s: record: is only valid on the deliver step", where)
-		}
-		if s.Suppress != nil {
-			return fmt.Errorf("pipeline: %s: suppress: is only valid on the deliver step", where)
-		}
-		return nil
-	}
-	if err := deliverGroupOnly(p.Source, p.Source.ID); err != nil {
-		return err
-	}
-	for i := range p.Steps {
-		if err := deliverGroupOnly(&p.Steps[i], p.Steps[i].ID); err != nil {
-			return err
-		}
-	}
-	if p.Deliver != nil && p.Deliver.Suppress != nil {
-		if strings.TrimSpace(p.Deliver.Suppress.Group) == "" {
-			return fmt.Errorf("pipeline: %s: suppress: needs a group", p.Deliver.ID)
-		}
-		if _, err := ParseCache(p.Deliver.Suppress.Within); err != nil {
-			return fmt.Errorf("pipeline: %s: suppress.within: %w", p.Deliver.ID, err)
-		}
 	}
 	for _, s := range p.AllSteps() {
 		for _, g := range append(append([]string{}, s.Require...), s.Exclude...) {
@@ -283,7 +252,8 @@ func (p *Pipeline) normalize() error {
 
 	// when: may only reference an earlier step, and only with .passed (v0).
 	priors := map[string]bool{p.Source.ID: true}
-	check := func(s *Step) error {
+	for i := range p.Steps {
+		s := &p.Steps[i]
 		if s.When != "" {
 			m := whenPattern.FindStringSubmatch(strings.TrimSpace(s.When))
 			if m == nil {
@@ -294,17 +264,6 @@ func (p *Pipeline) normalize() error {
 			}
 		}
 		priors[s.ID] = true
-		return nil
-	}
-	for i := range p.Steps {
-		if err := check(&p.Steps[i]); err != nil {
-			return err
-		}
-	}
-	if p.Deliver != nil {
-		if err := check(p.Deliver); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -338,15 +297,12 @@ func FormatCache(d time.Duration) string {
 	return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 }
 
-// AllSteps returns source, steps and deliver in execution order.
+// AllSteps returns the source and every step in execution order.
 func (p *Pipeline) AllSteps() []Step {
-	out := make([]Step, 0, len(p.Steps)+2)
+	out := make([]Step, 0, len(p.Steps)+1)
 	if p.Source != nil {
 		out = append(out, *p.Source)
 	}
 	out = append(out, p.Steps...)
-	if p.Deliver != nil {
-		out = append(out, *p.Deliver)
-	}
 	return out
 }

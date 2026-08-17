@@ -30,13 +30,14 @@ source:
       email: Email
       company_domain: Company Website
 
-deliver:
-  use: mock/deliver
-  with:
-    campaign: campaign-zero-test
-  variables:
-    first_name: full_name
-  idempotency: email
+steps:
+  - id: deliver
+    use: mock/deliver
+    with:
+      campaign: campaign-zero-test
+    variables:
+      first_name: full_name
+    idempotency: email
 `
 
 func TestCampaignZeroDryThenArmedThenRerun(t *testing.T) {
@@ -131,7 +132,7 @@ func TestCampaignZeroOnMissingFail(t *testing.T) {
 	h := newHarness(t)
 	h.write("contacts.csv", campaignZeroCSV)
 	h.write("campaign-zero.yaml", strings.Replace(campaignZeroYAML,
-		"  idempotency: email", "  on_missing: fail\n  idempotency: email", 1))
+		"    idempotency: email", "    on_missing: fail\n    idempotency: email", 1))
 	deliverLog := filepath.Join(h.work, "delivered.ndjson")
 
 	res := h.runWithEnv([]string{"MOCK_DELIVER_LOG=" + deliverLog}, "", "run", "campaign-zero.yaml")

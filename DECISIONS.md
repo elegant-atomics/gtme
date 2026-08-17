@@ -755,7 +755,8 @@ binding improvement back-fills a new field with zero vendor calls;
 
 ### ADR-031: Deliver is a role, not a position — deliver steps join `steps:`
 **Status:** Accepted (2026-08-17 — design conversation; human-approved
-same day)
+same day. *Update, same day:* built as milestone M13 — `make check`
+green; see SPEC §11 and changelog v0.14)
 **Context:** pipeline.yaml carried a singular top-level `deliver:` block
 beside `source:` and `steps:` — a shape inherited from the original
 pipeline sketch and never defended by an ADR. The manifest layer already
@@ -1327,3 +1328,39 @@ module path is identity in Go, and env vars/home paths ossify into user
 scripts. This was the last free moment to do it.
 **Spec impact:** Changelog v0.12; §2 binary name and every env/path
 reference (applied wholesale).
+
+### 2026-08-17 — M13 internals: delivers as steps
+
+**Question:** Where does the role-gating of the deliver-only keys live, and
+how does "is this record stopped" survive fail verdicts that no longer stop
+records?
+**Choice:** (1) Role-gating (`variables:`/`on_missing:`/`idempotency:`/
+`record:`/`suppress:` valid only on deliver-role steps) lives entirely in
+the planner, which is the layer that knows adapter roles —
+`internal/pipeline` keeps only value-shape checks (the `on_missing` enum, a
+well-formed `suppress.within`), valid on any step syntactically. A document
+carrying the old top-level `deliver:` block is rejected by the existing
+`KnownFields` decode, with the error rewritten to name the fix (move the
+block into `steps:`) per §0's errors-are-prompts. (2) A withheld send
+(`on_missing: skip`, suppression) now advances `run_records.state` to the
+deliver step — previously it did not, which was invisible while the deliver
+step was always last; advancement is what makes the record eligible for
+later steps and the terminus. (3) Deliver-step fail verdicts share
+`run_records.verdicts` with filter fails (the §3 shape is unchanged), so
+"is this record stopped" needs step roles: the runner classifies via its
+plan's deliver-step id set; `gtme runs`, holding only a bare run id, counts
+fail verdicts without classifying and its summary wording now says so
+("filtered, or a send withheld"). (4) Two deliver steps sharing a target
+adapter share that target's `(target, idempotency)` dedupe scope — a direct
+consequence of the §3 key, so the M13 acceptance pipeline's two sends use
+two different targets (`mock/deliver`, `csv/deliver`), which is also
+ADR-031's motivating multi-target case. (5) `gtme plan` renders the §7
+call-out as one block after the step list — `send surface: N deliver
+step(s)`, one line per step with target and touch scope.
+**Why:** The M13 acceptance runs offline end to end: dry-run resolves
+variables for both sends with zero `deliveries` writes; armed delivers to
+both and re-runs deliver nothing twice on either; a record failing between
+the sends delivers to the first only and misses the terminus while a
+suppressed record completes and joins it; the misplaced keys and the old
+shape both fail at plan/validation naming step and key.
+**Spec impact:** None beyond v0.13 (marked built as v0.14).

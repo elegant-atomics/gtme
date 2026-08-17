@@ -1486,7 +1486,8 @@ decided contract, not shipped behavior.
   without its `idempotency:` key fails naming the rule; `csv/deliver`
   writes header + rows, appends nothing on a re-run, and the file is
   reviewable as written.
-- **M13 — delivers as steps (ADR-031; §7, §8, §9).** Remove the top-level
+- **M13 — delivers as steps (ADR-031; §7, §8, §9). Built 2026-08-17
+  (changelog v0.14).** Remove the top-level
   `deliver:` block from `internal/pipeline` and the schema; accept
   deliver-role adapters as ordinary `steps:` entries, any number, any
   position; role-gate `variables:`/`on_missing:`/`idempotency:`/`record:`/
@@ -1645,6 +1646,25 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.14 — 2026-08-17 (M13 build: delivers as steps, built)
+**Changed:** §11 M13 marked built; no normative text changed — v0.13's
+contract is now shipped behavior, covered by M13's acceptance tests.
+Behavioral notes from the build: a document carrying the old top-level
+`deliver:` block fails validation with an error naming the fix (move the
+block into `steps:`); a withheld send (`on_missing: skip`, suppression)
+advances `run_records.state` to the deliver step, which is what makes the
+record visible to later steps and the terminus; `gtme plan` renders the §7
+deliver call-out as one block after the step list (`send surface: N
+deliver step(s)`, one line per step with target and touch scope); two
+deliver steps naming the SAME target adapter share that target's
+`(target, idempotency)` dedupe scope — the §3 key is per target, not per
+step, so independent dedupe (ADR-031's promise) is per distinct target;
+`gtme runs`' record summary counts fail verdicts without classifying them
+(a bare run id carries no step roles) and says so. `examples/`, README's
+quickstart, VALIDATION.md's pipelines, `gtme help --agent`'s canonical
+pipelines, and the e2e fixtures all moved off the old block in the same
+change.
 
 ### v0.13 — 2026-08-17 (ADR-031: delivers as steps)
 **Changed:** The top-level `deliver:` block is gone; deliver adapters

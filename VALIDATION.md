@@ -66,13 +66,14 @@ source:
       email: Email
       company_domain: Company Website
 
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "gtm-campaign-zero-<date>"
-  variables:
-    first_name: full_name
-  idempotency: email
+steps:
+  - id: send            # ADR-031: a deliver adapter is an ordinary step
+    use: instantly/add-to-campaign
+    with:
+      campaign: "gtm-campaign-zero-<date>"
+    variables:
+      first_name: full_name
+    idempotency: email
 ```
 
 ### Enactment script
@@ -150,11 +151,11 @@ steps:
         Write first_line and ps_line using recent_posts and role_history.
       batch_size: 25
 
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "gtme-validation-<date>"
-  idempotency: email
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: "gtme-validation-<date>"
+    idempotency: email
 ```
 
 ### Enactment script — the eight stories in miniature

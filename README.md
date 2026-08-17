@@ -22,11 +22,11 @@ steps:
     when: fit.passed
     uses: [full_name, title, company_name]
     with: { prompt: Write first_line and ps_line for a short, honest intro. }
-deliver:
-  use: instantly/add-to-campaign
-  with: { campaign: "Q3 VP Marketing" }
-  variables: { first_line: first_line, ps_line: ps_line }
-  idempotency: email              # re-runs deliver nothing twice, ever
+  - id: send                      # delivery is a step like any other — put it anywhere, use several
+    use: instantly/add-to-campaign
+    with: { campaign: "Q3 VP Marketing" }
+    variables: { first_line: first_line, ps_line: ps_line }
+    idempotency: email            # re-runs deliver nothing twice, ever
 ```
 
 ```
@@ -36,7 +36,7 @@ step     adapter                   in   out  cached  cost     avoided
 source   apollo/search             0    200  0       $0       -
 fit      ai/filter                 200  74   0       $0.19    -
 lines    ai/compose                74   74   0       $0.31    -
-deliver  instantly/add-to-campaign 74   74   0       $0       -
+send     instantly/add-to-campaign 74   74   0       $0       -
 total: $0.50 spent
 ```
 

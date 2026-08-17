@@ -35,11 +35,11 @@ steps:
         Write first_line and ps_line using recent_posts and role_history.
       batch_size: 25
 
-deliver:
-  use: instantly/add-to-campaign
-  with:
-    campaign: "Q3 VP Marketing"
-  idempotency: email
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: "Q3 VP Marketing"
+    idempotency: email
 `
 
 func TestParseSpecExample(t *testing.T) {
@@ -56,14 +56,15 @@ func TestParseSpecExample(t *testing.T) {
 	if p.Source.With["limit"] != 500 {
 		t.Errorf("source limit = %#v", p.Source.With["limit"])
 	}
-	if len(p.Steps) != 3 {
-		t.Fatalf("steps = %d, want 3", len(p.Steps))
+	if len(p.Steps) != 4 {
+		t.Fatalf("steps = %d, want 4", len(p.Steps))
 	}
 	if p.Steps[1].WhenStep() != "icp-filter" {
 		t.Errorf("when step = %q", p.Steps[1].WhenStep())
 	}
-	if p.Deliver == nil || p.Deliver.ID != DefaultDeliverID || p.Deliver.Idempotency != "email" {
-		t.Errorf("deliver = %+v", p.Deliver)
+	// A deliver adapter is an ordinary step (ADR-031).
+	if send := p.Steps[3]; send.ID != "send" || send.Idempotency != "email" {
+		t.Errorf("send step = %+v", send)
 	}
 
 	d, err := ParseCache(p.Steps[1].Cache)
@@ -95,6 +96,11 @@ func TestParseErrors(t *testing.T) {
 			name: "unknown field is a typo, not an extension point",
 			yaml: "name: x\nsource:\n  use: a/b\n  wth:\n    path: p\n",
 			want: "field wth not found",
+		},
+		{
+			name: "top-level deliver block is gone (ADR-031)",
+			yaml: "name: x\nsource:\n  use: a/b\ndeliver:\n  use: c/d\n",
+			want: "deliver adapters are ordinary steps: entries",
 		},
 		{
 			name: "name is required",
@@ -151,19 +157,19 @@ func TestParseErrors(t *testing.T) {
 }
 
 func TestStepIDsDefaultByPosition(t *testing.T) {
-	p, err := Parse([]byte("name: x\nsource:\n  use: a/b\nsteps:\n  - use: c/d\n  - use: e/f\ndeliver:\n  use: g/h\n"))
+	p, err := Parse([]byte("name: x\nsource:\n  use: a/b\nsteps:\n  - use: c/d\n  - use: e/f\n"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	got := []string{p.Source.ID, p.Steps[0].ID, p.Steps[1].ID, p.Deliver.ID}
-	want := []string{"source", "step-1", "step-2", "deliver"}
+	got := []string{p.Source.ID, p.Steps[0].ID, p.Steps[1].ID}
+	want := []string{"source", "step-1", "step-2"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("id %d = %q, want %q", i, got[i], want[i])
 		}
 	}
-	if n := len(p.AllSteps()); n != 4 {
-		t.Errorf("AllSteps = %d, want 4", n)
+	if n := len(p.AllSteps()); n != 3 {
+		t.Errorf("AllSteps = %d, want 3", n)
 	}
 }
 
@@ -180,7 +186,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-parsing marshalled pipeline: %v\n%s", err, raw)
 	}
-	if again.Name != p.Name || len(again.Steps) != len(p.Steps) || again.Deliver.Idempotency != "email" {
+	if again.Name != p.Name || len(again.Steps) != len(p.Steps) || again.Steps[3].Idempotency != "email" {
 		t.Errorf("round trip changed the pipeline:\n%s", raw)
 	}
 	if again.Steps[1].Cache != "30d" {

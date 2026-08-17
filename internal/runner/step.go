@@ -63,8 +63,9 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// A record that failed a filter stops advancing (SPEC §7).
-		if rr.AnyFailed() {
+		// A record that failed a filter stops advancing (SPEC §7). A deliver
+		// step's fail verdict is a withheld send, not a stop (SPEC §8, ADR-031).
+		if r.stopped(rr) {
 			continue
 		}
 		// Strict ordering: a record is eligible for this step only if the previous
@@ -300,6 +301,11 @@ func (r *runner) suppress(ctx context.Context, st *planner.Step, it *item) (bool
 		map[string]any{"pass": false, "reason": reason}); err != nil {
 		return false, err
 	}
+	// Suppression gates this step's send, not the record (SPEC §8, ADR-031):
+	// it advances, so later steps — and the terminus — still see it.
+	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
+		return false, err
+	}
 	r.bump(st, func(s *StepStat) {
 		s.Skipped++
 		s.Suppressed = append(s.Suppressed, SuppressedRecord{
@@ -310,8 +316,10 @@ func (r *runner) suppress(ctx context.Context, st *planner.Step, it *item) (bool
 }
 
 // holdMissing applies on_missing to a record whose variables did not resolve
-// (SPEC §8): fail marks it failed; skip (the default) records a fail verdict
-// with the missing fields as the reason and lists it in the receipt.
+// (SPEC §8): fail marks it failed (state freezes, it does not advance); skip
+// (the default) records a fail verdict with the missing fields as the reason,
+// lists it in the receipt, and advances the record — the withheld send is this
+// step's alone, and later steps still see the record (ADR-031).
 func (r *runner) holdMissing(ctx context.Context, st *planner.Step, it *item, rv RecordVariables) error {
 	reason := "missing " + strings.Join(rv.Missing, ", ")
 	if st.OnMissing == "fail" {
@@ -322,6 +330,9 @@ func (r *runner) holdMissing(ctx context.Context, st *planner.Step, it *item, rv
 	}
 	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done",
 		map[string]any{"pass": false, "reason": reason}); err != nil {
+		return err
+	}
+	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
 		return err
 	}
 	r.bump(st, func(s *StepStat) {

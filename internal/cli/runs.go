@@ -128,7 +128,9 @@ func printReceipt(ctx context.Context, env Env, l *ledger.Ledger, run ledger.Run
 		fmt.Fprintf(env.Stderr, " (%s)", strings.Join(parts, " "))
 	}
 	if failed > 0 {
-		fmt.Fprintf(env.Stderr, ", %d stopped by a filter", failed)
+		// A fail verdict is a filter stop or a withheld send (SPEC §8, ADR-031);
+		// telling them apart needs step roles, which a bare run id does not carry.
+		fmt.Fprintf(env.Stderr, ", %d with a fail verdict (filtered, or a send withheld)", failed)
 	}
 	fmt.Fprintln(env.Stderr)
 

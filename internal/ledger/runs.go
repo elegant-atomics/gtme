@@ -151,8 +151,11 @@ type RunRecord struct {
 // Passed reports whether a step's verdict for this record was a pass.
 func (r RunRecord) Passed(stepID string) bool { return r.Verdicts[stepID] == "pass" }
 
-// AnyFailed reports whether any filter has failed this record. A failed record
-// stops advancing (SPEC §7).
+// AnyFailed reports whether any step recorded a fail verdict for this record.
+// A filter's fail freezes the record (SPEC §7); a deliver step's fail records
+// a withheld send and the record advances (SPEC §8, ADR-031) — callers that
+// need "is this record stopped" must therefore judge verdicts against step
+// roles (the runner does, via its plan), not use this alone.
 func (r RunRecord) AnyFailed() bool {
 	for _, v := range r.Verdicts {
 		if v == "fail" {

@@ -36,14 +36,14 @@ steps:
     with:
       prompt: Write first_line and ps_line.
 
-deliver:
-  use: mock/deliver
-  with:
-    campaign: sim-test
-  variables:
-    first_name: full_name
-    first_line: first_line
-  idempotency: email
+  - id: deliver
+    use: mock/deliver
+    with:
+      campaign: sim-test
+    variables:
+      first_name: full_name
+      first_line: first_line
+    idempotency: email
 `
 
 // TestSimulateCampaignZero is M8's simulation acceptance criterion (SPEC §11):
