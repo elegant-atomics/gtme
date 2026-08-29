@@ -1175,6 +1175,73 @@ the last-step rule / receipt / `gtme runs`; §9 `respend: true` and, with
 §10 items 3 and 5, `deferred: true`; §11 milestone M15;
 `spec/schemas/msg-pending.schema.json`, `msg-open.schema.json`.
 
+### ADR-039: The judgment cache — no paid call twice by default
+**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Judgment
+cache", named while amending ADR-038; Accepted on merge)
+**Context:** Enrich and verify steps cache-skip a record whose fields are
+current within the freshness window (§7); AI steps never do — every run
+re-judges every record and pays again, and the only guard is the
+operator remembering `exclude:` judgment memory (ADR-021). ADR-038 made
+that visible (the respend warning, `respend: true`) but not safe: the
+default is still "pay again". The decision the operator actually wants is
+the one enrich already has: the same question about the same facts is
+answered once. Judgments differ from fetched facts in one way that
+matters — they do not rot with time; they go stale when the *question*
+changes (the prompt, the model, the declared shape) or the *facts* do (the
+fields the prompt read). So the right key is not a clock but a signature
+over both. Nothing needs a table: the `done` step event already records
+each judgment with its verdict and reason, and `field_values.source`
+already carries the engine's model identifier (ADR-026).
+**Decision:** (1) **Every AI step caches by default.** Before dispatching a
+record, the runner computes the step's **judgment signature** — a hash
+over the adapter id, the model identifier, the operator prompt and the
+generated output shape (the declared or default provides, the `uses:`
+list) — and the record's **input hash** — a hash over the projected
+fields as the step would see them. If a `done` event for this identity
+carries the same signature and input hash, the record is skipped
+(`skipped_cache`, reason `same_judgment`): a filter re-applies the stored
+verdict (pass advances, fail freezes — and the declared provides written
+then are still the current values), a compose has nothing to write (its
+fields are current with that provenance). No time window by default —
+same question, same facts, same answer — and `cache: Nd` bounds reuse to
+N days when an operator wants a periodic re-read; `respend: true` (or
+`cache: 0d`) turns it off. (2) **The signature is recorded where the
+judgment is:** the `done` event's detail gains `signature` and `input`,
+and `field_values.source` for `ai/*` steps becomes
+`ai/<op> @ <model-id>#<signature>` (ADR-026 amended), so a provenance row
+says which question produced it and `gtme show --provenance` and SQL over
+`current_values` can tell two prompts' outputs apart. (3) **The respend
+warning narrows** to what remains uncached: a paid enrich/verify with no
+freshness window. An AI step no longer warns; `exclude:` judgment memory
+stays as the *routing* memory it always was. (4) **Sources stay
+excluded** by design — a source's spend is its query, and "search once,
+consume the group" already covers it. (5) `--simulate` runs against a
+copy of the ledger, so it cache-skips exactly as an armed run would —
+free and deterministic, which is what a rehearsal should be. Deferred
+steps (ADR-038) cache-skip before they submit, so a re-run after a
+collection submits only what changed.
+**Consequences:** Double spend on judgments becomes an explicit choice
+instead of the default, with no new grammar (`cache:` and `respend:`
+already exist) and no migration (a JSON detail and a provenance string).
+The receipt's cached column now counts judgments, and its avoided-cost
+line prints `?` for AI steps until per-record cost is attributable (a
+batch's COST is per call). A changed prompt, model, or input re-judges
+without anyone clearing anything, which is the property a cache keyed by
+time cannot have. The provenance format change is breaking for anything
+parsing `ai/* @ <model>` exactly; pre-launch, that is a one-line
+adjustment in this repo's own tests and nowhere else. ~250 LOC: the
+signature and input hash in the AI adapter's OPEN handshake (the runner
+cannot see the assembled prompt, so the adapter reports the signature in
+SCHEMA — or the runner computes both from what it already holds: the
+step config and the projection; the build decides which and records it),
+the lookup in the runner's prepare, the verdict re-application, the
+provenance suffix, the narrowed warning, receipt wording.
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§7 cache check extended to AI roles with the signature and input rules,
+and the respend warning narrowed; §10a provenance format
+`ai/<op> @ <model-id>#<signature>`; §3 `step_events.detail` keys
+(prose, no DDL); §11 milestone M16.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
