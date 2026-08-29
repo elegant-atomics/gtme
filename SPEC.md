@@ -823,15 +823,13 @@ a SQL step whose query references `relations` or `group_members` as
 *cross-record*, so a reviewer sees its character without reading the
 join.
 
-**Respend (ADR-038):** plan MUST warn when a paid step would pay for the
-same records again on a re-run with nothing to remember the answer: an
-AI step with no judgment memory — no `exclude:` naming a group this
-pipeline writes (its `group:` terminus or a `group/deliver` target) — or
-an enrich/verify step whose adapter declares credentials or a cost
-estimate and that has no freshness window (no manifest `freshness_days`,
-no `cache:`). `respend: true` on the step (§9) silences the warning; it is
-the operator saying so in the reviewable file. (A default judgment cache
-that makes the warning unnecessary is a queued design, ROADMAP.md.)
+**Respend (ADR-038, narrowed by ADR-039):** plan MUST warn when a paid
+enrich/verify step would pay for the same records again on a re-run with
+nothing to remember the answer — its adapter declares credentials or a
+cost estimate and it has no freshness window (no manifest
+`freshness_days`, no `cache:`). `respend: true` on the step (§9) silences
+the warning; it is the operator saying so in the reviewable file. AI
+steps do not warn: the judgment cache (above) remembers by default.
 
 **One commit point (ADR-032):** plan MUST warn when a pipeline carries
 both a `group/deliver` step and a network-side deliver step — ADR-031
@@ -846,10 +844,24 @@ At execution time, per step, per record:
   is the judgment-memory mechanism: a qualify pipeline that excludes its
   own output groups sends only never-judged records to its filter, so an
   identity is judged once per scope — determinism first, cost second.
-- **Cache check (enrich/verify only):** if every field in the step's
+- **Cache check (enrich/verify):** if every field in the step's
   `provides` already has a current value within the freshness window,
   the runner MUST skip the record (`step_events.event='skipped_cache'`, no
   adapter call, no cost).
+- **Judgment cache (AI roles; ADR-039):** before dispatching a record to
+  an AI step the runner MUST compute the step's *judgment signature* — a
+  hash over the adapter id, the model identifier, the operator prompt,
+  the output shape (declared or default provides) and the `uses:` list —
+  and the record's *input hash* — a hash over the projected fields as the
+  step would see them. If a `done` event for this identity carries the
+  same signature and input hash (any run), the runner MUST skip the
+  record (`skipped_cache`, reason `same_judgment`): a filter re-applies
+  the stored verdict (pass advances, fail freezes), a compose writes
+  nothing (its fields are current with that provenance). There is no time
+  window by default — the same question about the same facts has the same
+  answer; `cache: Nd` bounds reuse to N days; `respend: true` or
+  `cache: 0d` disables it. A deferred step (ADR-038) cache-checks before
+  it submits.
 - **Projection:** the runner MUST build `fields` strictly from `needs`
   properties (or from `uses`, for AI steps that declare it).
 - **Filter verdicts** MUST be stored in `run_records.verdicts`; records with
@@ -1496,10 +1508,13 @@ out); the model provider is an interchangeable engine → operation-named,
 provider is config. When a provider capability leaks into the contract
 (a response format that IS the product), it takes the vendor name — the
 same canonical-when-shared, namespaced-when-proprietary logic as fields
-(§4a). Provenance carries the engine: for `ai/*` steps,
-`field_values.source` MUST record the model identifier in the form
-`ai/compose @ <model-id>` (e.g. `ai/compose @ claude-sonnet-4-6`), and
-COST attributes spend per model.
+(§4a). Provenance carries the engine and the question: for `ai/*` steps,
+`field_values.source` MUST record the model identifier and the judgment
+signature (§7, ADR-039) in the form `ai/compose @ <model-id>#<signature>`
+(e.g. `ai/compose @ claude-sonnet-4-6#1a2b3c4d5e6f`), so two prompts'
+outputs are distinguishable in provenance, and COST attributes spend per
+model. The `done` step event for an AI judgment carries `signature` and
+`input` in its detail (§3) — the cache entry the runner reads back.
 
 ### `http/enrich` — generic fetch enricher (ADR-024; built in M11)
 
@@ -1799,6 +1814,22 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
+- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Proposed
+  2026-08-29.** Signature and input hash computed in the runner's prepare
+  from the step config, the adapter's shape and the projection; lookup
+  over `done` events; verdict re-application for filters; the provenance
+  suffix; the AI respend warning retired; receipt wording.
+  ✅ E2E, offline: a re-run of a judgment pipeline with unchanged prompt
+  and inputs dispatches nothing (every record `skipped_cache` with reason
+  `same_judgment`, filter verdicts re-applied so downstream gating and
+  the terminus behave as in the first run, zero AI calls asserted via the
+  fixture log); changing the prompt re-judges every record; changing one
+  record's input field re-judges only that record; `cache: 1d` with a
+  ledger clock past the window re-judges; `respend: true` re-judges; a
+  compose's provenance carries the signature and `gtme show --provenance`
+  shows it; the AI respend warning no longer appears while the
+  paid-enrich one still does; `--simulate` of a judged pipeline
+  cache-skips; a deferred step cache-checks before submitting.
 - **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Built
   2026-08-29 (changelog v0.18).** PENDING and OPEN `pending` in `internal/protocol` and the
   schemas; the `pending`/`collected` step events and the `pending` run
@@ -1962,6 +1993,15 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.19 — 2026-08-29 (ADR-039 packet: the judgment cache — PROPOSED, not yet accepted)
+**Added (proposed):** §7 judgment cache for AI roles (signature + input
+hash, no window by default, `cache:`/`respend:` as the knobs); §11
+milestone M16. **Changed (proposed):** §7 respend warning narrowed to
+paid enrich/verify; §10a provenance `ai/<op> @ <model-id>#<signature>` and
+the `done` event's `signature`/`input` detail keys (prose; no DDL).
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.18 — 2026-08-29 (M15 build: asynchronous steps, built)
 **Changed:** §11 M15 marked built; no normative text changed — v0.17's
