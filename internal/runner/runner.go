@@ -82,6 +82,13 @@ type StepStat struct {
 	// DryRun lists each record's RESOLVED variables when the run was dry —
 	// the approval artifact a human reviews before arming (SPEC §8).
 	DryRun []RecordVariables
+
+	// TargetGroup names a group/deliver step's group (SPEC §8, ADR-032);
+	// GroupAdded counts the records handed off, GroupWould what a dry or
+	// simulated run held back.
+	TargetGroup string
+	GroupAdded  int
+	GroupWould  int
 }
 
 // SuppressedRecord is one record a suppression window held back (SPEC §8).
@@ -621,7 +628,8 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 	if err != nil {
 		return fmt.Errorf("runner: %s: %w", st.ID, err)
 	}
-	members, err := r.l.GroupMembers(ctx, g.ID)
+	// Insertion order, oldest first, capped by limit: (SPEC §8/§9, ADR-032).
+	members, err := r.l.GroupMembersOldest(ctx, g.ID, st.Limit)
 	if err != nil {
 		return err
 	}
@@ -635,11 +643,18 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 		r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, nil)
 	}
 	stat.Out = len(members)
-	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done",
-		map[string]any{"records": len(members), "group": g.Name}); err != nil {
+	detail := map[string]any{"records": len(members), "group": g.Name}
+	if st.Limit > 0 {
+		detail["limit"] = st.Limit
+	}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done", detail); err != nil {
 		return err
 	}
-	fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
+	if st.Limit > 0 {
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q (limit %d, oldest first)\n", st.ID, len(members), g.Name, st.Limit)
+	} else {
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
+	}
 	return nil
 }
 

@@ -166,6 +166,38 @@ func (l *Ledger) GroupMembers(ctx context.Context, groupID string) ([]Identity, 
 	return out, rows.Err()
 }
 
+// GroupMembersOldest lists current members in insertion order — by the
+// `added` event that made each one a member, oldest first — capped at limit
+// when limit > 0 (SPEC §8/§9, ADR-032: what a group source serves).
+func (l *Ledger) GroupMembersOldest(ctx context.Context, groupID string, limit int) ([]Identity, error) {
+	if limit <= 0 {
+		limit = -1 // SQLite: no limit
+	}
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT i.id, i.entity_type, i.identity_key, i.created_at
+		 FROM group_members m
+		 JOIN identities i ON i.id = m.identity_id
+		 JOIN (SELECT group_id, identity_id, max(created_at) AS added_at, max(id) AS event_id
+		       FROM group_events WHERE event = 'added' GROUP BY group_id, identity_id) e
+		   ON e.group_id = m.group_id AND e.identity_id = m.identity_id
+		 WHERE m.group_id = ?
+		 ORDER BY e.added_at, e.event_id
+		 LIMIT ?`, groupID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Identity
+	for rows.Next() {
+		var ident Identity
+		if err := rows.Scan(&ident.ID, &ident.EntityType, &ident.IdentityKey, &ident.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ident)
+	}
+	return out, rows.Err()
+}
+
 // LastTouched reports the newest `touched` event for an identity in a group —
 // what a suppression window reads (SPEC §8).
 func (l *Ledger) LastTouched(ctx context.Context, groupID, identityID string) (time.Time, bool, error) {

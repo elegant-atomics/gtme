@@ -31,6 +31,7 @@ Three kinds appear below:
 | `ai/compose` | compose | process (built-in) | LLM writing → `first_line`, `ps_line`, or whatever the step's `provides:` declares |
 | `instantly/add-to-campaign` | deliver | process (built-in) | add a lead to an Instantly campaign |
 | `attio/assert` | deliver | **binding** | idempotent upsert of a person into Attio |
+| `group/deliver` | deliver | runner-owned | hand records to a group — the next stage's source (ADR-032) |
 | `http/deliver` | deliver | engine-inline | POST resolved variables to any URL |
 | `csv/deliver` | deliver | process (built-in) | append delivered records to a reviewable CSV |
 | `mock-enrich-py` | enrich | process (external, Python) | example proving the any-language adapter boundary |
@@ -330,6 +331,23 @@ Asserts (upserts) a person into Attio by `matching_attribute` (default
 duplicate. `variables:` become attribute values on the record. Config:
 `object` (default `people`). Credential: `ATTIO_API_KEY`. Pure YAML:
 [spec/bindings/attio-assert/](spec/bindings/attio-assert/binding.yaml).
+
+### `group/deliver` — the handoff (ADR-032)
+
+Runner-owned, like the SQL steps: no adapter, no network. `use:
+group/deliver` with `with: {group: <name>}` delivers each record *to a
+group*, created on demand — the way one pipeline commits records to the
+next stage under the same gate a send gets: `--dry-run` receipts the
+resolved `variables:` per record for review, arming commits, delivery
+idempotency (`group:<name>` is the target scope) means nothing is handed
+off twice, and `suppress:`/`on_missing:`/`record:`/`require:`/`exclude:`
+all apply. A pipeline may carry several. A group with no consumer is a
+hold; release is `gtme groups add`, rejection `gtme groups remove --note
+"why"`, review `gtme groups show`. Nothing runs the consumer — it pulls on
+its own schedule, and a group source takes `limit: N` (oldest-added
+first) to bound a day's work. One commit point per pipeline: `gtme plan`
+warns when a handoff and a network-side deliver share one, because arming
+approves both.
 
 ### `http/deliver`
 

@@ -50,7 +50,7 @@ var agentVerbs = []agentVerb{
 	{"gtme show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
 	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
 	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
-	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021)"},
+	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
 	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
 	{"gtme help --agent", "print this document"},
 }

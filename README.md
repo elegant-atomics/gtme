@@ -179,7 +179,7 @@ always-current surface:
 | **Enrich** | `harvest/profile` · `http/enrich` (any URL → markdown or JSON) · `sql/enrich` |
 | **Judge** | `ai/filter` · `sql/filter` |
 | **Write** | `ai/compose` |
-| **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` |
+| **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` · `group/deliver` (the next stage) |
 
 Adding your own doesn't require touching this repo: drop a `binding.yaml`
 into `~/.gtme/adapters/<name>/` and the id resolves immediately.

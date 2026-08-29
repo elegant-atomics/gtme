@@ -86,6 +86,18 @@ func PrintReceipt(w io.Writer, res *Result) {
 		fmt.Fprintf(w, "group %q: %d record(s) added\n", res.TerminusGroup, res.TerminusAdded)
 	}
 
+	// Handoffs (SPEC §8, ADR-032): what each group/deliver step committed to
+	// its group, or would have.
+	for _, s := range res.Steps {
+		switch {
+		case s.TargetGroup == "":
+		case s.GroupWould > 0:
+			fmt.Fprintf(w, "%s: %d record(s) would be handed off to group %q (held back — %s)\n",
+				s.ID, s.GroupWould, s.TargetGroup, holdReason(res))
+		default:
+			fmt.Fprintf(w, "%s: %d record(s) handed off to group %q\n", s.ID, s.GroupAdded, s.TargetGroup)
+		}
+	}
 	// Deliver records held back by on_missing, each with its reason (SPEC §8).
 	for _, s := range res.Steps {
 		if len(s.MissingSkips) == 0 {

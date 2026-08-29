@@ -1766,3 +1766,52 @@ inline and drops the fence sentence from the system prompt.
 **Spec impact:** None — §10.3 (v0.15) already states the rules; `fence`
 is the config key it names.
 
+### 2026-08-28 — M14 step 3 internals: the handoff as a delivery (ADR-032)
+
+**Question:** What is a `group/deliver` step's `deliveries.target`, how
+does the runner execute a deliver step with no adapter, how do "passers
+and failers" reach different groups given that a filter's fail freezes the
+record (§7) and `when:` knows only `.passed`, and what is a group source's
+"insertion order"?
+**Choice:** (1) `target` is `group:<name>` — each group keeps its own
+`(target, idempotency)` scope exactly as each adapter does, so two
+handoffs in one pipeline never share a dedupe key, and a record handed to
+a group once is never re-enqueued there by a re-run (release after a
+removal is `gtme groups add`, deliberately). `touched` events name the
+same target. (2) `group/deliver` resolves in the planner beside the SQL
+steps: role deliver, no manifest, needs derived from `variables:` with no
+floor, config exactly `with.group`, entity-blind name validation against
+the pipeline's entity type. In the runner it goes through the same
+`prepare` path as any deliver — idempotency, suppression, completeness,
+dry-run receipting — and where an adapter step would open a session it
+instead advances each record: `deliveries` row, `touched` under the
+`record:` scope, and an `added` event on the target group (detail
+`{pipeline, step, handoff: true}`; an existing member is not
+re-asserted). The receipt gains a per-handoff line, armed or would-have.
+(3) In one pipeline, failers cannot follow a `.passed` gate, so the
+acceptance's "different groups" is intake-before-judgment plus
+passers-after: `intake → judge → stage-2 (when: judge.passed)`. The
+failers' route is a consumer pipeline `source: {group: intake}` with
+`exclude: [stage-2]` into `held` — judgment memory does the routing, no
+`sql/filter` needed; ADR-032's "second sql/filter over the verdict" stays
+available for finer cuts. Noted for the spec keeper: §8's "routing
+different `when:` outcomes to different groups" is satisfiable across
+filter steps only where a record survives the first gate; a `.failed`
+form remains unjustified (ADR-032). (4) A group source serves current
+members ordered by the `added` event that made each one a member (newest
+`added` per identity — a re-added record queues at the back), tie-broken
+by event ULID, `LIMIT N`; `gtme groups show` keeps key order. `limit:`
+is validated in `internal/pipeline` (only a group source may carry it;
+≥ 1), since no role knowledge is needed. (5) `groups remove --note` lands
+as `detail.note`; `--note` on `add` is refused (there is no reason to
+record). (6) The one-commit-point warning is a plan-level `Warnings`
+list printed after the send surface — the first non-blocking plan-level
+observation; step notes stay per step.
+**Why:** The step-3 acceptance runs offline: two handoffs dry-run to two
+receipts with zero group events, zero deliveries, zero groups; armed,
+intake gets 3, stage-2 gets 2, the re-run hands off nothing twice; the
+consumer parks the failer in `held`; `limit: 2` sources the two
+oldest-added members of a hand-built group; `--note` is on the event; the
+warning fires only when a network send shares the pipeline.
+**Spec impact:** None — §7/§8/§9 (v0.15) state all of it.
+

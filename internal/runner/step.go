@@ -130,6 +130,22 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		r.printStepLine(st)
 		return nil
 	}
+	if st.IsGroupDeliver {
+		// The handoff (SPEC §8, ADR-032): no adapter, no network — every
+		// record prepare() let through is delivered to the group here. Dry
+		// runs never reach this point with work (prepare receipts them).
+		for _, it := range work {
+			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
+				return err
+			}
+			r.bump(st, func(s *StepStat) { s.In++ })
+			if err := r.advance(ctx, st, it, map[string]any{"group": st.TargetGroup}, nil); err != nil {
+				return err
+			}
+		}
+		r.printStepLine(st)
+		return nil
+	}
 	return r.dispatch(ctx, st, work)
 }
 
@@ -191,7 +207,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 		return nil, err
 	}
 	fields := rec.Fields()
-	if err := st.Manifest.ValidateNeeds(fields); err != nil {
+	if err := r.validateNeeds(st, fields); err != nil {
 		r.bump(st, func(s *StepStat) { s.Failed++ })
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), identityID, "failed",
 			map[string]any{"reason": err.Error()}); err != nil {
@@ -227,7 +243,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 			return nil, err
 		}
 		it.idem = idem
-		delivered, err := r.l.AlreadyDelivered(ctx, st.Manifest.ID, idem)
+		delivered, err := r.l.AlreadyDelivered(ctx, st.Target(), idem)
 		if err != nil {
 			return nil, err
 		}
@@ -364,8 +380,24 @@ func (r *runner) dryDeliver(ctx context.Context, st *planner.Step, it *item, rv 
 	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
 		return err
 	}
-	r.bump(st, func(s *StepStat) { s.DryRun = append(s.DryRun, rv) })
+	r.bump(st, func(s *StepStat) {
+		s.DryRun = append(s.DryRun, rv)
+		if st.IsGroupDeliver {
+			s.TargetGroup = st.TargetGroup
+			s.GroupWould++
+		}
+	})
 	return nil
+}
+
+// validateNeeds checks a projection against the step's needs: the manifest's
+// schema for an adapter step; a runner-owned deliver (group/deliver) has no
+// static floor — variables: completeness is checked by prepare.
+func (r *runner) validateNeeds(st *planner.Step, fields map[string]any) error {
+	if st.Manifest == nil {
+		return nil
+	}
+	return st.Manifest.ValidateNeeds(fields)
 }
 
 // stringify renders a projected value for a merge field; empty means missing.
@@ -729,8 +761,27 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		return err
 	}
 	if st.IsDeliver {
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Manifest.ID, it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
 			return err
+		}
+		// The handoff itself (SPEC §8, ADR-032): membership in the target
+		// group, created on demand. An existing member is not re-asserted.
+		if st.IsGroupDeliver {
+			g, err := r.l.EnsureGroup(ctx, st.TargetGroup)
+			if err != nil {
+				return err
+			}
+			members, err := r.l.GroupMembership(ctx, g.ID)
+			if err != nil {
+				return err
+			}
+			if !members[it.identityID] {
+				if err := r.l.AddGroupEvent(ctx, g.ID, it.identityID, ledger.GroupAdded,
+					map[string]any{"pipeline": r.plan.Pipeline.Name, "step": st.ID, "handoff": true}, r.runID); err != nil {
+					return err
+				}
+			}
+			r.bump(st, func(s *StepStat) { s.TargetGroup = st.TargetGroup; s.GroupAdded++ })
 		}
 		// Touch scoping (SPEC §8, ADR-021): a successful delivery appends a
 		// `touched` event to the step's record: group (pipeline name by
@@ -742,7 +793,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 				return err
 			}
 			if err := r.l.AddGroupEvent(ctx, g.ID, it.identityID, ledger.GroupTouched,
-				map[string]any{"target": st.Manifest.ID, "step": st.ID}, r.runID); err != nil {
+				map[string]any{"target": st.Target(), "step": st.ID}, r.runID); err != nil {
 				return err
 			}
 		}

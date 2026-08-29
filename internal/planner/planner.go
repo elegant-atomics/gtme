@@ -92,9 +92,16 @@ type Step struct {
 
 	// Group semantics (SPEC §7/§8/§9, ADR-021) — all runner-owned.
 	// IsGroupSource marks a `source: {group: ...}` step: members projected
-	// from the ledger, no adapter, provides open.
+	// from the ledger, no adapter, provides open. Limit caps it (ADR-032):
+	// at most N members, oldest-added first; 0 is unbounded.
 	IsGroupSource bool
 	SourceGroup   string
+	Limit         int
+	// IsGroupDeliver marks a `use: group/deliver` step (SPEC §8, ADR-032):
+	// a runner-owned deliver step whose target is TargetGroup, created on
+	// demand. Every deliver-step key applies; --dry-run withholds it.
+	IsGroupDeliver bool
+	TargetGroup    string
 	// Require/Exclude are membership gates checked per record.
 	Require []string
 	Exclude []string
@@ -111,6 +118,25 @@ type Plan struct {
 	Steps     []Step
 	Available []string
 	Wildcard  bool
+	// Warnings are plan-level observations that do not block (SPEC §7): the
+	// one-commit-point rule (ADR-032) is the first.
+	Warnings []string
+}
+
+// GroupDeliverID is the runner-owned handoff step (SPEC §8, ADR-032).
+const GroupDeliverID = "group/deliver"
+
+// Target is the deliveries.target a deliver step writes under (SPEC §3): the
+// adapter id, or `group:<name>` for a handoff — so each group keeps its own
+// (target, idempotency) scope, as each adapter does.
+func (s *Step) Target() string {
+	if s.IsGroupDeliver {
+		return "group:" + s.TargetGroup
+	}
+	if s.Manifest != nil {
+		return s.Manifest.ID
+	}
+	return s.Use
 }
 
 // Source is the source step.
@@ -292,6 +318,26 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 	}
 
 	plan.Available = keys(available)
+
+	// One commit point (SPEC §7, ADR-032): arming is all-or-nothing
+	// (ADR-031), so a handoff and a network-side send in one pipeline means
+	// approving the handoff approves the send. Warned, not refused.
+	var handoffs, sends []string
+	for i := range plan.Steps {
+		st := &plan.Steps[i]
+		switch {
+		case st.IsGroupDeliver:
+			handoffs = append(handoffs, fmt.Sprintf("%s (→ group %q)", st.ID, st.TargetGroup))
+		case st.IsDeliver:
+			sends = append(sends, fmt.Sprintf("%s (→ %s)", st.ID, st.Use))
+		}
+	}
+	if len(handoffs) > 0 && len(sends) > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf(
+			"one commit point (ADR-032): this pipeline both hands off — %s — and sends — %s. Arming approves every deliver step at once, so approving the handoff approves the send; keep the handoff in its own pipeline and let the send consume the group.",
+			strings.Join(handoffs, ", "), strings.Join(sends, ", ")))
+	}
+
 	if len(problems) > 0 {
 		return plan, &Errors{Problems: problems}
 	}
@@ -358,6 +404,62 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 	}
 
+	// group/deliver (SPEC §8, ADR-032) resolves no adapter: the handoff to
+	// the next stage is a delivery the runner performs itself — every
+	// deliver-step key applies, the target group is created on demand.
+	if s.Use == GroupDeliverID {
+		ps.IsDeliver = true
+		ps.IsGroupDeliver = true
+		ps.Role = adapters.RoleDeliver
+		if isSource {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: GroupDeliverID + " cannot be the source"})
+		}
+		group, _ := ps.Config["group"].(string)
+		ps.TargetGroup = strings.TrimSpace(group)
+		if ps.TargetGroup == "" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: GroupDeliverID + " needs with.group — the group records are handed off to (SPEC §8)"})
+		}
+		for k := range ps.Config {
+			if k != "group" {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+					Msg: fmt.Sprintf("%s takes only with.group (got %q)", GroupDeliverID, k)})
+			}
+		}
+		if len(s.Uses) > 0 {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("uses: is only valid on filter/compose steps (%s has role %q)", s.Use, ps.Role)})
+		}
+		gateProvides(false)
+		// Dynamic needs from variables:, no static floor (SPEC §6/§9).
+		ps.Variables = s.Variables
+		ps.Needs = variableFields(s.Variables)
+		ps.Required = append([]string(nil), ps.Needs...)
+		ps.OnMissing = s.OnMissing
+		if ps.OnMissing == "" {
+			ps.OnMissing = "skip"
+		}
+		ps.Idempotency = s.Idempotency
+		ps.RecordGroup = strings.TrimSpace(s.Record)
+		if s.Suppress != nil {
+			ps.SuppressGroup = strings.TrimSpace(s.Suppress.Group)
+			d, err := pipeline.ParseCache(s.Suppress.Within)
+			if err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "suppress.within: " + err.Error()})
+			}
+			ps.SuppressWithin = d
+		}
+		ps.EntityType = scope.EntityType
+		if reg, err := registry.Load(); err == nil {
+			for _, field := range ps.Needs {
+				if err := reg.ValidateName(ps.EntityType, field); err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "variables: " + err.Error()})
+				}
+			}
+		}
+		return ps, problems
+	}
+
 	// SQL steps (SPEC §10a, ADR-027) resolve no adapter: the runner mediates
 	// their read-only ledger access, and their contracts are DECLARED —
 	// uses:/provides: in config — never parsed from the SQL.
@@ -412,6 +514,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	if isSource && strings.TrimSpace(s.Group) != "" {
 		ps.IsGroupSource = true
 		ps.SourceGroup = strings.TrimSpace(s.Group)
+		ps.Limit = s.Limit
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true

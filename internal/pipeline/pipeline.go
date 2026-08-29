@@ -80,6 +80,10 @@ type Step struct {
 	// step, mutually exclusive with use:. Members are projected from the
 	// ledger like any record.
 	Group string `yaml:"group,omitempty" json:"group,omitempty"`
+	// Limit caps a group source (SPEC §9, ADR-032): at most N current
+	// members, oldest-added first — the budget for "work thirty today".
+	// Valid only on a group source.
+	Limit int `yaml:"limit,omitempty" json:"limit,omitempty"`
 	// Require / Exclude are membership gates (SPEC §7, ADR-021): process only
 	// current members of every Require group; skip current members of any
 	// Exclude group. Valid on interior steps and deliver, not the source.
@@ -254,6 +258,18 @@ func (p *Pipeline) normalize() error {
 	}
 	if len(p.Source.Require) > 0 || len(p.Source.Exclude) > 0 {
 		return fmt.Errorf("pipeline: %s: require:/exclude: are not valid on the source step (SPEC §9)", p.Source.ID)
+	}
+	// limit: (ADR-032) bounds a group source and nothing else.
+	for _, s := range p.AllSteps() {
+		if s.Limit == 0 {
+			continue
+		}
+		if s.Limit < 0 {
+			return fmt.Errorf("pipeline: %s: limit must be >= 1 (got %d)", s.ID, s.Limit)
+		}
+		if strings.TrimSpace(s.Group) == "" || s.ID != p.Source.ID {
+			return fmt.Errorf("pipeline: %s: limit: is only valid on a group source (SPEC §9, ADR-032)", s.ID)
+		}
 	}
 	for _, s := range p.AllSteps() {
 		for _, g := range append(append([]string{}, s.Require...), s.Exclude...) {

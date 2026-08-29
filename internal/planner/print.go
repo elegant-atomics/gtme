@@ -50,6 +50,12 @@ func Print(w io.Writer, p *Plan) {
 			fmt.Fprintf(w, "     suppress:  touched in %s within %s\n",
 				s.SuppressGroup, pipeline.FormatCache(s.SuppressWithin))
 		}
+		if s.IsGroupSource && s.Limit > 0 {
+			fmt.Fprintf(w, "     limit:     %d member(s), oldest-added first\n", s.Limit)
+		}
+		if s.IsGroupDeliver {
+			fmt.Fprintf(w, "     handoff:   → group %q (created on demand)\n", s.TargetGroup)
+		}
 		fmt.Fprintf(w, "     entity:    %s\n", s.EntityType)
 		if !s.IsSource {
 			projects := list(s.Needs)
@@ -135,8 +141,15 @@ func Print(w io.Writer, p *Plan) {
 	if len(delivers) > 0 {
 		fmt.Fprintf(w, "\nsend surface: %d deliver step(s) (ADR-031)\n", len(delivers))
 		for _, s := range delivers {
-			fmt.Fprintf(w, "  %s → %s (touch scope: %s)\n", s.ID, s.Use, s.RecordGroup)
+			target := s.Use
+			if s.IsGroupDeliver {
+				target = fmt.Sprintf("group %q (handoff, no network)", s.TargetGroup)
+			}
+			fmt.Fprintf(w, "  %s → %s (touch scope: %s)\n", s.ID, target, s.RecordGroup)
 		}
+	}
+	for _, warning := range p.Warnings {
+		fmt.Fprintf(w, "\nwarning: %s\n", warning)
 	}
 
 	if p.Pipeline.Group != "" {
