@@ -25,11 +25,16 @@ type item struct {
 	identityID string
 	key        protocol.Key
 	fields     map[string]any
-	idem       string // deliver steps
+	// fetched names the projected fields whose provenance is an external
+	// fetch (SPEC §10.3, ADR-035) — what an AI step fences.
+	fetched []string
+	idem    string // deliver steps
 
 	advanced bool // state moved to this step
 	verdict  bool // a VERDICT arrived (filter steps)
 	output   bool // a RECORD arrived
+	failed   bool // this step failed the record; nothing advances it now
+	attested bool // an ATTEST arrived (attesting deliver steps)
 }
 
 // bump mutates a step's stats under the lock.
@@ -126,6 +131,22 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		r.printStepLine(st)
 		return nil
 	}
+	if st.IsGroupDeliver {
+		// The handoff (SPEC §8, ADR-032): no adapter, no network — every
+		// record prepare() let through is delivered to the group here. Dry
+		// runs never reach this point with work (prepare receipts them).
+		for _, it := range work {
+			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
+				return err
+			}
+			r.bump(st, func(s *StepStat) { s.In++ })
+			if err := r.advance(ctx, st, it, map[string]any{"group": st.TargetGroup}, nil); err != nil {
+				return err
+			}
+		}
+		r.printStepLine(st)
+		return nil
+	}
 	return r.dispatch(ctx, st, work)
 }
 
@@ -187,7 +208,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 		return nil, err
 	}
 	fields := rec.Fields()
-	if err := st.Manifest.ValidateNeeds(fields); err != nil {
+	if err := r.validateNeeds(st, fields); err != nil {
 		r.bump(st, func(s *StepStat) { s.Failed++ })
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), identityID, "failed",
 			map[string]any{"reason": err.Error()}); err != nil {
@@ -200,6 +221,13 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 		identityID: identityID,
 		key:        protocol.Key{EntityType: rec.Identity.EntityType, IdentityKey: rec.Identity.IdentityKey},
 		fields:     fields,
+	}
+	if isAIStep(st) {
+		for name, v := range rec.Values {
+			if r.fetchedSource(v.Source) {
+				it.fetched = append(it.fetched, name)
+			}
+		}
 	}
 
 	skipped, err := r.cacheSkip(ctx, st, it)
@@ -216,7 +244,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 			return nil, err
 		}
 		it.idem = idem
-		delivered, err := r.l.AlreadyDelivered(ctx, st.Manifest.ID, idem)
+		delivered, err := r.l.AlreadyDelivered(ctx, st.Target(), idem)
 		if err != nil {
 			return nil, err
 		}
@@ -353,8 +381,24 @@ func (r *runner) dryDeliver(ctx context.Context, st *planner.Step, it *item, rv 
 	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
 		return err
 	}
-	r.bump(st, func(s *StepStat) { s.DryRun = append(s.DryRun, rv) })
+	r.bump(st, func(s *StepStat) {
+		s.DryRun = append(s.DryRun, rv)
+		if st.IsGroupDeliver {
+			s.TargetGroup = st.TargetGroup
+			s.GroupWould++
+		}
+	})
 	return nil
+}
+
+// validateNeeds checks a projection against the step's needs: the manifest's
+// schema for an adapter step; a runner-owned deliver (group/deliver) has no
+// static floor — variables: completeness is checked by prepare.
+func (r *runner) validateNeeds(st *planner.Step, fields map[string]any) error {
+	if st.Manifest == nil {
+		return nil
+	}
+	return st.Manifest.ValidateNeeds(fields)
 }
 
 // stringify renders a projected value for a merge field; empty means missing.
@@ -545,7 +589,7 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 	}
 
 	msgs := make([]protocol.Message, 0, len(items)+2)
-	msgs = append(msgs, r.openMessage(st))
+	msgs = append(msgs, r.openMessage(st, items))
 	for _, it := range items {
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
 			return err
@@ -577,6 +621,10 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 			}
 		case protocol.TypeVerdict:
 			if err := r.applyVerdict(ctx, st, byKey, m); err != nil {
+				return err
+			}
+		case protocol.TypeAttest:
+			if err := r.applyAttest(ctx, st, byKey, m); err != nil {
 				return err
 			}
 		case protocol.TypeCost:
@@ -625,8 +673,95 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 			if err := r.advance(ctx, st, it, map[string]any{"fields": 0}, nil); err != nil {
 				return err
 			}
+			continue
+		}
+		// An attesting deliver adapter that acknowledged a record but said
+		// nothing about what the target stored: inconclusive (SPEC §5).
+		if attesting(st) && !it.attested && !it.failed {
+			if err := r.attestInconclusive(ctx, st, it, "the adapter reported no attestation for this record"); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
+}
+
+// attesting reports a deliver step whose adapter declares attests (SPEC §6).
+func attesting(st *planner.Step) bool {
+	return st.IsDeliver && st.Manifest != nil && st.Manifest.Attests
+}
+
+// applyAttest applies a deliver adapter's three-way verdict (SPEC §5/§8,
+// ADR-036). confirmed: the delivery advances and its row is refined;
+// contradicted: the row is kept with that status (the record exists at the
+// target — re-sending would duplicate it) and the record fails;
+// inconclusive: advances, accepted, with a receipt warning. Only an adapter
+// declaring attests is heard.
+func (r *runner) applyAttest(ctx context.Context, st *planner.Step, byKey map[string]*item, m protocol.Message) error {
+	if m.Key == nil {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST with no key\n", st.ID)
+		return nil
+	}
+	if !attesting(st) {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST from %s, which does not declare attests (SPEC §6)\n", st.ID, st.Use)
+		return nil
+	}
+	it, ok := byKey[m.Key.String()]
+	if !ok {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST for an unknown key %s\n", st.ID, m.Key)
+		return nil
+	}
+	if it.attested || it.failed || it.advanced {
+		return nil
+	}
+	it.attested = true
+	switch m.Status {
+	case protocol.AttestConfirmed:
+		if err := r.advance(ctx, st, it, map[string]any{"attested": m.Status, "reason": m.Reason}, nil); err != nil {
+			return err
+		}
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryConfirmed); err != nil {
+			return err
+		}
+		r.bump(st, func(s *StepStat) { s.Attests = true; s.Confirmed++ })
+		return nil
+	case protocol.AttestContradicted:
+		reason := "contradicted by the target's re-read"
+		if m.Reason != "" {
+			reason += ": " + m.Reason
+		}
+		// The record exists at the target: keep the row so idempotency holds,
+		// marked for what it is, and fail the record.
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
+			return err
+		}
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryContradicted); err != nil {
+			return err
+		}
+		r.bump(st, func(s *StepStat) { s.Attests = true; s.Contradicted++ })
+		return r.failItem(ctx, st, it, reason)
+	default:
+		reason := m.Reason
+		if m.Status != protocol.AttestInconclusive {
+			reason = fmt.Sprintf("unrecognised attestation status %q", m.Status)
+		}
+		return r.attestInconclusive(ctx, st, it, reason)
+	}
+}
+
+// attestInconclusive advances a delivery that could not be confirmed: it
+// stays accepted, and the receipt warns (SPEC §8) — failing it would be the
+// more dangerous direction to be wrong in (ADR-036).
+func (r *runner) attestInconclusive(ctx context.Context, st *planner.Step, it *item, reason string) error {
+	it.attested = true
+	if err := r.advance(ctx, st, it, map[string]any{"attested": protocol.AttestInconclusive, "reason": reason}, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(r.stderr, "%s [warn]: %s delivered (accepted) but not confirmed — %s\n", st.ID, it.key.IdentityKey, reason)
+	r.bump(st, func(s *StepStat) {
+		s.Attests = true
+		s.Inconclusive = append(s.Inconclusive, Attestation{IdentityKey: it.key.IdentityKey, Reason: reason})
+	})
 	return nil
 }
 
@@ -642,11 +777,12 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 	}
 	it.output = true
 
-	// Output is validated against the manifest before it reaches the ledger
-	// (SPEC §5): an invalid record fails, the run continues. Canonical fields
-	// are additionally held to the registry's type, domain and normalized form
-	// (SPEC §4a, enforcement layer 2).
-	if err := st.Manifest.ValidateProvides(m.Fields); err != nil {
+	// Output is validated against the step's provides before it reaches the
+	// ledger (SPEC §5) — the declared schema for an AI step that carries one
+	// (ADR-033), else the manifest's: an invalid record fails, the run
+	// continues. Canonical fields are additionally held to the registry's
+	// type, domain and normalized form (SPEC §4a, enforcement layer 2).
+	if err := st.ValidateProvides(m.Fields); err != nil {
 		return r.failItem(ctx, st, it, err.Error())
 	}
 	if err := r.checkRegistry(it.key.EntityType, m.Fields); err != nil {
@@ -667,6 +803,18 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 			_ = err
 		}
 	}
+	// A filter's RECORD carries its declared provides (SPEC §5, ADR-033) —
+	// stored like any output, pass or fail — but only its VERDICT advances.
+	if st.Role == adapters.RoleFilter {
+		r.emit(it.key, m.Fields)
+		return nil
+	}
+	// An attesting deliver adapter's acknowledgement waits for its ATTEST
+	// (SPEC §5, ADR-036); a silent adapter is settled inconclusive at the
+	// end of the session.
+	if attesting(st) {
+		return nil
+	}
 	return r.advance(ctx, st, it, map[string]any{"fields": n}, m.Fields)
 }
 
@@ -681,6 +829,11 @@ func (r *runner) applyVerdict(ctx context.Context, st *planner.Step, byKey map[s
 		return nil
 	}
 	it.verdict = true
+	if it.failed {
+		// Its RECORD already failed validation at this step: the failure
+		// stands, whatever the verdict says (SPEC §5).
+		return nil
+	}
 	pass := m.Passed()
 	if err := r.l.SetVerdict(ctx, r.runID, it.identityID, st.ID, pass); err != nil {
 		return err
@@ -696,7 +849,7 @@ func (r *runner) applyVerdict(ctx context.Context, st *planner.Step, byKey map[s
 // advance marks a record done for this step, moves its state forward, and passes
 // it downstream in pipe mode.
 func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail, fields map[string]any) error {
-	if it.advanced {
+	if it.advanced || it.failed {
 		return nil
 	}
 	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done", detail); err != nil {
@@ -706,8 +859,27 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		return err
 	}
 	if st.IsDeliver {
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Manifest.ID, it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
 			return err
+		}
+		// The handoff itself (SPEC §8, ADR-032): membership in the target
+		// group, created on demand. An existing member is not re-asserted.
+		if st.IsGroupDeliver {
+			g, err := r.l.EnsureGroup(ctx, st.TargetGroup)
+			if err != nil {
+				return err
+			}
+			members, err := r.l.GroupMembership(ctx, g.ID)
+			if err != nil {
+				return err
+			}
+			if !members[it.identityID] {
+				if err := r.l.AddGroupEvent(ctx, g.ID, it.identityID, ledger.GroupAdded,
+					map[string]any{"pipeline": r.plan.Pipeline.Name, "step": st.ID, "handoff": true}, r.runID); err != nil {
+					return err
+				}
+			}
+			r.bump(st, func(s *StepStat) { s.TargetGroup = st.TargetGroup; s.GroupAdded++ })
 		}
 		// Touch scoping (SPEC §8, ADR-021): a successful delivery appends a
 		// `touched` event to the step's record: group (pipeline name by
@@ -719,7 +891,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 				return err
 			}
 			if err := r.l.AddGroupEvent(ctx, g.ID, it.identityID, ledger.GroupTouched,
-				map[string]any{"target": st.Manifest.ID, "step": st.ID}, r.runID); err != nil {
+				map[string]any{"target": st.Target(), "step": st.ID}, r.runID); err != nil {
 				return err
 			}
 		}
@@ -731,9 +903,10 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 }
 
 func (r *runner) failItem(ctx context.Context, st *planner.Step, it *item, reason string) error {
-	if it.advanced {
+	if it.advanced || it.failed {
 		return nil
 	}
+	it.failed = true
 	r.bump(st, func(s *StepStat) { s.Failed++ })
 	return r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "failed", map[string]any{"reason": reason})
 }

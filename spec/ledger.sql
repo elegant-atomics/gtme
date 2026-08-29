@@ -85,10 +85,12 @@ CREATE TABLE costs (
 CREATE TABLE deliveries (
   id             TEXT PRIMARY KEY,
   identity_id    TEXT NOT NULL,
-  target         TEXT NOT NULL,           -- adapter id
+  target         TEXT NOT NULL,           -- adapter id, or group:<name> for a handoff (ADR-032)
   idempotency    TEXT NOT NULL,           -- computed key, see §8 deliver
   run_id         TEXT NOT NULL,
   created_at     TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
+  sent_at        TEXT,                    -- set only by attestation (ADR-036)
   UNIQUE(target, idempotency)
 );
 
@@ -155,6 +157,19 @@ FROM (
   WHERE event IN ('added', 'removed')
 )
 WHERE rn = 1 AND event = 'added';
+
+-- Vocabulary views (ADR-037): the read surface user-authored SQL (§10a) and
+-- config queries (§9) are written against, so a query reads as vocabulary
+-- rather than as table internals. current_values is current_fields with the
+-- JSON encoding unwrapped; group_membership is group_members keyed by name.
+CREATE VIEW current_values AS
+SELECT identity_id, field, json_extract(value, '$') AS value, source, confidence, run_id, created_at
+FROM current_fields;
+
+CREATE VIEW group_membership AS
+SELECT g.name AS group_name, m.group_id, m.identity_id
+FROM group_members m
+JOIN groups g ON g.id = m.group_id;
 
 -- Payloads: raw vendor responses as CACHE, not facts (ADR-030, SPEC §3).
 -- Extracted = fact (append-only, above); unextracted = cache (purgeable).

@@ -24,7 +24,7 @@
     "entity_type": {
       "type": "string",
       "minLength": 1,
-      "description": "'person' | 'company' (extensible)."
+      "description": "'person' | 'company' (extensible), or '*' for an entity-agnostic adapter (SPEC.md §6, ADR-033): its steps take the pipeline's entity type, and its static needs/provides are validated against that type at plan time. A source may not declare '*'."
     },
     "needs": {
       "oneOf": [
@@ -73,6 +73,10 @@
     "keep_payloads": {
       "type": "boolean",
       "description": "ADR-030: whether raw responses this adapter attaches to its RECORDs (SPEC.md §5) are retained in the payloads cache tier. Default true; steps may override with keep_payloads: false in config."
+    },
+    "attests": {
+      "type": "boolean",
+      "description": "ADR-036, deliver adapters only: after a successful create the adapter re-reads the target and emits an ATTEST per record (SPEC.md §5) — confirmed | contradicted | inconclusive. Absent, every delivery stays `accepted` and is reported inconclusive (the honest default)."
     },
     "payload_ttl_days": {
       "type": "integer",

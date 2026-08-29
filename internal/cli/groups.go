@@ -9,6 +9,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -32,7 +33,7 @@ func cmdGroups(ctx context.Context, env Env, args []string) error {
 		return groupsEdit(ctx, env, rest, ledger.GroupRemoved)
 	default:
 		return fail(ExitValidation,
-			"usage: gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY...]")
+			"usage: gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]")
 	}
 }
 
@@ -102,16 +103,23 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 	fromSegment := fs.String("from-segment", "", "snapshot a saved segment's identity_id column into membership")
 	query := fs.String("query", "", "snapshot a read-only SELECT's identity_id column into membership")
 	entityType := fs.String("type", "", "entity type, when a key matches more than one")
+	note := fs.String("note", "", "remove only: the reason, recorded in the event's detail (ADR-032)")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(positional) < 1 {
-		return fail(ExitValidation, "usage: gtme groups %s NAME [KEY...] [--from-segment NAME | --query SQL]", verbFor(event))
+		if event == ledger.GroupRemoved {
+			return fail(ExitValidation, "usage: gtme groups remove NAME KEY... [--note TEXT]")
+		}
+		return fail(ExitValidation, "usage: gtme groups add NAME [KEY...] [--from-segment NAME | --query SQL]")
 	}
 	name, keys := positional[0], positional[1:]
 	if event == ledger.GroupRemoved && (*fromSegment != "" || *query != "") {
 		return fail(ExitValidation, "snapshots only add; remove takes identity keys")
+	}
+	if event == ledger.GroupAdded && *note != "" {
+		return fail(ExitValidation, "--note records why a record was removed; add has no reason to record (SPEC §8)")
 	}
 	if len(keys) == 0 && *fromSegment == "" && *query == "" {
 		return fail(ExitValidation, "nothing to %s: give identity keys, --from-segment, or --query", verbFor(event))
@@ -138,6 +146,9 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 
 	var ids []string
 	detail := map[string]any{"via": "cli"}
+	if strings.TrimSpace(*note) != "" {
+		detail["note"] = strings.TrimSpace(*note)
+	}
 	switch {
 	case *fromSegment != "":
 		saved, err := l.SavedQuery(ctx, *fromSegment)

@@ -360,12 +360,12 @@ is recorded there.
 
 Every piece of the binding-era stack in one pipeline against the real
 ledger and the live Instantly test shell: csv/source → http/enrich
-(markdown mode) → sql/enrich → ai/compose → the instantly deliver
+(markdown mode) → sql/transform → ai/compose → the instantly deliver
 BINDING, installed the operator way (`~/.gtme/adapters/instantly-add-lead/
 binding.yaml`, id rewritten, fixtures alongside). Run up the full ladder:
 simulate → plan → dry → arm → re-run.
 
-- **Simulate ($0):** sql/enrich ran for real (offline by construction),
+- **Simulate ($0):** sql/transform ran for real (offline by construction),
   AI answered synthetically-marked, http/enrich surfaced as a counted
   gap, delivery held with all four variables resolved. The agent-rung
   works: behavior validated before any key was exercised.

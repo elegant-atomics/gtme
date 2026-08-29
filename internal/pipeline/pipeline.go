@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,15 @@ type Step struct {
 	// the planner (which knows adapter roles, unlike this package) enforces
 	// that.
 	Uses []string `yaml:"uses,omitempty" json:"uses,omitempty"`
+	// Provides declares an AI-backed step's output fields (SPEC §7, §9,
+	// DECISIONS.md ADR-033): a list of field names, or a map of field name →
+	// {type?, enum?, canonical?}. The planner derives the step's effective
+	// provides from it (namespaced by pipeline unless already namespaced or
+	// marked canonical) and the runtime
+	// validates the model's output against the derived schema. Valid only on
+	// AI-backed filter/compose steps; the planner enforces that, as with Uses.
+	// Kept as decoded YAML here; ProvidesFields is the parsed form.
+	Provides any `yaml:"provides,omitempty" json:"provides,omitempty"`
 	// Variables is a deliver step's egress mapping (SPEC §9, ADR-018/019):
 	// target merge-field name → canonical or namespaced ledger field. Its
 	// values are the step's dynamic needs. Valid only on deliver steps.
@@ -70,6 +80,10 @@ type Step struct {
 	// step, mutually exclusive with use:. Members are projected from the
 	// ledger like any record.
 	Group string `yaml:"group,omitempty" json:"group,omitempty"`
+	// Limit caps a group source (SPEC §9, ADR-032): at most N current
+	// members, oldest-added first — the budget for "work thirty today".
+	// Valid only on a group source.
+	Limit int `yaml:"limit,omitempty" json:"limit,omitempty"`
 	// Require / Exclude are membership gates (SPEC §7, ADR-021): process only
 	// current members of every Require group; skip current members of any
 	// Exclude group. Valid on interior steps and deliver, not the source.
@@ -221,6 +235,9 @@ func (p *Pipeline) normalize() error {
 				return fmt.Errorf("pipeline: %s: suppress.within: %w", s.ID, err)
 			}
 		}
+		if _, err := s.ProvidesFields(); err != nil {
+			return fmt.Errorf("pipeline: %s: %w", s.ID, err)
+		}
 		return nil
 	}
 	if err := wellFormed(p.Source); err != nil {
@@ -241,6 +258,18 @@ func (p *Pipeline) normalize() error {
 	}
 	if len(p.Source.Require) > 0 || len(p.Source.Exclude) > 0 {
 		return fmt.Errorf("pipeline: %s: require:/exclude: are not valid on the source step (SPEC §9)", p.Source.ID)
+	}
+	// limit: (ADR-032) bounds a group source and nothing else.
+	for _, s := range p.AllSteps() {
+		if s.Limit == 0 {
+			continue
+		}
+		if s.Limit < 0 {
+			return fmt.Errorf("pipeline: %s: limit must be >= 1 (got %d)", s.ID, s.Limit)
+		}
+		if strings.TrimSpace(s.Group) == "" || s.ID != p.Source.ID {
+			return fmt.Errorf("pipeline: %s: limit: is only valid on a group source (SPEC §9, ADR-032)", s.ID)
+		}
 	}
 	for _, s := range p.AllSteps() {
 		for _, g := range append(append([]string{}, s.Require...), s.Exclude...) {
@@ -266,6 +295,135 @@ func (p *Pipeline) normalize() error {
 		priors[s.ID] = true
 	}
 	return nil
+}
+
+// ProvidesField is one declared output field of an AI-backed step (ADR-033).
+type ProvidesField struct {
+	Name string
+	// Type is a JSON-Schema primitive type when declared, else "".
+	Type string
+	// Enum is the value domain when declared; a value outside it is a
+	// validation failure at run time, never stored (SPEC §7).
+	Enum []string
+	// Canonical marks the declared name as a canonical field of the
+	// pipeline's entity type (SPEC §7): the output lands there, global,
+	// instead of namespaced by pipeline. The planner validates the claim.
+	Canonical bool
+}
+
+// providesTypes are the JSON-Schema types a declared field may carry.
+var providesTypes = map[string]bool{
+	"string": true, "integer": true, "number": true, "boolean": true, "array": true,
+}
+
+// ProvidesFields parses a step's provides: declaration (SPEC §9, ADR-033) into
+// its fields, in declaration order for the list form and sorted by name for
+// the map form. Nil for a step declaring nothing. Shape errors name the field
+// and what was wrong with it; WHICH steps may declare provides is the
+// planner's role question.
+func (s Step) ProvidesFields() ([]ProvidesField, error) {
+	if s.Provides == nil {
+		return nil, nil
+	}
+	switch v := s.Provides.(type) {
+	case []any:
+		if len(v) == 0 {
+			return nil, fmt.Errorf("provides: must name at least one field")
+		}
+		out := make([]ProvidesField, 0, len(v))
+		seen := map[string]bool{}
+		for _, item := range v {
+			name, ok := item.(string)
+			if !ok || strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("provides: list entries must be non-empty field names (got %#v)", item)
+			}
+			name = strings.TrimSpace(name)
+			if seen[name] {
+				return nil, fmt.Errorf("provides: %q is declared twice", name)
+			}
+			seen[name] = true
+			out = append(out, ProvidesField{Name: name})
+		}
+		return out, nil
+	case map[string]any:
+		if len(v) == 0 {
+			return nil, fmt.Errorf("provides: must name at least one field")
+		}
+		names := make([]string, 0, len(v))
+		for name := range v {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		out := make([]ProvidesField, 0, len(names))
+		for _, name := range names {
+			if strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("provides: field names must be non-empty")
+			}
+			f, err := parseProvidesField(strings.TrimSpace(name), v[name])
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, f)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("provides: must be a list of field names or a map of field name → {type, enum} (got %T)", s.Provides)
+	}
+}
+
+// parseProvidesField reads one map-form entry: null or {} declares only the
+// name; type and enum are the two keywords SPEC §7 admits.
+func parseProvidesField(name string, raw any) (ProvidesField, error) {
+	f := ProvidesField{Name: name}
+	if raw == nil {
+		return f, nil
+	}
+	spec, ok := raw.(map[string]any)
+	if !ok {
+		return f, fmt.Errorf("provides: %s: must be null, {}, or a map with type/enum (got %T)", name, raw)
+	}
+	for k, v := range spec {
+		switch k {
+		case "type":
+			t, ok := v.(string)
+			if !ok || !providesTypes[t] {
+				return f, fmt.Errorf("provides: %s: type must be one of string, integer, number, boolean, array (got %#v)", name, v)
+			}
+			f.Type = t
+		case "enum":
+			list, ok := v.([]any)
+			if !ok || len(list) == 0 {
+				return f, fmt.Errorf("provides: %s: enum must be a non-empty list of strings", name)
+			}
+			seen := map[string]bool{}
+			for _, item := range list {
+				str, ok := item.(string)
+				if !ok || strings.TrimSpace(str) == "" {
+					return f, fmt.Errorf("provides: %s: enum values must be non-empty strings (got %#v)", name, item)
+				}
+				if seen[str] {
+					return f, fmt.Errorf("provides: %s: enum value %q repeats", name, str)
+				}
+				seen[str] = true
+				f.Enum = append(f.Enum, str)
+			}
+		case "canonical":
+			b, ok := v.(bool)
+			if !ok {
+				return f, fmt.Errorf("provides: %s: canonical must be true or false (got %#v)", name, v)
+			}
+			f.Canonical = b
+		default:
+			return f, fmt.Errorf("provides: %s: unknown keyword %q (a declared field may carry type, enum and canonical, SPEC §7)", name, k)
+		}
+	}
+	if f.Canonical && strings.Contains(name, ".") {
+		return f, fmt.Errorf("provides: %s: a canonical name must not contain a dot (SPEC §4a) — drop canonical: true or the namespace", name)
+	}
+	if len(f.Enum) > 0 && f.Type != "" && f.Type != "string" {
+		return f, fmt.Errorf("provides: %s: an enum is a string domain; type %q contradicts it", name, f.Type)
+	}
+	return f, nil
 }
 
 // WhenStep returns the step id a gate depends on, or "" when ungated.

@@ -77,7 +77,7 @@ receipt shows dollars *avoided*, and nobody gets delivered twice.
 - **Research enrichment** — `http/enrich` fetches a page to markdown as a
   ledger fact (with mandatory freshness — web content rots), and AI steps
   judge the stored content. Fetch once, judge many.
-- **Deterministic transforms in SQL** — `sql/enrich` and `sql/filter` run
+- **Deterministic transforms in SQL** — `sql/transform` and `sql/filter` run
   declared, read-only queries over the ledger: derive fields, bucket
   titles, gate on "3+ known contacts at this company" — no AI spend for
   computable questions.
@@ -176,10 +176,10 @@ always-current surface:
 | | |
 |---|---|
 | **In** | `csv/source` · `webhook/source` · group-as-source · `apollo/search` *(binding)* |
-| **Enrich** | `harvest/profile` · `http/enrich` (any URL → markdown or JSON) · `sql/enrich` |
+| **Enrich** | `harvest/profile` · `http/enrich` (any URL → markdown or JSON) · `sql/transform` |
 | **Judge** | `ai/filter` · `sql/filter` |
 | **Write** | `ai/compose` |
-| **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` |
+| **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` · `group/deliver` (the next stage) |
 
 Adding your own doesn't require touching this repo: drop a `binding.yaml`
 into `~/.gtme/adapters/<name>/` and the id resolves immediately.

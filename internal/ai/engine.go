@@ -27,8 +27,17 @@ const DefaultMaxTokens = 8192
 
 // Request is one completion.
 type Request struct {
-	System    string
-	Prompt    string
+	System string
+	// Prompt is the whole user turn — Shared then Payload in the stated
+	// order (SPEC §10.3, ADR-035) — for engines that take one string.
+	Prompt string
+	// Shared and Payload are the two halves of Prompt, exposed so an engine
+	// can place a cache breakpoint between them and so the order is A/B-able
+	// without touching assembly: Shared is what every batch of a step sends
+	// alike (the operator's prompt), Payload is this batch's records. Either
+	// may be empty, in which case Prompt is authoritative.
+	Shared    string
+	Payload   string
 	Model     string
 	MaxTokens int
 	// Keys are the identity keys of the records in this batch. Engines use them
@@ -36,6 +45,19 @@ type Request struct {
 	Keys []string
 	// Kind is "filter" or "compose", for the same reason.
 	Kind string
+	// Fields is the step's output shape beyond identity_key (and, for a
+	// filter, pass/reason): the declared or default provides (ADR-033), in
+	// order. The fixture engine synthesizes a value per field from it.
+	Fields []FieldShape
+}
+
+// FieldShape is one output field an AI step expects back from the model.
+type FieldShape struct {
+	Name string
+	// Type is a JSON-Schema primitive type, or "" when the field is untyped.
+	Type string
+	// Enum is the declared value domain, if any.
+	Enum []string
 }
 
 // Response is what an engine returns, including what it cost.

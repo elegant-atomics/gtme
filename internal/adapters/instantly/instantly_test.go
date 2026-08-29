@@ -13,12 +13,26 @@ import (
 
 const campaignID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+const leadID = "99999999-8888-7777-6666-555555555555"
+
 func routes(t *testing.T) map[string]adaptertest.Response {
 	t.Helper()
 	return map[string]adaptertest.Response{
-		"GET /api/v2/campaigns": {Body: adaptertest.Fixture(t, "campaigns.json")},
-		"POST /api/v2/leads":    {Body: adaptertest.Fixture(t, "lead.json")},
+		"GET /api/v2/campaigns":       {Body: adaptertest.Fixture(t, "campaigns.json")},
+		"POST /api/v2/leads":          {Body: adaptertest.Fixture(t, "lead.json")},
+		"GET /api/v2/leads/" + leadID: {Body: adaptertest.Fixture(t, "lead-read.json")},
 	}
+}
+
+// attests returns the ATTEST messages.
+func attests(msgs []protocol.Message) []protocol.Message {
+	var out []protocol.Message
+	for _, m := range msgs {
+		if m.Type == protocol.TypeAttest {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func lead(key string, fields map[string]any) []protocol.Message {
@@ -118,8 +132,8 @@ func TestResolvesCampaignOncePerInvocation(t *testing.T) {
 	if n := stub.CallsTo("/api/v2/campaigns"); n != 1 {
 		t.Errorf("campaign lookups = %d, want 1 for the whole batch", n)
 	}
-	if n := stub.CallsTo("/api/v2/leads"); n != 3 {
-		t.Errorf("lead calls = %d, want 3", n)
+	if n := stub.CallsTo("POST https://instantly.test/api/v2/leads"); n != 3 {
+		t.Errorf("lead creates = %d, want 3", n)
 	}
 }
 
@@ -275,5 +289,112 @@ func TestManifestContract(t *testing.T) {
 	}
 	if got := resolved.Manifest.RequiredNeeds(); strings.Join(got, ",") != "email" {
 		t.Errorf("required needs (the static floor) = %v, want just email", got)
+	}
+}
+
+// TestAttestsThreeWays is ADR-036 at the adapter: after the create, the lead
+// is re-read and compared field by field — confirmed when everything sent is
+// stored, contradicted when a stored value disagrees, inconclusive when the
+// re-read fails or the shape carries no readable value.
+func TestAttestsThreeWays(t *testing.T) {
+	ResetCampaignCache()
+	input := func() adaptertest.Input {
+		return adaptertest.Input{
+			Config: map[string]any{
+				"campaign": campaignID, "base_url": "https://instantly.test",
+				"variables": map[string]any{"first_name": "first_name", "personalization": "first_line", "ps_line": "ps_line", "title": "title"},
+			},
+			Env: map[string]string{"INSTANTLY_API_KEY": "secret"},
+			Records: lead("jane.doe@acme.com", map[string]any{
+				"email": "Jane.Doe@Acme.com", "first_name": "Jane", "title": "VP Marketing",
+				"first_line": "Saw your post on killing three channels.", "ps_line": "PS: the CAC math checks out.",
+			}),
+		}
+	}
+
+	// Confirmed: the fixture re-read matches everything sent.
+	stub := &adaptertest.Stub{Routes: routes(t)}
+	msgs, err := adaptertest.Run(t, &Adapter{HTTP: stub}, input())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stub.CallsTo("GET https://instantly.test/api/v2/leads/"+leadID) != 1 {
+		t.Errorf("the lead must be re-read once; calls = %+v", stub.Calls)
+	}
+	got := attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestConfirmed || got[0].Key.IdentityKey != "jane.doe@acme.com" {
+		t.Fatalf("attest = %+v, want confirmed", got)
+	}
+	// Order: the acknowledgement RECORD precedes the ATTEST (SPEC §5).
+	var order []string
+	for _, m := range msgs {
+		if m.Type == protocol.TypeRecord || m.Type == protocol.TypeAttest {
+			order = append(order, m.Type)
+		}
+	}
+	if strings.Join(order, ",") != "RECORD,ATTEST" {
+		t.Errorf("order = %v", order)
+	}
+
+	// Contradicted: the stored personalization is not what was sent.
+	r := routes(t)
+	r["GET /api/v2/leads/"+leadID] = adaptertest.Response{Body: strings.Replace(
+		adaptertest.Fixture(t, "lead-read.json"), "Saw your post on killing three channels.", "", 1)}
+	msgs, err = adaptertest.Run(t, &Adapter{HTTP: &adaptertest.Stub{Routes: r}}, input())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got = attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestContradicted ||
+		!strings.Contains(got[0].Reason, `personalization: sent "Saw your post on killing three channels.", stored ""`) {
+		t.Errorf("attest = %+v, want contradicted naming the field", got)
+	}
+
+	// Inconclusive: the re-read fails (no route → 404).
+	r = routes(t)
+	delete(r, "GET /api/v2/leads/"+leadID)
+	msgs, err = adaptertest.Run(t, &Adapter{HTTP: &adaptertest.Stub{Routes: r}}, input())
+	if err != nil {
+		t.Fatalf("Run: %v (a failed re-read must not fail the delivery)", err)
+	}
+	got = attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "re-read failed") {
+		t.Errorf("attest = %+v, want inconclusive", got)
+	}
+
+	// Inconclusive: an unrecognised shape — no custom variables readable.
+	r = routes(t)
+	r["GET /api/v2/leads/"+leadID] = adaptertest.Response{Body: `{"id":"` + leadID + `","email":"jane.doe@acme.com","first_name":"Jane","personalization":"Saw your post on killing three channels."}`}
+	msgs, err = adaptertest.Run(t, &Adapter{HTTP: &adaptertest.Stub{Routes: r}}, input())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got = attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "custom variable ps_line, custom variable title") {
+		t.Errorf("attest = %+v, want inconclusive naming the unreadable variables", got)
+	}
+
+	// Inconclusive, not contradicted: a first-class field the response omits
+	// entirely is unreadable — absence is not disagreement (ADR-036).
+	r = routes(t)
+	r["GET /api/v2/leads/"+leadID] = adaptertest.Response{Body: strings.Replace(
+		adaptertest.Fixture(t, "lead-read.json"), `"personalization": "Saw your post on killing three channels.",`, "", 1)}
+	msgs, err = adaptertest.Run(t, &Adapter{HTTP: &adaptertest.Stub{Routes: r}}, input())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got = attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "no readable value for personalization") {
+		t.Errorf("attest = %+v, want inconclusive for an omitted field", got)
+	}
+}
+
+func TestManifestDeclaresAttestation(t *testing.T) {
+	resolved, err := adapters.Resolve(ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.Manifest.Attests {
+		t.Error("instantly/add-to-campaign is the first attesting adapter (ADR-036)")
 	}
 }

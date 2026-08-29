@@ -131,7 +131,10 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 		t.Errorf("auto filter answer = %+v", filters)
 	}
 
-	res, err = engine.Complete(context.Background(), Request{Kind: "compose", Keys: []string{"a@x.com"}})
+	// The adapter hands the engine its output shape (ADR-033) — here the
+	// compose default — and the answer is synthesized from it.
+	res, err = engine.Complete(context.Background(), Request{Kind: "compose", Keys: []string{"a@x.com"},
+		Fields: []FieldShape{{Name: "first_line", Type: "string"}, {Name: "ps_line", Type: "string"}}})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -143,8 +146,30 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 	if err := json.Unmarshal([]byte(res.Text), &composed); err != nil {
 		t.Fatalf("auto compose answer is not valid JSON: %v (%s)", err, res.Text)
 	}
-	if len(composed) != 1 || composed[0].FirstLine == "" || composed[0].PSLine == "" {
+	if len(composed) != 1 || composed[0].FirstLine != "Fixture first line for a@x.com" || composed[0].PSLine == "" {
 		t.Errorf("auto compose answer = %+v", composed)
+	}
+
+	// A declared shape (ADR-033): enum fields take their first member, typed
+	// fields a typed sample, so the synthesized answer is always schema-valid.
+	res, err = engine.Complete(context.Background(), Request{Kind: "filter", Keys: []string{"a@x.com"},
+		Fields: []FieldShape{
+			{Name: "q.state", Enum: []string{"now", "later"}},
+			{Name: "q.score", Type: "integer"},
+			{Name: "q.hot", Type: "boolean"},
+			{Name: "q.rationale"},
+		}})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	var judged []map[string]any
+	if err := json.Unmarshal([]byte(res.Text), &judged); err != nil {
+		t.Fatalf("auto declared answer is not valid JSON: %v (%s)", err, res.Text)
+	}
+	got := judged[0]
+	if got["pass"] != true || got["q.state"] != "now" || got["q.score"] != float64(0) ||
+		got["q.hot"] != true || got["q.rationale"] != "Fixture rationale for a@x.com" {
+		t.Errorf("auto declared answer = %v", got)
 	}
 }
 

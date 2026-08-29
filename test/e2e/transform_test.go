@@ -3,7 +3,7 @@ package e2e
 // M11 acceptance (SPEC §10a/§11): the transform floor plus payload
 // retention, offline — http/enrich fetches a local page to markdown into a
 // declared field with the raw response retained as a payload and the second
-// run cache-skipping the fetch; sql/enrich derives a field with query-hash
+// run cache-skipping the fetch; sql/transform derives a field with query-hash
 // provenance; sql/filter gates by predicate in both styles; gtme vacuum
 // reports; --simulate counts http/enrich as a gap while SQL runs.
 
@@ -90,7 +90,7 @@ steps:
 	contains(t, res.stderr, "simulation gap: fetch (http/enrich)", "simulate receipt")
 }
 
-func TestSQLEnrichAndFilter(t *testing.T) {
+func TestSQLTransformAndFilter(t *testing.T) {
 	h := newHarness(t)
 	h.write("contacts.csv", campaignZeroCSV)
 	h.write("p.yaml", `name: transform-floor
@@ -104,7 +104,7 @@ source:
       company_domain: Company Website
 steps:
   - id: shout
-    use: sql/enrich
+    use: sql/transform
     with:
       uses: [full_name]
       provides: [sql.shout]
@@ -128,8 +128,8 @@ steps:
 		t.Errorf("sql.shout = %v, want JANE DOE + BOB STONE (carol has no name)", shouts)
 	}
 	sources := h.queryStrings(`SELECT DISTINCT source FROM field_values WHERE field = 'sql.shout'`)
-	if len(sources) != 1 || !strings.HasPrefix(sources[0], "sql/enrich @ ") {
-		t.Errorf("provenance = %v, want sql/enrich @ <hash>", sources)
+	if len(sources) != 1 || !strings.HasPrefix(sources[0], "sql/transform @ ") {
+		t.Errorf("provenance = %v, want sql/transform @ <hash>", sources)
 	}
 
 	// Membership-style filter: jane (teal) and carol (mauve) pass, bob has no
@@ -221,11 +221,24 @@ steps:
 	}
 	contains(t, res.stderr, "company_domain", "plan error names the derived need")
 
-	// sql/enrich without declared provides.
+	// The old id fails plan naming the new one (ADR-037).
 	h.write("p.yaml", strings.Replace(base, "%s", `  - id: derive
     use: sql/enrich
     with:
-      query: SELECT identity_id FROM identities
+      provides: [sql.x]
+      query: SELECT id AS identity_id FROM identities
+`, 1))
+	res = h.run("plan", "p.yaml")
+	if res.code != 2 {
+		t.Fatalf("sql/enrich: plan exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "sql/enrich was renamed sql/transform (ADR-037)", "plan error names the rename")
+
+	// sql/transform without declared provides.
+	h.write("p.yaml", strings.Replace(base, "%s", `  - id: derive
+    use: sql/transform
+    with:
+      query: SELECT id AS identity_id FROM identities
 `, 1))
 	res = h.run("plan", "p.yaml")
 	if res.code != 2 {
@@ -235,7 +248,7 @@ steps:
 
 	// A mutating statement is rejected before anything runs.
 	h.write("p.yaml", strings.Replace(base, "%s", `  - id: derive
-    use: sql/enrich
+    use: sql/transform
     with:
       provides: [sql.x]
       query: DELETE FROM identities

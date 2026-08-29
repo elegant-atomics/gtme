@@ -4,6 +4,7 @@ package planner
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/elegant-atomics/gtme/internal/pipeline"
 	"github.com/elegant-atomics/gtme/internal/registry"
 	"github.com/elegant-atomics/gtme/internal/secrets"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 // DefaultBatchSize is the batch size for AI steps (SPEC §9).
@@ -46,6 +48,13 @@ type Step struct {
 	ProvidesSchema json.RawMessage
 	Provides       []string
 	Wildcard       bool
+	// AIProvides is an AI step's derived provides schema (SPEC §7, ADR-033):
+	// the step-level provides: declaration with names namespaced by pipeline
+	// (unless already namespaced), in declaration order under required. Nil
+	// when the step declares nothing. The runner injects it into OPEN config
+	// and validates the step's RECORDs against it (ValidateProvides).
+	AIProvides json.RawMessage
+	aiProvides *jsonschema.Schema
 
 	Cache       time.Duration
 	When        string
@@ -84,9 +93,16 @@ type Step struct {
 
 	// Group semantics (SPEC §7/§8/§9, ADR-021) — all runner-owned.
 	// IsGroupSource marks a `source: {group: ...}` step: members projected
-	// from the ledger, no adapter, provides open.
+	// from the ledger, no adapter, provides open. Limit caps it (ADR-032):
+	// at most N members, oldest-added first; 0 is unbounded.
 	IsGroupSource bool
 	SourceGroup   string
+	Limit         int
+	// IsGroupDeliver marks a `use: group/deliver` step (SPEC §8, ADR-032):
+	// a runner-owned deliver step whose target is TargetGroup, created on
+	// demand. Every deliver-step key applies; --dry-run withholds it.
+	IsGroupDeliver bool
+	TargetGroup    string
 	// Require/Exclude are membership gates checked per record.
 	Require []string
 	Exclude []string
@@ -103,10 +119,90 @@ type Plan struct {
 	Steps     []Step
 	Available []string
 	Wildcard  bool
+	// Warnings are plan-level observations that do not block (SPEC §7): the
+	// one-commit-point rule (ADR-032) is the first.
+	Warnings []string
+}
+
+// GroupDeliverID is the runner-owned handoff step (SPEC §8, ADR-032).
+const GroupDeliverID = "group/deliver"
+
+// Target is the deliveries.target a deliver step writes under (SPEC §3): the
+// adapter id, or `group:<name>` for a handoff — so each group keeps its own
+// (target, idempotency) scope, as each adapter does.
+func (s *Step) Target() string {
+	if s.IsGroupDeliver {
+		return "group:" + s.TargetGroup
+	}
+	if s.Manifest != nil {
+		return s.Manifest.ID
+	}
+	return s.Use
 }
 
 // Source is the source step.
 func (p *Plan) Source() *Step { return &p.Steps[0] }
+
+// ValidateProvides checks a step's output RECORD before it reaches the ledger
+// (SPEC §5): against the derived provides schema when the step declared one
+// (ADR-033), else against the manifest's static schema.
+func (s *Step) ValidateProvides(fields map[string]any) error {
+	if s.aiProvides != nil {
+		if err := s.aiProvides.Validate(adapters.NormalizeForSchema(fields)); err != nil {
+			return fmt.Errorf("output does not match declared provides: %w", err)
+		}
+		return nil
+	}
+	if s.Manifest == nil {
+		return nil
+	}
+	return s.Manifest.ValidateProvides(fields)
+}
+
+// Scope is what a step inherits from its pipeline at resolve time: the name
+// (the default namespace for declared AI outputs, SPEC §4a), the entity type
+// its source emits (the entity type of every entity-agnostic AI step, SPEC
+// §10.3), and the local ledger, read-only — what config values from the
+// ledger and plan-time EXPLAIN resolve against (SPEC §7, ADR-037). Ledger
+// may be nil, in which case a step needing it is a plan problem.
+type Scope struct {
+	Ctx        context.Context
+	Pipeline   string
+	EntityType string
+	Ledger     *ledger.Ledger
+}
+
+// SQLTransformID and SQLFilterID are the runner-owned SQL steps (SPEC §10a).
+// SQLEnrichID is the pre-ADR-037 name, kept only to name the fix.
+const (
+	SQLTransformID = "sql/transform"
+	SQLFilterID    = "sql/filter"
+	SQLEnrichID    = "sql/enrich"
+)
+
+// ResolvedPipeline is the pipeline with every step's with: replaced by its
+// resolved config — {query:}/{segment:} values substituted (SPEC §7,
+// ADR-037) — which is what runs.config_json records, so a run reproduces
+// what it actually ran against, not what it would recompute.
+func (p *Plan) ResolvedPipeline() *pipeline.Pipeline {
+	out := *p.Pipeline
+	if p.Pipeline.Source != nil {
+		src := *p.Pipeline.Source
+		out.Source = &src
+	}
+	out.Steps = append([]pipeline.Step(nil), p.Pipeline.Steps...)
+	for i := range p.Steps {
+		st := &p.Steps[i]
+		if i == 0 && out.Source != nil {
+			out.Source.With = st.Config
+			continue
+		}
+		if i-1 < len(out.Steps) {
+			out.Steps[i-1].With = st.Config
+		}
+	}
+	return &out
+}
 
 // StepByID finds a step.
 func (p *Plan) StepByID(id string) *Step {
@@ -168,19 +264,31 @@ func (e *Errors) ExitCode() int {
 }
 
 // Build resolves and validates a pipeline. It performs no network calls and
-// spends nothing.
-func Build(p *pipeline.Pipeline) (*Plan, error) {
+// spends nothing; the ledger, when given, is read only (SPEC §7: config
+// values from the ledger, SQL at plan). ctx and l may be nil for a pipeline
+// that needs neither.
+func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	plan := &Plan{Pipeline: p}
 	var problems []Problem
 
 	available := map[string]bool{}
 	steps := p.AllSteps()
+	scope := Scope{Ctx: ctx, Pipeline: p.Name, Ledger: l}
 
 	for i, s := range steps {
 		isSource := i == 0
 
-		ps, stepProblems := ResolveStep(s, isSource)
+		ps, stepProblems := ResolveStep(s, isSource, scope)
 		problems = append(problems, stepProblems...)
+		if isSource {
+			// The pipeline's entity type is its source's; a group source has
+			// none to offer (members may be of any type), so steps after it
+			// validate names entity-blind, as SQL steps always have.
+			scope.EntityType = ps.EntityType
+		}
 		// A deliver step's touch scope defaults to the pipeline name (SPEC §8,
 		// ADR-031: per deliver step — steps sharing the default share the
 		// scope): every pipeline is safely scoped unless it opts to share.
@@ -252,6 +360,26 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 	}
 
 	plan.Available = keys(available)
+
+	// One commit point (SPEC §7, ADR-032): arming is all-or-nothing
+	// (ADR-031), so a handoff and a network-side send in one pipeline means
+	// approving the handoff approves the send. Warned, not refused.
+	var handoffs, sends []string
+	for i := range plan.Steps {
+		st := &plan.Steps[i]
+		switch {
+		case st.IsGroupDeliver:
+			handoffs = append(handoffs, fmt.Sprintf("%s (→ group %q)", st.ID, st.TargetGroup))
+		case st.IsDeliver:
+			sends = append(sends, fmt.Sprintf("%s (→ %s)", st.ID, st.Use))
+		}
+	}
+	if len(handoffs) > 0 && len(sends) > 0 {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf(
+			"one commit point (ADR-032): this pipeline both hands off — %s — and sends — %s. Arming approves every deliver step at once, so approving the handoff approves the send; keep the handoff in its own pipeline and let the send consume the group.",
+			strings.Join(handoffs, ", "), strings.Join(sends, ", ")))
+	}
+
 	if len(problems) > 0 {
 		return plan, &Errors{Problems: problems}
 	}
@@ -261,8 +389,9 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 // ResolveStep resolves one step's adapter, config, credentials, cache window and
 // schemas. Whether a step is a deliver step is a role fact read from its
 // resolved manifest (ADR-031), never a position: a pipeline may carry any
-// number of deliver steps, anywhere after the source.
-func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
+// number of deliver steps, anywhere after the source. scope carries what the
+// step inherits from its pipeline (name, entity type).
+func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) {
 	var problems []Problem
 	ps := Step{
 		ID:        s.ID,
@@ -275,6 +404,19 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	}
 	if ps.Config == nil {
 		ps.Config = map[string]any{}
+	}
+	// Config values from the ledger (SPEC §7/§9, ADR-037): {query:} and
+	// {segment:} values resolve read-only before anything reads the config —
+	// the adapter's config_schema validates the substituted value.
+	// The with: map itself is never a value (a sql/* step's own `query`
+	// key lives there); only the values under its keys are.
+	if resolved, notes, valueProblems := resolveConfigMap(scope, "with", ps.Config); len(valueProblems) > 0 {
+		for _, msg := range valueProblems {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: msg})
+		}
+	} else {
+		ps.Config = resolved
+		ps.Notes = append(ps.Notes, notes...)
 	}
 	ps.Require = append([]string(nil), s.Require...)
 	ps.Exclude = append([]string(nil), s.Exclude...)
@@ -300,12 +442,91 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 		}
 	}
 
-	// SQL steps (SPEC §10a, ADR-027) resolve no adapter: the runner mediates
+	// gateProvides rejects a step-level provides: declaration anywhere but an
+	// AI-backed filter/compose step (SPEC §9, ADR-033) — the uses: pattern,
+	// third instance. Called once the step's role is known.
+	gateProvides := func(isAI bool) {
+		if s.Provides == nil {
+			return
+		}
+		switch {
+		case ps.Role != adapters.RoleFilter && ps.Role != adapters.RoleCompose:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("provides: is only valid on AI-backed filter/compose steps (%s has role %q) — ADR-033", ps.Use, ps.Role)})
+		case !isAI:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("provides: is only valid on AI steps (ai/filter, ai/compose); %s takes its outputs from its own contract, not from a step-level declaration — ADR-033", ps.Use)})
+		}
+	}
+
+	// group/deliver (SPEC §8, ADR-032) resolves no adapter: the handoff to
+	// the next stage is a delivery the runner performs itself — every
+	// deliver-step key applies, the target group is created on demand.
+	if s.Use == GroupDeliverID {
+		ps.IsDeliver = true
+		ps.IsGroupDeliver = true
+		ps.Role = adapters.RoleDeliver
+		if isSource {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: GroupDeliverID + " cannot be the source"})
+		}
+		group, _ := ps.Config["group"].(string)
+		ps.TargetGroup = strings.TrimSpace(group)
+		if ps.TargetGroup == "" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: GroupDeliverID + " needs with.group — the group records are handed off to (SPEC §8)"})
+		}
+		for k := range ps.Config {
+			if k != "group" {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+					Msg: fmt.Sprintf("%s takes only with.group (got %q)", GroupDeliverID, k)})
+			}
+		}
+		if len(s.Uses) > 0 {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("uses: is only valid on filter/compose steps (%s has role %q)", s.Use, ps.Role)})
+		}
+		gateProvides(false)
+		// Dynamic needs from variables:, no static floor (SPEC §6/§9).
+		ps.Variables = s.Variables
+		ps.Needs = variableFields(s.Variables)
+		ps.Required = append([]string(nil), ps.Needs...)
+		ps.OnMissing = s.OnMissing
+		if ps.OnMissing == "" {
+			ps.OnMissing = "skip"
+		}
+		ps.Idempotency = s.Idempotency
+		ps.RecordGroup = strings.TrimSpace(s.Record)
+		if s.Suppress != nil {
+			ps.SuppressGroup = strings.TrimSpace(s.Suppress.Group)
+			d, err := pipeline.ParseCache(s.Suppress.Within)
+			if err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "suppress.within: " + err.Error()})
+			}
+			ps.SuppressWithin = d
+		}
+		ps.EntityType = scope.EntityType
+		if reg, err := registry.Load(); err == nil {
+			for _, field := range ps.Needs {
+				if err := reg.ValidateName(ps.EntityType, field); err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "variables: " + err.Error()})
+				}
+			}
+		}
+		return ps, problems
+	}
+
+	// SQL steps (SPEC §10a, ADR-027/037) resolve no adapter: the runner mediates
 	// their read-only ledger access, and their contracts are DECLARED —
 	// uses:/provides: in config — never parsed from the SQL.
-	if s.Use == "sql/enrich" || s.Use == "sql/filter" {
+	if s.Use == SQLEnrichID {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
+			Msg: fmt.Sprintf("%s was renamed %s (ADR-037) — a transform is a per-record derivation or a cross-record aggregate, not a provider lookup; change use: to %s", SQLEnrichID, SQLTransformID, SQLTransformID)})
+		gateDeliverKeys()
+		return ps, problems
+	}
+	if s.Use == SQLTransformID || s.Use == SQLFilterID {
 		ps.IsSQL = true
-		if s.Use == "sql/enrich" {
+		if s.Use == SQLTransformID {
 			ps.Role = adapters.RoleEnrich
 		} else {
 			ps.Role = adapters.RoleFilter
@@ -318,17 +539,29 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 		} else if err := ledger.ReadOnlyStatement(ps.Query); err != nil {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 				Msg: fmt.Sprintf("%s: %v", s.Use, err)})
+		} else {
+			// SQL at plan (SPEC §7, ADR-037): EXPLAIN QUERY PLAN against the
+			// local ledger — $0, no network — so an unknown table or column
+			// fails the plan rather than the run.
+			if err := explainQuery(scope, ps.Query); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("%s: the query does not plan against the ledger: %v", s.Use, err)})
+			}
+			if refs := crossRecordRefs(ps.Query); len(refs) > 0 {
+				ps.Notes = append(ps.Notes,
+					fmt.Sprintf("cross-record: this query reads %s — it may read any identity in the ledger; only its results are scoped to the run, and it recomputes every run (SPEC §10a)", strings.Join(refs, " and ")))
+			}
 		}
 		ps.Needs = configStrings(ps.Config["uses"])
 		ps.Required = append([]string(nil), ps.Needs...)
 		provides := configStrings(ps.Config["provides"])
-		if s.Use == "sql/enrich" && len(provides) == 0 {
+		if s.Use == SQLTransformID && len(provides) == 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: "sql/enrich needs config.provides — the declared output fields (SPEC §10a)"})
+				Msg: SQLTransformID + " needs config.provides — the declared output fields (SPEC §10a)"})
 		}
-		if s.Use == "sql/filter" && len(provides) > 0 {
+		if s.Use == SQLFilterID && len(provides) > 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: "sql/filter produces verdicts, not fields — drop config.provides"})
+				Msg: SQLFilterID + " produces verdicts, not fields — drop config.provides"})
 		}
 		ps.Provides = provides
 		if reg, err := registry.Load(); err == nil {
@@ -343,6 +576,7 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 				Msg: s.Use + " cannot be the source"})
 		}
 		gateDeliverKeys()
+		gateProvides(false)
 		return ps, problems
 	}
 
@@ -353,10 +587,12 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	if isSource && strings.TrimSpace(s.Group) != "" {
 		ps.IsGroupSource = true
 		ps.SourceGroup = strings.TrimSpace(s.Group)
+		ps.Limit = s.Limit
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
 		gateDeliverKeys()
+		gateProvides(false)
 		return ps, problems
 	}
 
@@ -369,6 +605,18 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	ps.Role = resolved.Manifest.Role
 	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
+	// An entity-agnostic manifest (SPEC §6, ADR-033 — the AI steps) takes
+	// the pipeline's entity type, so uses:/provides: and its static schemas
+	// validate against the registry the records actually belong to. A source
+	// has no pipeline type to take.
+	isAI := resolved.Manifest.IsAI()
+	if resolved.Manifest.EntityAgnostic() {
+		if isSource {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("%s declares entity_type \"*\" and cannot be the source — a source names the entity type its records are (SPEC §6)", s.Use)})
+		}
+		ps.EntityType = scope.EntityType
+	}
 	ps.Needs = resolved.Manifest.NeedsFields()
 	ps.Required = resolved.Manifest.RequiredNeeds()
 	ps.CostEstimate = resolved.Manifest.CostEstimate
@@ -390,10 +638,40 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	} else {
 		gateDeliverKeys()
 	}
+	gateProvides(isAI)
 
 	reg, regErr := registry.Load()
 	if regErr != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter, Msg: regErr.Error()})
+	}
+
+	// Declared AI provides (SPEC §7, ADR-033): the step's effective provides
+	// derive from its provides: declaration — names namespaced by pipeline
+	// unless already namespaced — and replace the manifest's static shape.
+	if s.Provides != nil && isAI && ps.Role != adapters.RoleSource {
+		decl, err := s.ProvidesFields()
+		if err != nil {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
+		} else {
+			schema, notes, declProblems := deriveAIProvides(decl, ps.Role, scope.Pipeline, ps.EntityType, reg)
+			for _, msg := range declProblems {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: msg})
+			}
+			ps.Notes = append(ps.Notes, notes...)
+			if len(declProblems) == 0 {
+				compiled, err := adapters.CompileSchema(s.ID+"/provides", schema)
+				if err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
+				} else {
+					ps.AIProvides = schema
+					ps.aiProvides = compiled
+				}
+			}
+		}
+	}
+	if _, ok := ps.Config["provides"]; ok && isAI {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: "provides: is a step-level key, not a with: key — move it out of with: (SPEC §9, ADR-033)"})
 	}
 
 	// uses: (ADR-004) narrows an AI-backed step's needs-all wildcard to an
@@ -467,10 +745,18 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 			}
 		}
 		for _, name := range append(append([]string{}, s.Uses...), variableFields(s.Variables)...) {
-			if registry.IsNamespaced(name) {
-				ps.Notes = append(ps.Notes,
-					fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
+			if !registry.IsNamespaced(name) {
+				continue
 			}
+			if strings.HasPrefix(name, scope.Pipeline+".") {
+				// This pipeline's own declared AI output (ADR-033): per-campaign
+				// by design, not a vendor coupling.
+				ps.Notes = append(ps.Notes,
+					fmt.Sprintf("needs this pipeline's own judgment field %q (declared by an earlier AI step, ADR-033)", name))
+				continue
+			}
+			ps.Notes = append(ps.Notes,
+				fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
 		}
 		// Manifest static schemas get the same check (an external adapter's
 		// authoring error surfaces here rather than as a silent mismatch).
@@ -480,10 +766,17 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 					Msg: fmt.Sprintf("manifest needs: %v", err)})
 			}
 		}
-		for _, name := range resolved.Manifest.ProvidesFields() {
-			if err := reg.ValidateName(ps.EntityType, name); err != nil {
-				problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
-					Msg: fmt.Sprintf("manifest provides: %v", err)})
+		// A step that declares its own provides (ADR-033) replaces the
+		// manifest's static shape, so the static names are not its contract.
+		if len(ps.AIProvides) == 0 {
+			for _, name := range resolved.Manifest.ProvidesFields() {
+				if err := reg.ValidateName(ps.EntityType, name); err != nil {
+					msg := fmt.Sprintf("manifest provides: %v", err)
+					if isAI {
+						msg += " — or declare provides: on this step (ADR-033)"
+					}
+					problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter, Msg: msg})
+				}
 			}
 		}
 	}
@@ -537,9 +830,12 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 			Msg: fmt.Sprintf("a source cannot require input fields (%s)", strings.Join(ps.Required, ", "))})
 	}
 
-	// Provides: a config-specific probe wins over the static manifest schema.
+	// Provides: a config-specific probe wins over the static manifest schema,
+	// and a declared AI shape (ADR-033) over both.
 	ps.ProvidesSchema = resolved.Manifest.Provides
-	if probed, err := resolved.ProbeSchema(ps.Config); err != nil {
+	if len(ps.AIProvides) > 0 {
+		ps.ProvidesSchema = ps.AIProvides
+	} else if probed, err := resolved.ProbeSchema(ps.Config); err != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 	} else if len(probed) > 0 {
 		ps.ProvidesSchema = probed
@@ -595,6 +891,102 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 		}
 	}
 	return ps, problems
+}
+
+// reservedOutputNames are the element keys the AI output shape already owns
+// (SPEC §10.3): a declared field may not shadow them.
+var reservedOutputNames = map[string]string{
+	"identity_key": "every AI role",
+	"pass":         "filter",
+}
+
+// deriveAIProvides turns a step's provides: declaration into its effective
+// provides schema (SPEC §7, ADR-033): each name lands as written when it is
+// already namespaced or marked canonical (a registry-checked claim), else as
+// <pipeline>.<name> (SPEC §4a — a judgment is a fact about working the entity
+// in one campaign; two campaigns' judgments about one identity must not
+// collide). The schema carries the declared type
+// and enum per field, requires every field, and admits nothing else. Notes
+// surface where a bare name coincides with a canonical field, so the operator
+// sees that the canonical field is untouched.
+func deriveAIProvides(decl []pipeline.ProvidesField, role, pipelineName, entityType string, reg *registry.Registry) (json.RawMessage, []string, []string) {
+	var problems, notes []string
+	props := map[string]any{}
+	required := make([]string, 0, len(decl))
+	for _, f := range decl {
+		if owner, ok := reservedOutputNames[f.Name]; ok && (owner == "every AI role" || owner == role) {
+			problems = append(problems, fmt.Sprintf("provides: %q is reserved by the AI output shape (SPEC §10.3) — choose another name", f.Name))
+			continue
+		}
+		name := f.Name
+		switch {
+		case f.Canonical:
+			// The declared name IS the canonical field (SPEC §7): global, not
+			// per-campaign — so the claim is checked against the registry,
+			// type and domain included, before anything can land there.
+			if reg != nil && reg.Known(entityType) {
+				entry, ok := reg.Lookup(entityType, f.Name)
+				if !ok {
+					msg := fmt.Sprintf("provides: %q is marked canonical but is not a canonical %s field (see spec/fields/%s.json)", f.Name, entityType, entityType)
+					if sugg := reg.Suggest(entityType, f.Name); sugg != "" {
+						msg += fmt.Sprintf(" — did you mean %q?", sugg)
+					}
+					problems = append(problems, msg)
+					continue
+				}
+				if f.Type != "" && f.Type != entry.Type {
+					problems = append(problems, fmt.Sprintf("provides: %q declares type %s but the canonical %s field is %s", f.Name, f.Type, entityType, entry.Type))
+					continue
+				}
+				if len(f.Enum) > 0 && entry.Type != "string" {
+					problems = append(problems, fmt.Sprintf("provides: %q declares an enum but the canonical %s field is %s, not string", f.Name, entityType, entry.Type))
+					continue
+				}
+				if len(entry.Enum) > 0 {
+					for _, v := range f.Enum {
+						if !containsStr(entry.Enum, v) {
+							problems = append(problems, fmt.Sprintf("provides: %q enum value %q is outside the canonical domain %v", f.Name, v, entry.Enum))
+						}
+					}
+				}
+			}
+		case !registry.IsNamespaced(name):
+			name = pipelineName + "." + f.Name
+			if reg != nil {
+				if _, canonical := reg.Lookup(entityType, f.Name); canonical {
+					notes = append(notes, fmt.Sprintf("provides: %q lands as %q (per-campaign, ADR-033); the canonical %s field %q is untouched — add canonical: true to write it instead",
+						f.Name, name, entityType, f.Name))
+				}
+			}
+		}
+		if _, dup := props[name]; dup {
+			problems = append(problems, fmt.Sprintf("provides: %q resolves to %q, which another declared field already uses", f.Name, name))
+			continue
+		}
+		spec := map[string]any{}
+		if f.Type != "" {
+			spec["type"] = f.Type
+		}
+		if len(f.Enum) > 0 {
+			spec["type"] = "string"
+			spec["enum"] = f.Enum
+		}
+		props[name] = spec
+		required = append(required, name)
+	}
+	if len(problems) > 0 {
+		return nil, notes, problems
+	}
+	raw, err := json.Marshal(map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           props,
+		"required":             required,
+	})
+	if err != nil {
+		return nil, notes, []string{err.Error()}
+	}
+	return raw, notes, nil
 }
 
 // ReferencedGroups lists every group the plan requires to EXIST at plan time
@@ -826,4 +1218,188 @@ func schemaProperties(raw json.RawMessage) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// crossRecordTables are the objects whose presence in a query marks it
+// cross-record (SPEC §7, ADR-037): it joins beyond the record's own facts.
+var crossRecordTables = []string{"relations", "group_members", "group_membership"}
+
+// crossRecordRefs lists the cross-record objects a query names, as whole
+// words, in a stable order.
+func crossRecordRefs(query string) []string {
+	var out []string
+	for _, name := range crossRecordTables {
+		if regexp.MustCompile(`\b` + name + `\b`).MatchString(query) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// explainQuery runs EXPLAIN QUERY PLAN on the read-only connection (SPEC
+// §7): SQLite resolves every table and column without executing anything.
+// :run_id is bound when referenced, as the runner binds it.
+func explainQuery(scope Scope, query string) error {
+	if scope.Ledger == nil {
+		return nil // no ledger to plan against; the run will check
+	}
+	db, err := ledger.OpenReadOnly(scope.Ctx, scope.Ledger.Path())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var args []any
+	if strings.Contains(query, ":run_id") {
+		args = append(args, sql.Named("run_id", "plan"))
+	}
+	rows, err := db.QueryContext(scope.Ctx, "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		return err
+	}
+	return rows.Close()
+}
+
+// maxShownRows bounds how many resolved values a plan note lists.
+const maxShownRows = 10
+
+// resolveConfigValues walks a step's config and substitutes every
+// {query: SQL} / {segment: NAME} value with the ledger's answer (SPEC §7/§9,
+// ADR-037): one column → a list, one row and one column → a scalar; zero
+// rows is a plan error (an empty list handed to a vendor search is the shape
+// that searches everything), as is any other column shape. Returns a copy;
+// the pipeline's own config is never mutated. path names the value in
+// notes and errors ("with.domains").
+func resolveConfigValues(scope Scope, path string, v any) (any, []string, []string) {
+	switch t := v.(type) {
+	case map[string]any:
+		if kind, text, ok, malformed := configQuery(t); malformed {
+			return v, nil, []string{fmt.Sprintf("%s: {%s: …} must carry a non-empty string (SPEC §9)", path, kind)}
+		} else if ok {
+			value, note, err := resolveConfigQuery(scope, path, kind, text)
+			if err != nil {
+				return v, nil, []string{err.Error()}
+			}
+			return value, []string{note}, nil
+		}
+		return resolveConfigMap(scope, path, t)
+	case []any:
+		out := make([]any, len(t))
+		var notes, problems []string
+		for i, item := range t {
+			r, n, p := resolveConfigValues(scope, fmt.Sprintf("%s[%d]", path, i), item)
+			out[i] = r
+			notes = append(notes, n...)
+			problems = append(problems, p...)
+		}
+		return out, notes, problems
+	default:
+		return v, nil, nil
+	}
+}
+
+// resolveConfigMap resolves the values under a map's keys — never the map
+// itself, so a step's own with: block (or a sql/* step's with: {query: …})
+// is a container, not a value.
+func resolveConfigMap(scope Scope, path string, m map[string]any) (map[string]any, []string, []string) {
+	out := make(map[string]any, len(m))
+	var notes, problems []string
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		r, n, p := resolveConfigValues(scope, path+"."+k, m[k])
+		out[k] = r
+		notes = append(notes, n...)
+		problems = append(problems, p...)
+	}
+	return out, notes, problems
+}
+
+// configQuery recognises the two ledger-value forms: a map whose only key is
+// query or segment. ok means a well-formed value; malformed means the key is
+// there but its value is not a non-empty string — a plan error, never a
+// literal handed to the adapter.
+func configQuery(m map[string]any) (kind, text string, ok, malformed bool) {
+	if len(m) != 1 {
+		return "", "", false, false
+	}
+	for _, k := range []string{"query", "segment"} {
+		if v, present := m[k]; present {
+			s, isString := v.(string)
+			if !isString || strings.TrimSpace(s) == "" {
+				return k, "", false, true
+			}
+			return k, strings.TrimSpace(s), true, false
+		}
+	}
+	return "", "", false, false
+}
+
+// resolveConfigQuery runs one config value's SQL read-only and shapes the
+// result (SPEC §7).
+func resolveConfigQuery(scope Scope, path, kind, text string) (any, string, error) {
+	label := fmt.Sprintf("%s ← {%s: %s}", path, kind, text)
+	if scope.Ledger == nil {
+		return nil, "", fmt.Errorf("%s: resolving a config value from the ledger needs the ledger (run `gtme init`)", path)
+	}
+	query := text
+	if kind == "segment" {
+		saved, err := scope.Ledger.SavedQuery(scope.Ctx, text)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: no saved segment named %q — save one with `gtme query --save %s \"SQL\"`", path, text, text)
+		}
+		query = saved.SQL
+		label = fmt.Sprintf("%s ← {segment: %s}", path, text)
+	}
+	if err := ledger.ReadOnlyStatement(query); err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	db, err := ledger.OpenReadOnly(scope.Ctx, scope.Ledger.Path())
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(scope.Ctx, query)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	if len(cols) != 1 {
+		return nil, "", fmt.Errorf("%s: a config query must yield exactly one column (got %s) — one column is a list, one row and one column a scalar (SPEC §7)", path, strings.Join(cols, ", "))
+	}
+	var values []any
+	for rows.Next() {
+		var v any
+		if err := rows.Scan(&v); err != nil {
+			return nil, "", fmt.Errorf("%s: %v", path, err)
+		}
+		if b, ok := v.([]byte); ok {
+			v = string(b)
+		}
+		values = append(values, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	if len(values) == 0 {
+		return nil, "", fmt.Errorf("%s: the %s yielded zero rows — an empty value handed to an adapter is the shape that matches everything; fix the %s or snapshot a group first (SPEC §7)", path, kind, kind)
+	}
+	shown := make([]string, 0, len(values))
+	for i, v := range values {
+		if i == maxShownRows {
+			shown = append(shown, fmt.Sprintf("… (+%d more)", len(values)-maxShownRows))
+			break
+		}
+		shown = append(shown, fmt.Sprint(v))
+	}
+	if len(values) == 1 {
+		return values[0], fmt.Sprintf("%s → 1 row (scalar): %s", label, shown[0]), nil
+	}
+	return values, fmt.Sprintf("%s → %d rows (list): %s", label, len(values), strings.Join(shown, ", ")), nil
 }

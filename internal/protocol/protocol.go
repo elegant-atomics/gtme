@@ -12,7 +12,7 @@ import (
 )
 
 // Message types. Runner → adapter: OPEN, RECORD, END. Adapter → runner: SCHEMA,
-// RECORD, VERDICT, COST, STATE, LOG, END (SPEC §5).
+// RECORD, VERDICT, ATTEST, COST, STATE, LOG, END (SPEC §5).
 const (
 	TypeOpen   = "OPEN"
 	TypeRecord = "RECORD"
@@ -20,9 +20,18 @@ const (
 
 	TypeSchema  = "SCHEMA"
 	TypeVerdict = "VERDICT"
+	TypeAttest  = "ATTEST"
 	TypeCost    = "COST"
 	TypeState   = "STATE"
 	TypeLog     = "LOG"
+)
+
+// Attestation statuses (SPEC §5, ADR-036): a deliver adapter's three-way
+// verdict on what the target stored.
+const (
+	AttestConfirmed    = "confirmed"
+	AttestContradicted = "contradicted"
+	AttestInconclusive = "inconclusive"
 )
 
 // Key identifies a record. The runner canonicalizes keys (SPEC §4); adapters
@@ -60,8 +69,9 @@ type Message struct {
 	// SCHEMA
 	Provides json.RawMessage `json:"provides,omitempty"`
 
-	// VERDICT
+	// VERDICT (pass, reason) and ATTEST (status, reason)
 	Pass   *bool  `json:"pass,omitempty"`
+	Status string `json:"status,omitempty"`
 	Reason string `json:"reason,omitempty"`
 
 	// COST. AmountUSD is a pointer, like Pass above and for the same reason: 0 is
@@ -140,6 +150,11 @@ func Record(key Key, fields map[string]any, confidence map[string]float64) Messa
 // Verdict builds a VERDICT message.
 func Verdict(key Key, pass bool, reason string) Message {
 	return Message{Type: TypeVerdict, Key: &key, Pass: &pass, Reason: reason}
+}
+
+// Attest builds an ATTEST message (SPEC §5, ADR-036).
+func Attest(key Key, status, reason string) Message {
+	return Message{Type: TypeAttest, Key: &key, Status: status, Reason: reason}
 }
 
 // Cost builds a COST message. key may be nil for step-level costs.

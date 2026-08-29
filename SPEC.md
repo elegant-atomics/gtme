@@ -225,10 +225,12 @@ CREATE TABLE costs (
 CREATE TABLE deliveries (
   id             TEXT PRIMARY KEY,
   identity_id    TEXT NOT NULL,
-  target         TEXT NOT NULL,           -- adapter id
+  target         TEXT NOT NULL,           -- adapter id, or group:<name> for a handoff (ADR-032)
   idempotency    TEXT NOT NULL,           -- computed key, see §8 deliver
   run_id         TEXT NOT NULL,
   created_at     TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
+  sent_at        TEXT,                    -- set only by attestation (ADR-036)
   UNIQUE(target, idempotency)
 );
 
@@ -272,6 +274,19 @@ FROM (
   WHERE event IN ('added', 'removed')
 )
 WHERE rn = 1 AND event = 'added';
+
+-- Vocabulary views (ADR-037): the read surface user-authored SQL (§10a) and
+-- config queries (§9) are written against, so a query reads as vocabulary
+-- rather than as table internals. current_values is current_fields with the
+-- JSON encoding unwrapped; group_membership is group_members keyed by name.
+CREATE VIEW current_values AS
+SELECT identity_id, field, json_extract(value, '$') AS value, source, confidence, run_id, created_at
+FROM current_fields;
+
+CREATE VIEW group_membership AS
+SELECT g.name AS group_name, m.group_id, m.identity_id
+FROM group_members m
+JOIN groups g ON g.id = m.group_id;
 
 -- Payloads: raw vendor responses as CACHE, not facts (ADR-030). Extracted =
 -- fact (append-only, above); unextracted = cache (this table, purgeable).
@@ -329,15 +344,15 @@ which applies the per-step window against ranked rows) and `gtme query`'s
 MUST resolve through it. No second implementation of the ranking rule may
 exist.
 
-**Queued schema deltas (ADR-036, ADR-037) — land with milestone M14's
-migration and are mirrored into `spec/ledger.sql` then, never ahead of
-it:** `deliveries` gains `status` (`accepted` | `confirmed` |
+**M14's schema deltas (ADR-036, ADR-037; migration `0007`, mirrored
+above):** `deliveries` carries `status` (`accepted` | `confirmed` |
 `contradicted` | `sent`; default `accepted`) and `sent_at` (nullable —
 empty until a provider attests). Two views join the public read surface
-beside `current_fields` and `group_members`: one that presents current
-values pre-unwrapped from their JSON encoding, and one that presents
-current membership keyed by group *name*, so user-authored SQL (§10a) and
-config queries (§9) read as vocabulary rather than as table internals.
+beside `current_fields` and `group_members`: `current_values` presents
+current values pre-unwrapped from their JSON encoding, and
+`group_membership` presents current membership keyed by group *name*, so
+user-authored SQL (§10a) and config queries (§9) read as vocabulary
+rather than as table internals.
 
 ---
 
@@ -448,8 +463,9 @@ Three tiers:
    range string).
 3. **Vendor namespace**: everything else as `<vendor>.<field>` (e.g.
    `apollo.id`). Declared AI outputs (ADR-033) default into this tier
-   under the *pipeline's* name — `<pipeline>.<field>` — unless the step's
-   config maps a name to a canonical field: a judgment is a fact about
+   under the *pipeline's* name — `<pipeline>.<field>` — unless the
+   declaration marks the field `canonical: true` (§7, §9), in which case
+   it lands on the canonical field of that name: a judgment is a fact about
    working the entity in one campaign, and two campaigns' judgments about
    one identity MUST NOT collide in `field_values`. Stored with provenance, queryable, usable in `uses:` and
    `variables:`. A canonical name MUST NOT contain a dot; a dot marks a
@@ -517,6 +533,7 @@ Adapter → runner:
 {"type":"SCHEMA","provides":{...json schema...}}          // first message
 {"type":"RECORD","key":{...},"fields":{...},"confidence":{"email":0.93}}
 {"type":"VERDICT","key":{...},"pass":true,"reason":"..."}  // filter steps
+{"type":"ATTEST","key":{...},"status":"confirmed|contradicted|inconclusive","reason":"..."}  // deliver steps declaring attests (§6)
 {"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"detail":{...}}
 {"type":"STATE","cursor":{...}}                            // resumable sources
 {"type":"LOG","level":"info|warn|error","msg":"..."}
@@ -551,6 +568,15 @@ Rules:
   key (ADR-033): the VERDICT gates advancement as ever; the RECORD's
   fields are its declared provides (§7), stored like any adapter output,
   so a judge's reasoning is queryable without a second call.
+- A deliver adapter declaring `attests` (§6) MAY emit an ATTEST after the
+  RECORD that acknowledges a delivery (ADR-036): `confirmed` and
+  `inconclusive` let the record advance — the latter with a receipt
+  warning, its delivery still `accepted` — and `contradicted` fails it,
+  keeping the `deliveries` row with that status, since the record exists
+  at the target and re-sending would duplicate it. An attesting adapter
+  that says nothing about a record is `inconclusive`. An adapter that does
+  not declare `attests` MUST NOT emit ATTEST; a runner ignores one that
+  does. Runners that predate the message ignore it, per the rule above.
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
@@ -626,6 +652,14 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   `entity_type` or vendor-namespaced (`<vendor>.<field>`). Schemas that
   name no properties (the needs-all wildcard, an open source schema) have
   nothing to check.
+- **Entity-agnostic manifests (ADR-033):** an adapter whose contract does
+  not depend on the entity type — the AI steps (§10.3, §10.5) — declares
+  `"entity_type": "*"`. Its steps take the pipeline's entity type (the
+  source's; none after a group source, in which case name validation is
+  entity-blind), and a static `needs`/`provides` schema on such a manifest
+  is validated against that type at plan time. A source MUST NOT be
+  entity-agnostic: it has no pipeline type to take, and the planner
+  rejects one.
 - `freshness_days`: default cache window for fields this adapter provides;
   overridable per step (`cache:` in YAML).
 - **Payload retention (ADR-030):** `keep_payloads` (default true) and
@@ -718,9 +752,15 @@ the derived provides exactly as it validates static provides (§5).
 
 **Declared AI provides (ADR-033):** an AI-role step MAY carry a step-level
 `provides:` — a list of field names, or a JSON-Schema object whose
-property names are the fields and whose values MAY declare `type` and
-`enum`. The planner treats it as dynamic provides above; names MUST be
-canonical or namespaced and default into `<pipeline>.<field>` (§4a). The
+property names are the fields and whose values MAY declare `type`,
+`enum`, and `canonical`. The planner treats it as dynamic provides above.
+Every bare name defaults into `<pipeline>.<field>` (§4a) — a name that
+happens to coincide with a canonical field included, which `gtme plan`
+MUST note — and a name written with a dot is kept as written. A field
+marked `canonical: true` lands on the canonical field of that name
+instead (global, not per-campaign): the name MUST be canonical for the
+pipeline's entity type, and a declared `type` or `enum` MUST agree with
+the registry entry, or the plan fails naming the step and field. The
 runtime validates the model's output against the derived schema with the
 existing retry (§10.3), and an `enum` violation is a validation failure,
 never stored. A filter with `provides:` emits VERDICT and RECORD (§5). A
@@ -1124,7 +1164,8 @@ Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
 it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
 valid only on AI-backed roles: the step's declared output fields, a list
-of names or a JSON-Schema object (§7); the planner rejects it elsewhere. Deliver adapters are ordinary
+of names or a map of name → `{type, enum, canonical}` (§7); the planner
+rejects it elsewhere. Deliver adapters are ordinary
 `steps:` entries (ADR-031): a pipeline MAY carry zero, one, or many, at
 any position — steps execute strictly in order, so a deliver step sends
 exactly the records that survived everything before it. `variables:`
@@ -1259,7 +1300,8 @@ contract, pure YAML.
    prompt precedes the records as a stated default, with the
    shared/payload split exposed so the order is A/B-able and a cache
    breakpoint can sit between them. AI steps hold no tools. The manifest is
-   entity-agnostic: the step's entity type is the pipeline's.
+   entity-agnostic (`"entity_type": "*"`, §6): the step's entity type is
+   the pipeline's.
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
    lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
    one-of `linkedin_url` | `linkedin_internal_url` |
@@ -1422,7 +1464,7 @@ projected fields, and its only network access is its model engine's API
 belongs to `http/enrich` and bindings, which are deterministic and
 cacheable.
 
-### `sql/transform` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11; `sql/transform` renamed `sql/transform` by ADR-037)
+### `sql/transform` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11; `sql/enrich` renamed `sql/transform` by ADR-037)
 
 `sql/transform`: a single SELECT over the projection view (plus relations),
 scoped to the run's records, executed read-only (`mode=ro`) and
@@ -1651,7 +1693,8 @@ decided contract, not shipped behavior.
   `variables:` on a non-deliver step fails plan naming step and key; a
   document with a top-level `deliver:` block fails validation.
 - **M14 — the composition pass (ADR-032, ADR-033, ADR-035, ADR-036,
-  ADR-037; §3, §5, §6, §7, §8, §9, §10, §10a). Queued 2026-08-28.**
+  ADR-037; §3, §5, §6, §7, §8, §9, §10, §10a). Built 2026-08-28
+  (changelog v0.16).**
   Build in this order, each step `make check` green: (1) ADR-033 —
   step-level `provides:` on AI roles, schema-generated output shape,
   `enum`, VERDICT+RECORD from filters, entity-agnostic AI manifests,
@@ -1823,6 +1866,29 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.16 — 2026-08-28 (M14 step 1 build: `canonical: true` on declared AI provides)
+**Added:** §7/§9 `canonical: true` on a declared AI output field — the
+explicit mapping onto a canonical field that §4a/§7 implied without
+naming (found building ADR-033, queued in AUDIT.md (b), human-approved
+2026-08-28); §4a tier 3 reworded to point at it. Every bare name
+namespaces otherwise, canonical-looking or not, and `gtme plan` notes the
+coincidence. `spec/schemas/pipeline.schema.json`: a `provides` map value
+is null or an object of `type`/`enum`/`canonical`. §6 entity-agnostic
+manifests: `"entity_type": "*"` names what §10.3 asserted without an
+encoding (AUDIT.md (b), approved 2026-08-28); a source may not declare
+it; `manifest.schema.json` describes the sentinel; the two AI manifests
+declare it.
+**Added:** §5 ATTEST — the wire form of ADR-036's three-way verdict,
+which its spec-impact list left out (found building step (5); approved
+2026-08-28): `spec/schemas/msg-attest.schema.json`, the wire README's
+table, and the `attests` key in `manifest.schema.json`.
+**Changed:** `spec/ledger.sql` and §3's DDL — M14's migration `0007`
+landed (step (4)): `deliveries.status`/`sent_at`, the `current_values`
+and `group_membership` views; §3's queued-deltas note now records them as
+landed. §10a heading typo (`sql/enrich` renamed `sql/transform`).
+**Changed:** §11 M14 marked built — all five steps and the account-pattern
+capstone run offline in the suite.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
 **Added:** §7 declared AI provides, config values from the ledger, SQL at

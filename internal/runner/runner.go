@@ -5,10 +5,12 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -80,6 +82,28 @@ type StepStat struct {
 	// DryRun lists each record's RESOLVED variables when the run was dry —
 	// the approval artifact a human reviews before arming (SPEC §8).
 	DryRun []RecordVariables
+
+	// TargetGroup names a group/deliver step's group (SPEC §8, ADR-032);
+	// GroupAdded counts the records handed off, GroupWould what a dry or
+	// simulated run held back.
+	TargetGroup string
+	GroupAdded  int
+	GroupWould  int
+
+	// Attestation (SPEC §8, ADR-036): what an attesting deliver adapter
+	// reported after re-reading the target. Confirmed and Contradicted are
+	// counts; Inconclusive lists each record whose delivery stays accepted
+	// but unconfirmed, with why — the receipt warns about them.
+	Attests      bool
+	Confirmed    int
+	Contradicted int
+	Inconclusive []Attestation
+}
+
+// Attestation is one inconclusive (or otherwise noteworthy) attestation.
+type Attestation struct {
+	IdentityKey string
+	Reason      string
 }
 
 // SuppressedRecord is one record a suppression window held back (SPEC §8).
@@ -140,6 +164,8 @@ type runner struct {
 	// deliverSteps holds the plan's deliver step ids: a fail verdict at one of
 	// these records a withheld send, not a stopped record (SPEC §8, ADR-031).
 	deliverSteps map[string]bool
+	// fetchedCache memoizes fetchedSource per adapter id.
+	fetchedCache map[string]bool
 	now          func() time.Time
 	// out is the downstream NDJSON stream in pipe mode, nil for `gtme run`.
 	out *protocol.Writer
@@ -175,6 +201,7 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		simulate:     o.Simulate,
 		reg:          reg,
 		deliverSteps: map[string]bool{},
+		fetchedCache: map[string]bool{},
 		now:          time.Now,
 		stats:        map[string]*StepStat{},
 	}
@@ -213,7 +240,9 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		}
 		fmt.Fprintf(r.stderr, "resuming run %s (%s)\n", run.ID, run.Pipeline)
 	} else {
-		run, err := r.l.CreateRun(ctx, o.Plan.Pipeline.Name, o.Plan.Pipeline)
+		// The config snapshot is the RESOLVED pipeline (SPEC §7, ADR-037):
+		// {query:}/{segment:} values as they evaluated at this run's start.
+		run, err := r.l.CreateRun(ctx, o.Plan.Pipeline.Name, o.Plan.ResolvedPipeline())
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +293,7 @@ func writeAutoFixture() (string, error) {
 
 // isAIStep reports an operation-named AI step (ADR-026).
 func isAIStep(st *planner.Step) bool {
-	return st.Manifest != nil && strings.HasPrefix(st.Manifest.ID, "ai/")
+	return st.Manifest != nil && st.Manifest.IsAI()
 }
 
 // stubbed reports whether a step is served nothing under --simulate: a binding
@@ -424,15 +453,32 @@ func (r *runner) sessionEnv(st *planner.Step) map[string]string {
 
 // openMessage is the OPEN that starts every session (SPEC §5). A deliver
 // step's variables: mapping rides in as config — the adapter owns the egress
-// mapping (ADR-018), the runner owns projecting the fields it references.
-func (r *runner) openMessage(st *planner.Step) protocol.Message {
+// mapping (ADR-018), the runner owns projecting the fields it references. An
+// AI step's derived provides schema rides in the same way (ADR-033): the
+// adapter generates its output shape from it, the runner validates against it.
+// An AI step also learns which of the batch's fields were fetched from the
+// outside world (ADR-035), so it can fence them: computed here from
+// provenance, since the adapter only ever sees a projection.
+func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 	config := st.Config
-	if len(st.Variables) > 0 {
-		config = make(map[string]any, len(st.Config)+1)
+	fetched := fetchedFields(items)
+	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 {
+		config = make(map[string]any, len(st.Config)+3)
 		for k, v := range st.Config {
 			config[k] = v
 		}
-		config["variables"] = st.Variables
+		if len(st.Variables) > 0 {
+			config["variables"] = st.Variables
+		}
+		if len(st.AIProvides) > 0 {
+			var schema map[string]any
+			if err := json.Unmarshal(st.AIProvides, &schema); err == nil {
+				config[adapters.ProvidesConfigKey] = schema
+			}
+		}
+		if len(fetched) > 0 {
+			config[adapters.FetchedConfigKey] = fetched
+		}
 	}
 	return protocol.Message{
 		Type:   protocol.TypeOpen,
@@ -440,6 +486,61 @@ func (r *runner) openMessage(st *planner.Step) protocol.Message {
 		RunID:  r.runID,
 		Config: config,
 	}
+}
+
+// fetchedFields is the sorted union of the batch's fetched fields.
+func fetchedFields(items []*item) []string {
+	seen := map[string]bool{}
+	for _, it := range items {
+		for _, f := range it.fetched {
+			seen[f] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// fetchedSource reports whether a field_values.source string names an
+// adapter that fetched the value from the outside world (SPEC §10.3,
+// ADR-035): a binding, http/enrich, or a credentialed process adapter —
+// the same "network by declaration" reading stubbed() uses. Operator input
+// (csv/source), the runner's own derivations (sql/*) and AI judgments
+// (ai/*) are not fetches. Resolved once per source string.
+func (r *runner) fetchedSource(source string) bool {
+	id := strings.TrimSpace(source)
+	if i := strings.IndexAny(id, "@ "); i >= 0 {
+		id = strings.TrimSpace(id[:i])
+	}
+	if id == "" || strings.HasPrefix(id, adapters.AIPrefix) || strings.HasPrefix(id, "sql/") {
+		return false
+	}
+	r.mu.Lock()
+	if v, ok := r.fetchedCache[id]; ok {
+		r.mu.Unlock()
+		return v
+	}
+	r.mu.Unlock()
+
+	fetched := false
+	if res, err := adapters.Resolve(id); err == nil {
+		switch {
+		case res.Binding, res.Manifest.ID == binding.HTTPEnrichID:
+			fetched = true
+		default:
+			fetched = len(res.Manifest.Credentials) > 0
+		}
+	}
+	r.mu.Lock()
+	r.fetchedCache[id] = fetched
+	r.mu.Unlock()
+	return fetched
 }
 
 // runSource drains the source adapter into the ledger and the run's membership.
@@ -480,7 +581,7 @@ func (r *runner) runSource(ctx context.Context) error {
 		return err
 	}
 	// A source receives no records; END says "there is no input coming".
-	sendErr := sess.SendStream([]protocol.Message{r.openMessage(st), protocol.End()})
+	sendErr := sess.SendStream([]protocol.Message{r.openMessage(st, nil), protocol.End()})
 
 	count := 0
 	for {
@@ -544,7 +645,8 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 	if err != nil {
 		return fmt.Errorf("runner: %s: %w", st.ID, err)
 	}
-	members, err := r.l.GroupMembers(ctx, g.ID)
+	// Insertion order, oldest first, capped by limit: (SPEC §8/§9, ADR-032).
+	members, err := r.l.GroupMembersOldest(ctx, g.ID, st.Limit)
 	if err != nil {
 		return err
 	}
@@ -558,11 +660,18 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 		r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, nil)
 	}
 	stat.Out = len(members)
-	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done",
-		map[string]any{"records": len(members), "group": g.Name}); err != nil {
+	detail := map[string]any{"records": len(members), "group": g.Name}
+	if st.Limit > 0 {
+		detail["limit"] = st.Limit
+	}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done", detail); err != nil {
 		return err
 	}
-	fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
+	if st.Limit > 0 {
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q (limit %d, oldest first)\n", st.ID, len(members), g.Name, st.Limit)
+	} else {
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
+	}
 	return nil
 }
 

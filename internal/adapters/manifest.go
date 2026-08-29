@@ -48,12 +48,43 @@ type Manifest struct {
 	// defaults to true, TTL to 90 days; a step config may override keep.
 	KeepPayloads   *bool `json:"keep_payloads,omitempty"`
 	PayloadTTLDays *int  `json:"payload_ttl_days,omitempty"`
+	// Attests marks a deliver adapter that re-reads what it wrote and emits
+	// an ATTEST per record (SPEC §5/§6, ADR-036). Absent, every delivery
+	// stays accepted and is reported inconclusive.
+	Attests bool `json:"attests,omitempty"`
 
 	needs, provides, config *jsonschema.Schema
 }
 
 // Source is the provenance string written to field_values.source.
 func (m *Manifest) Source() string { return fmt.Sprintf("%s@%d", m.ID, m.Version) }
+
+// AIPrefix names the operation-named AI steps (ADR-026): the adapters whose
+// judgment comes from a model rather than a provider.
+const AIPrefix = "ai/"
+
+// ProvidesConfigKey is the OPEN config key the runner injects an AI step's
+// derived provides schema under (SPEC §7, ADR-033) — the `variables` pattern,
+// second instance: never authored inside with:.
+const ProvidesConfigKey = "provides"
+
+// FetchedConfigKey is the OPEN config key the runner injects the names of
+// externally fetched fields under (SPEC §10.3, ADR-035), computed from the
+// batch's provenance so the AI adapter can fence them. Never authored
+// inside with:.
+const FetchedConfigKey = "fetched"
+
+// IsAI reports an AI step (ADR-026): the adapters that derive their provides
+// from a step-level declaration (SPEC §7, ADR-033).
+func (m *Manifest) IsAI() bool { return strings.HasPrefix(m.ID, AIPrefix) }
+
+// EntityAny is the entity_type an entity-agnostic manifest declares
+// (SPEC §6, ADR-033): its steps take the pipeline's entity type.
+const EntityAny = "*"
+
+// EntityAgnostic reports a manifest whose contract does not depend on the
+// entity type (SPEC §6).
+func (m *Manifest) EntityAgnostic() bool { return m.EntityType == EntityAny }
 
 // DefaultPayloadTTLDays is ADR-030's default retention window.
 const DefaultPayloadTTLDays = 90
@@ -119,6 +150,17 @@ func (m *Manifest) compile() error {
 	}
 	return nil
 }
+
+// CompileSchema compiles a JSON Schema document for validation — the same
+// compiler manifests use, so a config-derived provides schema (SPEC §7)
+// validates exactly as a static one.
+func CompileSchema(name string, raw json.RawMessage) (*jsonschema.Schema, error) {
+	return compileSchema(name, raw)
+}
+
+// NormalizeForSchema round-trips a value through JSON so a validator sees the
+// same types it would see on the wire (int → float64, structs → objects).
+func NormalizeForSchema(v any) any { return normalizeForSchema(v) }
 
 func compileSchema(name string, raw json.RawMessage) (*jsonschema.Schema, error) {
 	if len(raw) == 0 {

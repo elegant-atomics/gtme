@@ -137,6 +137,42 @@ Left in place as the record of what was found and why.
    OPTIONAL (matching `msg-record-out.schema.json`) plus a worked keyless
    example.
 
+## (b) Spec gaps queued from the M14 step 1 build (ADR-033) — proposed, not applied
+
+Found while building declared AI provides (DECISIONS.md, 2026-08-28 "M14
+step 1 internals"). Both are spec-visible under ADR-010's litmus — a
+second implementation would need the answer to interoperate — so the code
+takes the conservative reading and the question is queued here.
+
+1. **How does a step's config "map a name to a canonical field"?** §4a
+   tier 3 and §7 both said declared AI outputs default to
+   `<pipeline>.<field>` "unless the step's config maps a name to a
+   canonical field", but neither §9 nor `spec/schemas/pipeline.schema.json`
+   defined a mapping form — a `provides:` value could carry only `type`
+   and `enum`. Name-matching was rejected (`state` is a canonical person
+   field; a judgment must not land in a location).
+   **Applied (approved 2026-08-28, SPEC v0.16):** `canonical: true` on the
+   declaration — §7 states the rule (the name must be canonical for the
+   pipeline's entity type; declared `type`/`enum` must agree with the
+   registry), §9 lists the keyword, §4a points at it, the pipeline schema
+   constrains a map value to null or `{type, enum, canonical}`. Every
+   other bare name namespaces, and `gtme plan` notes a coincidence with a
+   canonical field and names the opt-in.
+
+2. **How does a manifest declare that it is entity-agnostic?** §10.3
+   (items 3 and 5) said "the manifest is entity-agnostic: the step's
+   entity type is the pipeline's", but §6 and
+   `spec/schemas/manifest.schema.json` required `entity_type` (min length
+   1) described as `'person' | 'company' (extensible)`, and the build
+   initially applied the §10.3 behaviour by a planner rule keyed on the
+   `ai/` id prefix with the two AI manifests still saying `person`.
+   **Applied (approved 2026-08-28, SPEC v0.16):** `"entity_type": "*"` —
+   §6 states the rule (steps take the pipeline's entity type; static
+   schemas validate against it at plan; a source may not declare it), the
+   manifest schema describes the sentinel, §10.3 points at §6, the AI
+   manifests declare it, and the planner keys on the declaration rather
+   than the id prefix — so external adapters can opt in.
+
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 
 SPEC §10 (item 8, added by Phase 2's ADR-009 reconciliation) documents a

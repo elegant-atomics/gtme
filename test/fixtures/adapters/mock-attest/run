@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""mock/attest — a fixture delivery target that attests (ADR-036).
+
+Like mock/deliver, but the manifest declares `attests`, and after each
+acknowledgement RECORD the adapter emits an ATTEST whose status is whatever
+$MOCK_ATTEST says: confirmed (default), contradicted, inconclusive, or
+`silent` to emit no ATTEST at all — which the runner must treat as
+inconclusive.
+"""
+
+import json
+import os
+import sys
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    mode = os.environ.get("MOCK_ATTEST", "confirmed")
+    delivered = 0
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        kind = msg.get("type")
+        if kind == "OPEN":
+            send({"type": "SCHEMA", "provides": {"type": "object", "properties": {}}})
+            continue
+        if kind == "RECORD":
+            key = msg.get("key") or {}
+            send({"type": "RECORD", "key": key, "fields": {}})
+            if mode != "silent":
+                send({"type": "ATTEST", "key": key, "status": mode,
+                      "reason": "fixture re-read: " + mode})
+            delivered += 1
+            continue
+        if kind == "END":
+            break
+    send({"type": "LOG", "level": "info", "msg": f"delivered {delivered} records"})
+    send({"type": "END"})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

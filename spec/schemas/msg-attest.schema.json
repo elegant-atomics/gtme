@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtme.spec/schemas/msg-attest.schema.json",
+  "title": "ATTEST (adapter → runner)",
+  "description": "A deliver adapter's three-way verdict on one delivery after re-reading what the target stored (SPEC.md §5, §6, §8; ADR-036). Emitted only by adapters declaring `attests` in their manifest, after the RECORD that acknowledges the delivery. `confirmed`: every non-blank field sent is present in what is stored. `contradicted`: a readable value says it did not persist — the record fails, the deliveries row is kept with that status (the record exists at the target; re-sending would duplicate it). `inconclusive`: the re-read failed or the shape was unrecognised — the record advances, `accepted`, with a receipt warning. An attesting adapter that says nothing about a record is `inconclusive`. Runners that predate this message ignore it (§5 forward compatibility).",
+  "type": "object",
+  "required": ["type", "key", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "ATTEST"},
+    "key": {"$ref": "#/definitions/key"},
+    "status": {"enum": ["confirmed", "contradicted", "inconclusive"]},
+    "reason": {"type": "string", "description": "What was compared, or why nothing could be. Omitted when empty."}
+  },
+  "definitions": {
+    "key": {
+      "type": "object",
+      "required": ["entity_type", "identity_key"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_type": {"type": "string"},
+        "identity_key": {"type": "string"}
+      }
+    }
+  }
+}

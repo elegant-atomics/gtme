@@ -45,6 +45,7 @@ Selected by `msg.type` and `dir`:
 | `adapter->runner` | `SCHEMA`   | `spec/schemas/msg-schema.schema.json`    |
 | `adapter->runner` | `RECORD`   | `spec/schemas/msg-record-out.schema.json`|
 | `adapter->runner` | `VERDICT`  | `spec/schemas/msg-verdict.schema.json`   |
+| `adapter->runner` | `ATTEST`   | `spec/schemas/msg-attest.schema.json`    |
 | `adapter->runner` | `COST`     | `spec/schemas/msg-cost.schema.json`      |
 | `adapter->runner` | `STATE`    | `spec/schemas/msg-state.schema.json`     |
 | `adapter->runner` | `LOG`      | `spec/schemas/msg-log.schema.json`       |

@@ -169,18 +169,47 @@
           "description": "Reserved (SPEC.md §9); rejected in v0."
         },
         "provides": {
-          "description": "ADR-033: declared output fields, valid only on AI-backed roles. A list of field names, or an object whose keys are field names and whose values may declare type and enum. Names are canonical or namespaced; default namespace is the pipeline name.",
+          "description": "ADR-033: declared output fields, valid only on AI-backed roles. A list of field names, or an object whose keys are field names and whose values are null or declare type, enum, canonical. Bare names land as <pipeline>.<name>; a dotted name is kept as written; canonical: true lands the field on the canonical field of that name (SPEC.md §7).",
           "oneOf": [
             {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               "minItems": 1
             },
             {
               "type": "object",
-              "minProperties": 1
+              "minProperties": 1,
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "enum": ["string", "integer", "number", "boolean", "array"]
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "minItems": 1
+                      },
+                      "canonical": {
+                        "type": "boolean",
+                        "description": "SPEC.md §7: the declared name IS a canonical field of the pipeline's entity type; the output lands there, global rather than per-campaign."
+                      }
+                    }
+                  }
+                ]
+              }
             }
           ]
         },

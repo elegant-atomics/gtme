@@ -27,5 +27,6 @@
     }
   },
   "credentials": ["INSTANTLY_API_KEY"],
+  "attests": true,
   "cost_estimate_usd": 0
 }

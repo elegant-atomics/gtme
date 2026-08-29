@@ -59,7 +59,15 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		}
 		p = loaded
 	}
-	plan, err := planner.Build(p)
+	l, err := openLedger(ctx)
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+
+	// The plan reads the ledger (SPEC §7, ADR-037): config values resolve,
+	// SQL steps EXPLAIN — read-only, before anything runs.
+	plan, err := planner.Build(ctx, p, l)
 	if err != nil {
 		// A simulated run touches no live API, so a missing credential must not
 		// block it (SPEC §8: an agent validates offline before anyone sets keys);
@@ -69,12 +77,6 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		}
 		fmt.Fprintf(env.Stderr, "simulate: ignoring missing credentials (%v)\n", err)
 	}
-
-	l, err := openLedger(ctx)
-	if err != nil {
-		return err
-	}
-	defer l.Close()
 
 	// Group references resolve against the ledger before anything runs
 	// (SPEC §7, ADR-021) — enforced under --simulate too: a missing group is
@@ -142,32 +144,25 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return fail(ExitValidation, "%v", err)
 	}
-	plan, err := planner.Build(p)
-	if err != nil {
-		return planFailure(err)
-	}
-	if err := checkGroups(ctx, plan); err != nil {
-		return err
-	}
-	planner.Print(env.Stderr, plan)
-	return nil
-}
-
-// checkGroups resolves a plan's group references against the ledger (SPEC §7,
-// ADR-021) — opened only when the plan references any, so a group-free
-// pipeline still plans without a ledger.
-func checkGroups(ctx context.Context, plan *planner.Plan) error {
-	if len(plan.ReferencedGroups()) == 0 {
-		return nil
-	}
+	// The ledger is read at plan time (SPEC §7: group references, config
+	// values, SQL EXPLAIN — all read-only, zero network, zero spend). It is
+	// opened here the way `gtme run` opens it; a fresh one is empty, which
+	// the checks report as what it is.
 	l, err := openLedger(ctx)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
-	if err := plan.CheckGroups(ctx, l); err != nil {
+	plan, err := planner.Build(ctx, p, l)
+	if err != nil {
 		return planFailure(err)
 	}
+	if len(plan.ReferencedGroups()) > 0 {
+		if err := plan.CheckGroups(ctx, l); err != nil {
+			return planFailure(err)
+		}
+	}
+	planner.Print(env.Stderr, plan)
 	return nil
 }
 
