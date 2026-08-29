@@ -2,6 +2,13 @@
 // and ai/compose, which writes fields. Both batch their records into one model
 // call, validate what comes back against a strict output schema, and retry once
 // with the validation error appended before failing the batch (SPEC §2, §10).
+//
+// The output shape is one general rule (ADR-033): a step MAY declare its
+// output fields (`provides:`, injected by the runner into OPEN config as the
+// derived schema), in which case the required shape in the prompt is
+// generated from that schema, the model's answer is validated against it, and
+// a filter emits a RECORD carrying those fields beside its VERDICT. A step
+// declaring nothing keeps the manifest's static shape.
 package aisteps
 
 import (
@@ -56,6 +63,9 @@ type config struct {
 	Model     string
 	MaxTokens int
 	Fields    []string
+	// Provides is the derived provides schema the runner injected (ADR-033);
+	// nil when the step declares nothing.
+	Provides json.RawMessage
 }
 
 func parseConfig(raw map[string]any) (config, error) {
@@ -79,7 +89,85 @@ func parseConfig(raw map[string]any) (config, error) {
 			}
 		}
 	}
+	if v, ok := raw[adapters.ProvidesConfigKey]; ok && v != nil {
+		enc, err := json.Marshal(v)
+		if err != nil {
+			return c, fmt.Errorf("config.provides: %w", err)
+		}
+		c.Provides = enc
+	}
 	return c, nil
+}
+
+// shape is the output contract for one session: the fields the model must
+// return per record beyond identity_key (and, for a filter, pass/reason), and
+// the provides schema announced on the wire.
+type shape struct {
+	fields []ai.FieldShape
+	schema json.RawMessage
+}
+
+// shapeFor resolves the session's output shape: the injected provides schema
+// when the step declared one, else the manifest's static shape (ai/compose's
+// first_line/ps_line; nothing for ai/filter).
+func (a *Adapter) shapeFor(cfg config) (shape, error) {
+	raw := cfg.Provides
+	if len(raw) == 0 {
+		if a.Mode == modeCompose {
+			var doc struct {
+				Provides json.RawMessage `json:"provides"`
+			}
+			if err := json.Unmarshal(composeManifest, &doc); err != nil {
+				return shape{}, err
+			}
+			raw = doc.Provides
+		} else {
+			return shape{schema: json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`)}, nil
+		}
+	}
+	fields, err := shapeFields(raw)
+	if err != nil {
+		return shape{}, fmt.Errorf("%s: config.provides: %w", a.id(), err)
+	}
+	return shape{fields: fields, schema: raw}, nil
+}
+
+// shapeFields reads a provides schema into the ordered field list: `required`
+// order when the schema states one (the planner writes the declaration
+// order there), else property names sorted.
+func shapeFields(raw json.RawMessage) ([]ai.FieldShape, error) {
+	var doc struct {
+		Properties map[string]struct {
+			Type string   `json:"type"`
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("not a provides schema: %w", err)
+	}
+	order := doc.Required
+	seen := map[string]bool{}
+	for _, n := range order {
+		seen[n] = true
+	}
+	var rest []string
+	for n := range doc.Properties {
+		if !seen[n] {
+			rest = append(rest, n)
+		}
+	}
+	sort.Strings(rest)
+	order = append(order, rest...)
+	out := make([]ai.FieldShape, 0, len(order))
+	for _, n := range order {
+		p, ok := doc.Properties[n]
+		if !ok {
+			continue
+		}
+		out = append(out, ai.FieldShape{Name: n, Type: p.Type, Enum: p.Enum})
+	}
+	return out, nil
 }
 
 // record is one batch member.
@@ -95,10 +183,10 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	w := protocol.NewWriter(p.Out)
 
 	var (
-		cfg      config
-		opened   bool
-		records  []record
-		provides = a.providesSchema()
+		cfg     config
+		sh      shape
+		opened  bool
+		records []record
 	)
 
 	for {
@@ -115,8 +203,12 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", a.id(), err)
 			}
+			sh, err = a.shapeFor(cfg)
+			if err != nil {
+				return err
+			}
 			opened = true
-			if err := w.Write(protocol.Schema(provides)); err != nil {
+			if err := w.Write(protocol.Schema(sh.schema)); err != nil {
 				return err
 			}
 		case protocol.TypeRecord:
@@ -147,7 +239,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		engine, model = e, resolved
 	}
 
-	answers, res, err := a.ask(ctx, engine, w, cfg, model, records)
+	answers, res, err := a.ask(ctx, engine, w, cfg, sh, model, records)
 	if err != nil {
 		return err
 	}
@@ -157,7 +249,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 			return err
 		}
 	}
-	if err := a.emit(w, records, answers); err != nil {
+	if err := a.emit(w, sh, records, answers); err != nil {
 		return err
 	}
 	return w.Write(protocol.End())
@@ -165,14 +257,15 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 
 // ask sends the batch, validates the answer, and retries once with the
 // validation error appended (SPEC §2). A second failure fails the batch.
-func (a *Adapter) ask(ctx context.Context, engine ai.Engine, w *protocol.Writer, cfg config, model string, records []record) (map[string]map[string]any, ai.Response, error) {
+func (a *Adapter) ask(ctx context.Context, engine ai.Engine, w *protocol.Writer, cfg config, sh shape, model string, records []record) (map[string]map[string]any, ai.Response, error) {
 	req := ai.Request{
-		System:    a.systemPrompt(),
+		System:    a.systemPrompt(sh),
 		Prompt:    a.userPrompt(cfg, records, ""),
 		Model:     model,
 		MaxTokens: cfg.MaxTokens,
 		Keys:      keysOf(records),
 		Kind:      a.Mode,
+		Fields:    sh.fields,
 	}
 
 	var last ai.Response
@@ -183,7 +276,7 @@ func (a *Adapter) ask(ctx context.Context, engine ai.Engine, w *protocol.Writer,
 		if err != nil {
 			return nil, res, err
 		}
-		answers, err := a.parse(res.Text, records)
+		answers, err := a.parse(res.Text, sh, records)
 		if err == nil {
 			return answers, res, nil
 		}
@@ -201,31 +294,58 @@ func (a *Adapter) id() string {
 	return FilterID
 }
 
-func (a *Adapter) providesSchema() json.RawMessage {
-	if a.Mode == modeCompose {
-		var doc struct {
-			Provides json.RawMessage `json:"provides"`
-		}
-		if err := json.Unmarshal(composeManifest, &doc); err == nil {
-			return doc.Provides
-		}
-	}
-	return json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{}}`)
-}
-
 // systemPrompt states the contract. It is deliberately about the format only —
-// what to decide or write is the operator's prompt.
-func (a *Adapter) systemPrompt() string {
-	shape := `{"identity_key": "<copied exactly from the input>", "pass": true or false, "reason": "<one short sentence>"}`
-	if a.Mode == modeCompose {
-		shape = `{"identity_key": "<copied exactly from the input>", "first_line": "<one sentence>", "ps_line": "<one sentence>"}`
+// what to decide or write is the operator's prompt. The required element shape
+// is generated from the session's output schema (ADR-033), never a literal.
+func (a *Adapter) systemPrompt(sh shape) string {
+	parts := []string{`"identity_key": "<copied exactly from the input>"`}
+	if a.Mode == modeFilter {
+		parts = append(parts, `"pass": true or false`, `"reason": "<one short sentence>"`)
 	}
-	return "You are one step in an automated data pipeline. You receive a batch of records as JSON and " +
+	hasEnum := false
+	for _, f := range sh.fields {
+		parts = append(parts, fmt.Sprintf("%q: %s", f.Name, shapeHint(f)))
+		if len(f.Enum) > 0 {
+			hasEnum = true
+		}
+	}
+	var b strings.Builder
+	b.WriteString("You are one step in an automated data pipeline. You receive a batch of records as JSON and " +
 		"return a decision for every record.\n\n" +
 		"Respond with a JSON array and nothing else: no prose, no explanation, no markdown fences.\n" +
-		"Each element must be an object of exactly this shape:\n" + shape + "\n\n" +
-		"Return exactly one element per input record, and copy each identity_key verbatim. " +
-		"Never invent, merge, drop, or reorder records."
+		"Each element must be an object of exactly this shape:\n{" + strings.Join(parts, ", ") + "}\n\n")
+	if hasEnum {
+		b.WriteString("Where a field lists alternatives separated by |, its value must be exactly one of them, verbatim.\n")
+	}
+	b.WriteString("Return exactly one element per input record, and copy each identity_key verbatim. " +
+		"Never invent, merge, drop, or reorder records.")
+	return b.String()
+}
+
+// shapeHint renders one field's expected value for the prompt: its enum
+// alternatives, else a typed placeholder.
+func shapeHint(f ai.FieldShape) string {
+	if len(f.Enum) > 0 {
+		quoted := make([]string, 0, len(f.Enum))
+		for _, v := range f.Enum {
+			quoted = append(quoted, fmt.Sprintf("%q", v))
+		}
+		return strings.Join(quoted, " | ")
+	}
+	switch f.Type {
+	case "integer":
+		return "<integer>"
+	case "number":
+		return "<number>"
+	case "boolean":
+		return "true or false"
+	case "array":
+		return "[<items>]"
+	case "string":
+		return `"<string>"`
+	default:
+		return `"<text>"`
+	}
 }
 
 // userPrompt carries the operator's instruction, the batch, and (on a retry) the
@@ -263,8 +383,11 @@ func (a *Adapter) userPrompt(cfg config, records []record, validationErr string)
 }
 
 // parse validates the model's answer: JSON array, one element per record, keys
-// that match the batch. Returns the answers keyed by identity_key.
-func (a *Adapter) parse(text string, records []record) (map[string]map[string]any, error) {
+// that match the batch, every element in the session's shape. Returns the
+// answers keyed by identity_key, string values trimmed at this boundary
+// (canonical values must be fixed points of their registry rule, SPEC §4a,
+// and a model legitimately emits stray whitespace).
+func (a *Adapter) parse(text string, sh shape, records []record) (map[string]map[string]any, error) {
 	cleaned := stripFence(text)
 	if strings.TrimSpace(cleaned) == "" {
 		return nil, fmt.Errorf("response was empty")
@@ -291,7 +414,7 @@ func (a *Adapter) parse(text string, records []record) (map[string]map[string]an
 		if _, dup := out[key]; dup {
 			return nil, fmt.Errorf("identity_key %q appears more than once", key)
 		}
-		if err := a.validateItem(item); err != nil {
+		if err := a.validateItem(item, sh); err != nil {
 			return nil, fmt.Errorf("element %d (%s): %v", i, key, err)
 		}
 		out[key] = item
@@ -310,44 +433,92 @@ func (a *Adapter) parse(text string, records []record) (map[string]map[string]an
 	return out, nil
 }
 
-func (a *Adapter) validateItem(item map[string]any) error {
-	if a.Mode == modeCompose {
-		for _, field := range []string{"first_line", "ps_line"} {
-			v, ok := item[field]
-			if !ok {
-				return fmt.Errorf("missing %s", field)
-			}
-			if _, ok := v.(string); !ok {
-				return fmt.Errorf("%s must be a string", field)
+// validateItem checks one element against the shape: a filter's pass, then
+// every declared field — present, non-null, of the declared type, inside the
+// declared enum. String values are trimmed in place.
+func (a *Adapter) validateItem(item map[string]any, sh shape) error {
+	if a.Mode == modeFilter {
+		if _, ok := item["pass"].(bool); !ok {
+			return fmt.Errorf("pass must be true or false")
+		}
+	}
+	for _, f := range sh.fields {
+		v, ok := item[f.Name]
+		if !ok {
+			return fmt.Errorf("missing %s", f.Name)
+		}
+		if v == nil {
+			return fmt.Errorf("%s must not be null", f.Name)
+		}
+		if s, ok := v.(string); ok {
+			v = strings.TrimSpace(s)
+			item[f.Name] = v
+		}
+		if err := checkType(f, v); err != nil {
+			return err
+		}
+		if len(f.Enum) > 0 {
+			s, _ := v.(string)
+			if !containsString(f.Enum, s) {
+				return fmt.Errorf("%s must be one of %s (got %q)", f.Name, strings.Join(f.Enum, ", "), s)
 			}
 		}
-		return nil
-	}
-	if _, ok := item["pass"].(bool); !ok {
-		return fmt.Errorf("pass must be true or false")
 	}
 	return nil
 }
 
-// emit turns validated answers into protocol messages.
-func (a *Adapter) emit(w *protocol.Writer, records []record, answers map[string]map[string]any) error {
+// checkType enforces a declared JSON-Schema primitive type. An enum implies
+// string; an untyped field admits any non-null value.
+func checkType(f ai.FieldShape, v any) error {
+	typ := f.Type
+	if typ == "" && len(f.Enum) > 0 {
+		typ = "string"
+	}
+	switch typ {
+	case "":
+		return nil
+	case "string":
+		if _, ok := v.(string); !ok {
+			return fmt.Errorf("%s must be a string", f.Name)
+		}
+	case "integer":
+		n, ok := v.(float64)
+		if !ok || n != float64(int64(n)) {
+			return fmt.Errorf("%s must be an integer", f.Name)
+		}
+	case "number":
+		if _, ok := v.(float64); !ok {
+			return fmt.Errorf("%s must be a number", f.Name)
+		}
+	case "boolean":
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("%s must be true or false", f.Name)
+		}
+	case "array":
+		if _, ok := v.([]any); !ok {
+			return fmt.Errorf("%s must be an array", f.Name)
+		}
+	}
+	return nil
+}
+
+// emit turns validated answers into protocol messages: a RECORD carrying the
+// shape's fields (compose always; a filter only when it declared provides,
+// ADR-033), and for a filter the VERDICT that gates advancement — the RECORD
+// first, so the runner has the fields in hand when the verdict lands.
+func (a *Adapter) emit(w *protocol.Writer, sh shape, records []record, answers map[string]map[string]any) error {
 	for _, rec := range records {
 		item := answers[rec.key.IdentityKey]
-		if a.Mode == modeCompose {
-			// Trimmed at this adapter's boundary: canonical values must be fixed
-			// points of their registry rule (SPEC §4a), and a model legitimately
-			// emits stray whitespace.
-			trim := func(v any) string {
-				s, _ := v.(string)
-				return strings.TrimSpace(s)
-			}
-			fields := map[string]any{
-				"first_line": trim(item["first_line"]),
-				"ps_line":    trim(item["ps_line"]),
+		if len(sh.fields) > 0 {
+			fields := make(map[string]any, len(sh.fields))
+			for _, f := range sh.fields {
+				fields[f.Name] = item[f.Name]
 			}
 			if err := w.Write(protocol.Record(rec.key, fields, nil)); err != nil {
 				return err
 			}
+		}
+		if a.Mode == modeCompose {
 			continue
 		}
 		pass, _ := item["pass"].(bool)
@@ -379,6 +550,15 @@ func keysOf(records []record) []string {
 		out = append(out, rec.key.IdentityKey)
 	}
 	return out
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // stripFence removes a ```json wrapper, which models add now and then despite

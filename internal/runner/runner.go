@@ -5,6 +5,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -264,7 +265,7 @@ func writeAutoFixture() (string, error) {
 
 // isAIStep reports an operation-named AI step (ADR-026).
 func isAIStep(st *planner.Step) bool {
-	return st.Manifest != nil && strings.HasPrefix(st.Manifest.ID, "ai/")
+	return st.Manifest != nil && st.Manifest.IsAI()
 }
 
 // stubbed reports whether a step is served nothing under --simulate: a binding
@@ -424,15 +425,25 @@ func (r *runner) sessionEnv(st *planner.Step) map[string]string {
 
 // openMessage is the OPEN that starts every session (SPEC §5). A deliver
 // step's variables: mapping rides in as config — the adapter owns the egress
-// mapping (ADR-018), the runner owns projecting the fields it references.
+// mapping (ADR-018), the runner owns projecting the fields it references. An
+// AI step's derived provides schema rides in the same way (ADR-033): the
+// adapter generates its output shape from it, the runner validates against it.
 func (r *runner) openMessage(st *planner.Step) protocol.Message {
 	config := st.Config
-	if len(st.Variables) > 0 {
-		config = make(map[string]any, len(st.Config)+1)
+	if len(st.Variables) > 0 || len(st.AIProvides) > 0 {
+		config = make(map[string]any, len(st.Config)+2)
 		for k, v := range st.Config {
 			config[k] = v
 		}
-		config["variables"] = st.Variables
+		if len(st.Variables) > 0 {
+			config["variables"] = st.Variables
+		}
+		if len(st.AIProvides) > 0 {
+			var schema map[string]any
+			if err := json.Unmarshal(st.AIProvides, &schema); err == nil {
+				config[adapters.ProvidesConfigKey] = schema
+			}
+		}
 	}
 	return protocol.Message{
 		Type:   protocol.TypeOpen,

@@ -17,6 +17,7 @@ import (
 	"github.com/elegant-atomics/gtme/internal/pipeline"
 	"github.com/elegant-atomics/gtme/internal/registry"
 	"github.com/elegant-atomics/gtme/internal/secrets"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 // DefaultBatchSize is the batch size for AI steps (SPEC §9).
@@ -46,6 +47,13 @@ type Step struct {
 	ProvidesSchema json.RawMessage
 	Provides       []string
 	Wildcard       bool
+	// AIProvides is an AI step's derived provides schema (SPEC §7, ADR-033):
+	// the step-level provides: declaration with names namespaced by pipeline
+	// (unless already namespaced), in declaration order under required. Nil
+	// when the step declares nothing. The runner injects it into OPEN config
+	// and validates the step's RECORDs against it (ValidateProvides).
+	AIProvides json.RawMessage
+	aiProvides *jsonschema.Schema
 
 	Cache       time.Duration
 	When        string
@@ -107,6 +115,31 @@ type Plan struct {
 
 // Source is the source step.
 func (p *Plan) Source() *Step { return &p.Steps[0] }
+
+// ValidateProvides checks a step's output RECORD before it reaches the ledger
+// (SPEC §5): against the derived provides schema when the step declared one
+// (ADR-033), else against the manifest's static schema.
+func (s *Step) ValidateProvides(fields map[string]any) error {
+	if s.aiProvides != nil {
+		if err := s.aiProvides.Validate(adapters.NormalizeForSchema(fields)); err != nil {
+			return fmt.Errorf("output does not match declared provides: %w", err)
+		}
+		return nil
+	}
+	if s.Manifest == nil {
+		return nil
+	}
+	return s.Manifest.ValidateProvides(fields)
+}
+
+// Scope is what a step inherits from its pipeline at resolve time: the name
+// (the default namespace for declared AI outputs, SPEC §4a) and the entity
+// type its source emits (the entity type of every entity-agnostic AI step,
+// SPEC §10.3).
+type Scope struct {
+	Pipeline   string
+	EntityType string
+}
 
 // StepByID finds a step.
 func (p *Plan) StepByID(id string) *Step {
@@ -175,12 +208,19 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 
 	available := map[string]bool{}
 	steps := p.AllSteps()
+	scope := Scope{Pipeline: p.Name}
 
 	for i, s := range steps {
 		isSource := i == 0
 
-		ps, stepProblems := ResolveStep(s, isSource)
+		ps, stepProblems := ResolveStep(s, isSource, scope)
 		problems = append(problems, stepProblems...)
+		if isSource {
+			// The pipeline's entity type is its source's; a group source has
+			// none to offer (members may be of any type), so steps after it
+			// validate names entity-blind, as SQL steps always have.
+			scope.EntityType = ps.EntityType
+		}
 		// A deliver step's touch scope defaults to the pipeline name (SPEC §8,
 		// ADR-031: per deliver step — steps sharing the default share the
 		// scope): every pipeline is safely scoped unless it opts to share.
@@ -261,8 +301,9 @@ func Build(p *pipeline.Pipeline) (*Plan, error) {
 // ResolveStep resolves one step's adapter, config, credentials, cache window and
 // schemas. Whether a step is a deliver step is a role fact read from its
 // resolved manifest (ADR-031), never a position: a pipeline may carry any
-// number of deliver steps, anywhere after the source.
-func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
+// number of deliver steps, anywhere after the source. scope carries what the
+// step inherits from its pipeline (name, entity type).
+func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) {
 	var problems []Problem
 	ps := Step{
 		ID:        s.ID,
@@ -297,6 +338,23 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 					Msg: fmt.Sprintf("%s is only valid on deliver steps (%s has role %q) — ADR-031", k.key, ps.Use, ps.Role)})
 			}
+		}
+	}
+
+	// gateProvides rejects a step-level provides: declaration anywhere but an
+	// AI-backed filter/compose step (SPEC §9, ADR-033) — the uses: pattern,
+	// third instance. Called once the step's role is known.
+	gateProvides := func(isAI bool) {
+		if s.Provides == nil {
+			return
+		}
+		switch {
+		case ps.Role != adapters.RoleFilter && ps.Role != adapters.RoleCompose:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("provides: is only valid on AI-backed filter/compose steps (%s has role %q) — ADR-033", ps.Use, ps.Role)})
+		case !isAI:
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("provides: is only valid on AI steps (ai/filter, ai/compose); %s takes its outputs from its own contract, not from a step-level declaration — ADR-033", ps.Use)})
 		}
 	}
 
@@ -343,6 +401,7 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 				Msg: s.Use + " cannot be the source"})
 		}
 		gateDeliverKeys()
+		gateProvides(false)
 		return ps, problems
 	}
 
@@ -357,6 +416,7 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
 		gateDeliverKeys()
+		gateProvides(false)
 		return ps, problems
 	}
 
@@ -369,6 +429,13 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	ps.Role = resolved.Manifest.Role
 	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
+	// AI manifests are entity-agnostic (SPEC §10.3, ADR-033): the step's
+	// entity type is the pipeline's, so uses:/provides: validate against the
+	// registry the records actually belong to.
+	isAI := resolved.Manifest.IsAI()
+	if isAI && !isSource {
+		ps.EntityType = scope.EntityType
+	}
 	ps.Needs = resolved.Manifest.NeedsFields()
 	ps.Required = resolved.Manifest.RequiredNeeds()
 	ps.CostEstimate = resolved.Manifest.CostEstimate
@@ -390,10 +457,40 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 	} else {
 		gateDeliverKeys()
 	}
+	gateProvides(isAI)
 
 	reg, regErr := registry.Load()
 	if regErr != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter, Msg: regErr.Error()})
+	}
+
+	// Declared AI provides (SPEC §7, ADR-033): the step's effective provides
+	// derive from its provides: declaration — names namespaced by pipeline
+	// unless already namespaced — and replace the manifest's static shape.
+	if s.Provides != nil && isAI && ps.Role != adapters.RoleSource {
+		decl, err := s.ProvidesFields()
+		if err != nil {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
+		} else {
+			schema, notes, declProblems := deriveAIProvides(decl, ps.Role, scope.Pipeline, ps.EntityType, reg)
+			for _, msg := range declProblems {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: msg})
+			}
+			ps.Notes = append(ps.Notes, notes...)
+			if len(declProblems) == 0 {
+				compiled, err := adapters.CompileSchema(s.ID+"/provides", schema)
+				if err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
+				} else {
+					ps.AIProvides = schema
+					ps.aiProvides = compiled
+				}
+			}
+		}
+	}
+	if _, ok := ps.Config["provides"]; ok && isAI {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: "provides: is a step-level key, not a with: key — move it out of with: (SPEC §9, ADR-033)"})
 	}
 
 	// uses: (ADR-004) narrows an AI-backed step's needs-all wildcard to an
@@ -467,10 +564,18 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 			}
 		}
 		for _, name := range append(append([]string{}, s.Uses...), variableFields(s.Variables)...) {
-			if registry.IsNamespaced(name) {
-				ps.Notes = append(ps.Notes,
-					fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
+			if !registry.IsNamespaced(name) {
+				continue
 			}
+			if strings.HasPrefix(name, scope.Pipeline+".") {
+				// This pipeline's own declared AI output (ADR-033): per-campaign
+				// by design, not a vendor coupling.
+				ps.Notes = append(ps.Notes,
+					fmt.Sprintf("needs this pipeline's own judgment field %q (declared by an earlier AI step, ADR-033)", name))
+				continue
+			}
+			ps.Notes = append(ps.Notes,
+				fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
 		}
 		// Manifest static schemas get the same check (an external adapter's
 		// authoring error surfaces here rather than as a silent mismatch).
@@ -480,10 +585,17 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 					Msg: fmt.Sprintf("manifest needs: %v", err)})
 			}
 		}
-		for _, name := range resolved.Manifest.ProvidesFields() {
-			if err := reg.ValidateName(ps.EntityType, name); err != nil {
-				problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
-					Msg: fmt.Sprintf("manifest provides: %v", err)})
+		// A step that declares its own provides (ADR-033) replaces the
+		// manifest's static shape, so the static names are not its contract.
+		if len(ps.AIProvides) == 0 {
+			for _, name := range resolved.Manifest.ProvidesFields() {
+				if err := reg.ValidateName(ps.EntityType, name); err != nil {
+					msg := fmt.Sprintf("manifest provides: %v", err)
+					if isAI {
+						msg += " — or declare provides: on this step (ADR-033)"
+					}
+					problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter, Msg: msg})
+				}
 			}
 		}
 	}
@@ -537,9 +649,12 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 			Msg: fmt.Sprintf("a source cannot require input fields (%s)", strings.Join(ps.Required, ", "))})
 	}
 
-	// Provides: a config-specific probe wins over the static manifest schema.
+	// Provides: a config-specific probe wins over the static manifest schema,
+	// and a declared AI shape (ADR-033) over both.
 	ps.ProvidesSchema = resolved.Manifest.Provides
-	if probed, err := resolved.ProbeSchema(ps.Config); err != nil {
+	if len(ps.AIProvides) > 0 {
+		ps.ProvidesSchema = ps.AIProvides
+	} else if probed, err := resolved.ProbeSchema(ps.Config); err != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 	} else if len(probed) > 0 {
 		ps.ProvidesSchema = probed
@@ -595,6 +710,70 @@ func ResolveStep(s pipeline.Step, isSource bool) (Step, []Problem) {
 		}
 	}
 	return ps, problems
+}
+
+// reservedOutputNames are the element keys the AI output shape already owns
+// (SPEC §10.3): a declared field may not shadow them.
+var reservedOutputNames = map[string]string{
+	"identity_key": "every AI role",
+	"pass":         "filter",
+}
+
+// deriveAIProvides turns a step's provides: declaration into its effective
+// provides schema (SPEC §7, ADR-033): each name lands as written when it is
+// already namespaced, else as <pipeline>.<name> (SPEC §4a — a judgment is a
+// fact about working the entity in one campaign; two campaigns' judgments
+// about one identity must not collide). The schema carries the declared type
+// and enum per field, requires every field, and admits nothing else. Notes
+// surface where a bare name coincides with a canonical field, so the operator
+// sees that the canonical field is untouched.
+func deriveAIProvides(decl []pipeline.ProvidesField, role, pipelineName, entityType string, reg *registry.Registry) (json.RawMessage, []string, []string) {
+	var problems, notes []string
+	props := map[string]any{}
+	required := make([]string, 0, len(decl))
+	for _, f := range decl {
+		if owner, ok := reservedOutputNames[f.Name]; ok && (owner == "every AI role" || owner == role) {
+			problems = append(problems, fmt.Sprintf("provides: %q is reserved by the AI output shape (SPEC §10.3) — choose another name", f.Name))
+			continue
+		}
+		name := f.Name
+		if !registry.IsNamespaced(name) {
+			name = pipelineName + "." + f.Name
+			if reg != nil {
+				if _, canonical := reg.Lookup(entityType, f.Name); canonical {
+					notes = append(notes, fmt.Sprintf("provides: %q lands as %q (per-campaign, ADR-033); the canonical %s field %q is untouched",
+						f.Name, name, entityType, f.Name))
+				}
+			}
+		}
+		if _, dup := props[name]; dup {
+			problems = append(problems, fmt.Sprintf("provides: %q resolves to %q, which another declared field already uses", f.Name, name))
+			continue
+		}
+		spec := map[string]any{}
+		if f.Type != "" {
+			spec["type"] = f.Type
+		}
+		if len(f.Enum) > 0 {
+			spec["type"] = "string"
+			spec["enum"] = f.Enum
+		}
+		props[name] = spec
+		required = append(required, name)
+	}
+	if len(problems) > 0 {
+		return nil, notes, problems
+	}
+	raw, err := json.Marshal(map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           props,
+		"required":             required,
+	})
+	if err != nil {
+		return nil, notes, []string{err.Error()}
+	}
+	return raw, notes, nil
 }
 
 // ReferencedGroups lists every group the plan requires to EXIST at plan time

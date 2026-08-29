@@ -94,41 +94,46 @@ func (e *fixtureEngine) Complete(ctx context.Context, req Request) (Response, er
 }
 
 // autoAnswer builds a valid response for the batch: pass everything for a
-// filter, and formulaic lines for a compose.
+// filter, and a formulaic value per declared field (ADR-033) — a compose with
+// nothing declared gets its default first_line/ps_line from the adapter's
+// Fields, so the synthesized answer is schema-valid for any shape.
 func autoAnswer(req Request) string {
-	type filterItem struct {
-		IdentityKey string `json:"identity_key"`
-		Pass        bool   `json:"pass"`
-		Reason      string `json:"reason"`
-	}
-	type composeItem struct {
-		IdentityKey string `json:"identity_key"`
-		FirstLine   string `json:"first_line"`
-		PSLine      string `json:"ps_line"`
-	}
-
-	var out any
-	switch req.Kind {
-	case "compose":
-		items := make([]composeItem, 0, len(req.Keys))
-		for _, k := range req.Keys {
-			items = append(items, composeItem{
-				IdentityKey: k,
-				FirstLine:   "Fixture first line for " + k,
-				PSLine:      "Fixture ps line for " + k,
-			})
+	items := make([]map[string]any, 0, len(req.Keys))
+	for _, k := range req.Keys {
+		item := map[string]any{"identity_key": k}
+		if req.Kind == "filter" {
+			item["pass"] = true
+			item["reason"] = "fixture pass"
 		}
-		out = items
-	default:
-		items := make([]filterItem, 0, len(req.Keys))
-		for _, k := range req.Keys {
-			items = append(items, filterItem{IdentityKey: k, Pass: true, Reason: "fixture pass"})
+		for _, f := range req.Fields {
+			item[f.Name] = fixtureValue(f, k)
 		}
-		out = items
+		items = append(items, item)
 	}
-	raw, err := json.Marshal(out)
+	raw, err := json.Marshal(items)
 	if err != nil {
 		return "[]"
 	}
 	return string(raw)
+}
+
+// fixtureValue is one synthesized, visibly synthetic value: the first enum
+// member when a domain is declared, else a typed zero-ish sample, else a
+// labelled string ("Fixture first line for <key>").
+func fixtureValue(f FieldShape, key string) any {
+	if len(f.Enum) > 0 {
+		return f.Enum[0]
+	}
+	switch f.Type {
+	case "integer", "number":
+		return 0
+	case "boolean":
+		return true
+	case "array":
+		return []any{}
+	default:
+		// The bare name, humanized: "qualify.first_line" → "first line".
+		bare := f.Name[strings.LastIndex(f.Name, ".")+1:]
+		return "Fixture " + strings.ReplaceAll(bare, "_", " ") + " for " + key
+	}
 }

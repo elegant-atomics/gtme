@@ -28,7 +28,7 @@ Three kinds appear below:
 | `sql/enrich` | enrich | runner-owned | derive fields with a read-only SELECT over the ledger |
 | `ai/filter` | filter | process (built-in) | LLM judgment → pass/fail verdicts with reasons |
 | `sql/filter` | filter | runner-owned | deterministic verdicts from a SQL predicate |
-| `ai/compose` | compose | process (built-in) | LLM writing → `first_line`, `ps_line` |
+| `ai/compose` | compose | process (built-in) | LLM writing → `first_line`, `ps_line`, or whatever the step's `provides:` declares |
 | `instantly/add-to-campaign` | deliver | process (built-in) | add a lead to an Instantly campaign |
 | `attio/assert` | deliver | **binding** | idempotent upsert of a person into Attio |
 | `http/deliver` | deliver | engine-inline | POST resolved variables to any URL |
@@ -240,6 +240,32 @@ config (`engine: api | claude-code`), model overridable per step;
 provenance records the model id. Credential: `ANTHROPIC_API_KEY`
 (optional — the `claude-code` engine needs none).
 
+A filter MAY also declare output fields with a step-level `provides:`
+(ADR-033) — a list of names, or a map of name → `{type, enum}`:
+
+```yaml
+  - id: judge
+    use: ai/filter
+    uses: [title, company_name]
+    provides:
+      state: {enum: [now, later]}
+      rationale: {}
+    with:
+      prompt: Decide when to work each contact, and why.
+```
+
+The required output shape in the prompt is generated from that schema;
+the model's answer is validated against it (a value outside the enum is
+retried once, then fails the batch — never stored); and the step emits
+its VERDICT *and* a RECORD carrying the declared fields, for passing and
+failing records alike, so the reasoning is queryable without a second
+call. Declared fields land namespaced by pipeline — `qualify.state`,
+`qualify.rationale` for a pipeline named `qualify` — so two campaigns'
+judgments about one identity never collide; a later step reads them as
+`uses: [qualify.state]`. A name written with a dot is kept as written.
+AI steps are entity-agnostic: inside a company pipeline they plan and
+validate against the company registry.
+
 ### `sql/filter`
 
 Same mechanism as `sql/enrich`, producing verdicts: return a `pass`
@@ -253,8 +279,12 @@ construction).
 
 ### `ai/compose`
 
-Batched LLM writing: provides `first_line` and `ps_line`, output
-validated against schema with one retry on malformed output. `uses:`
+Batched LLM writing: provides `first_line` and `ps_line` by default, or
+whatever the step's `provides:` declares (ADR-033 — same declaration,
+same namespacing and validation as `ai/filter` above; a compose declaring
+`provides: [subject, body]` in pipeline `outreach` writes
+`outreach.subject` and `outreach.body` and nothing else). Output is
+validated against the schema with one retry on malformed output. `uses:`
 declares what the prompt may reference — including fields `http/enrich`
 fetched, which is how compose gets grounded in a prospect's actual
 website.

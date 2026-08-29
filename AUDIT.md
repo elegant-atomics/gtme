@@ -137,6 +137,49 @@ Left in place as the record of what was found and why.
    OPTIONAL (matching `msg-record-out.schema.json`) plus a worked keyless
    example.
 
+## (b) Spec gaps queued from the M14 step 1 build (ADR-033) — proposed, not applied
+
+Found while building declared AI provides (DECISIONS.md, 2026-08-28 "M14
+step 1 internals"). Both are spec-visible under ADR-010's litmus — a
+second implementation would need the answer to interoperate — so the code
+takes the conservative reading and the question is queued here.
+
+1. **How does a step's config "map a name to a canonical field"?** §4a
+   tier 3 and §7 both say declared AI outputs default to
+   `<pipeline>.<field>` "unless the step's config maps a name to a
+   canonical field", but neither §9 nor `spec/schemas/pipeline.schema.json`
+   defines a mapping form — a `provides:` value may carry only `type` and
+   `enum`. The build namespaces every bare name, canonical-looking or not
+   (`state` is a canonical person field; a judgment must not land in a
+   location), and notes the coincidence at plan time; there is currently
+   no way to declare a canonical output on an AI step.
+   **Proposed diff (pick one):** (i) name-matching is the mapping — a
+   declared bare name that is canonical for the pipeline's entity type
+   stays canonical (global), everything else namespaces; §4a/§7 reworded
+   to say so and `gtme plan` keeps the note. Simple, mirrors `http/enrich`,
+   but a judgment named `state` silently becomes a location fact. (ii) An
+   explicit keyword on the declaration, e.g. `provides: {first_line:
+   {canonical: true}}` or `{opener: {as: first_line}}` — §7 lists it beside
+   `type`/`enum`, `pipeline.schema.json` gains it. Explicit, no silent
+   global write; one more keyword. The build is one function away from
+   either (`planner.deriveAIProvides`).
+
+2. **How does a manifest declare that it is entity-agnostic?** §10.3
+   (items 3 and 5) says "the manifest is entity-agnostic: the step's
+   entity type is the pipeline's", but §6 and
+   `spec/schemas/manifest.schema.json` require `entity_type` (min length
+   1) and describe it as `'person' | 'company' (extensible)`. The build
+   applies the §10.3 behaviour by a planner rule keyed on the `ai/` id
+   prefix (ADR-026) and leaves the two AI manifests saying `person`,
+   which `gtme help --agent` prints as-is.
+   **Proposed diff:** §6 gains "an adapter whose contract does not depend
+   on the entity type MAY omit `entity_type` (or declare `"*"`): its
+   steps take the pipeline's entity type, and a static `needs`/`provides`
+   schema on such a manifest is validated against that type at plan
+   time"; `manifest.schema.json` drops `entity_type` from `required` (or
+   admits the sentinel); the AI manifests follow. Until then the planner
+   rule stands and external adapters cannot opt in.
+
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 
 SPEC §10 (item 8, added by Phase 2's ADR-009 reconciliation) documents a

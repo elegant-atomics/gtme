@@ -36,6 +36,19 @@ type Request struct {
 	Keys []string
 	// Kind is "filter" or "compose", for the same reason.
 	Kind string
+	// Fields is the step's output shape beyond identity_key (and, for a
+	// filter, pass/reason): the declared or default provides (ADR-033), in
+	// order. The fixture engine synthesizes a value per field from it.
+	Fields []FieldShape
+}
+
+// FieldShape is one output field an AI step expects back from the model.
+type FieldShape struct {
+	Name string
+	// Type is a JSON-Schema primitive type, or "" when the field is untyped.
+	Type string
+	// Enum is the declared value domain, if any.
+	Enum []string
 }
 
 // Response is what an engine returns, including what it cost.

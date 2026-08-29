@@ -236,7 +236,11 @@ func TestValidationRejectsBadAnswers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.adapter.parse(tc.text, records)
+			sh, err := tc.adapter.shapeFor(config{})
+			if err != nil {
+				t.Fatalf("shapeFor: %v", err)
+			}
+			_, err = tc.adapter.parse(tc.text, sh, records)
 			if err == nil {
 				t.Fatal("want an error")
 			}
@@ -250,7 +254,7 @@ func TestValidationRejectsBadAnswers(t *testing.T) {
 func TestParseAcceptsFencedJSON(t *testing.T) {
 	records := []record{{key: protocol.Key{EntityType: "person", IdentityKey: "a@x.com"}}}
 	a := &Adapter{Mode: modeFilter}
-	answers, err := a.parse("```json\n[{\"identity_key\":\"a@x.com\",\"pass\":true}]\n```", records)
+	answers, err := a.parse("```json\n[{\"identity_key\":\"a@x.com\",\"pass\":true}]\n```", shape{}, records)
 	if err != nil {
 		t.Fatalf("a fenced answer should be recovered, not retried: %v", err)
 	}
@@ -309,5 +313,179 @@ func TestManifestsAreRegistered(t *testing.T) {
 	}
 	if got := compose.Manifest.ProvidesFields(); strings.Join(got, ",") != "first_line,ps_line" {
 		t.Errorf("ai/compose provides = %v", got)
+	}
+}
+
+// declared is a derived provides schema as the runner injects it (ADR-033):
+// names already namespaced by the planner, declaration order under required.
+var declared = map[string]any{
+	"type":                 "object",
+	"additionalProperties": false,
+	"properties": map[string]any{
+		"qualify.state":     map[string]any{"type": "string", "enum": []any{"now", "later"}},
+		"qualify.rationale": map[string]any{},
+		"qualify.score":     map[string]any{"type": "integer"},
+	},
+	"required": []any{"qualify.state", "qualify.rationale", "qualify.score"},
+}
+
+// TestFilterWithDeclaredProvidesEmitsRecordAndVerdict is ADR-033 on the wire:
+// the prompt's required shape is generated from the schema, the answer is
+// validated against it (an enum violation is rejected and retried), and the
+// filter emits a RECORD carrying the declared fields before its VERDICT —
+// for the failing record too, so the reasoning is queryable either way.
+func TestFilterWithDeclaredProvidesEmitsRecordAndVerdict(t *testing.T) {
+	engine := &scriptEngine{answers: []string{
+		`[{"identity_key":"a@x.com","pass":true,"reason":"fits","qualify.state":"never","qualify.rationale":"x","qualify.score":1},
+		  {"identity_key":"b@x.com","pass":false,"reason":"no","qualify.state":"later","qualify.rationale":"y","qualify.score":2}]`,
+		`[{"identity_key":"a@x.com","pass":true,"reason":"fits","qualify.state":" now ","qualify.rationale":"x","qualify.score":1},
+		  {"identity_key":"b@x.com","pass":false,"reason":"no","qualify.state":"later","qualify.rationale":"y","qualify.score":2}]`,
+	}}
+	a := &Adapter{Mode: modeFilter, Engine: engine}
+	msgs, err := drive(t, a, map[string]any{"prompt": "Judge.", "provides": declared}, "a@x.com", "b@x.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if engine.callCount != 2 {
+		t.Errorf("engine calls = %d, want 2 (the enum violation is retried)", engine.callCount)
+	}
+	if !strings.Contains(engine.prompts[1], `qualify.state must be one of now, later (got "never")`) {
+		t.Errorf("retry prompt should name the enum violation:\n%s", engine.prompts[1])
+	}
+
+	// SCHEMA announces the derived shape; RECORD precedes VERDICT per key.
+	var order []string
+	records := map[string]map[string]any{}
+	for _, m := range msgs {
+		switch m.Type {
+		case protocol.TypeSchema:
+			if !strings.Contains(string(m.Provides), `"qualify.state"`) {
+				t.Errorf("SCHEMA = %s", m.Provides)
+			}
+		case protocol.TypeRecord:
+			order = append(order, "record:"+m.Key.IdentityKey)
+			records[m.Key.IdentityKey] = m.Fields
+		case protocol.TypeVerdict:
+			order = append(order, "verdict:"+m.Key.IdentityKey)
+		}
+	}
+	if got := strings.Join(order, " "); got != "record:a@x.com verdict:a@x.com record:b@x.com verdict:b@x.com" {
+		t.Errorf("message order = %s", got)
+	}
+	if records["a@x.com"]["qualify.state"] != "now" || records["a@x.com"]["qualify.score"] != float64(1) {
+		t.Errorf("a@x.com fields = %v (strings are trimmed at the boundary)", records["a@x.com"])
+	}
+	if records["b@x.com"]["qualify.state"] != "later" {
+		t.Errorf("the failing record's fields must still be emitted: %v", records["b@x.com"])
+	}
+	for _, f := range records["a@x.com"] {
+		if f == nil {
+			t.Errorf("a declared field arrived null: %v", records["a@x.com"])
+		}
+	}
+	if _, has := records["a@x.com"]["pass"]; has {
+		t.Errorf("pass belongs to the VERDICT, not the RECORD: %v", records["a@x.com"])
+	}
+}
+
+// TestSystemPromptShapeIsGeneratedFromSchema: no literal shape string survives
+// — the element shape names every declared field, with enum alternatives.
+func TestSystemPromptShapeIsGeneratedFromSchema(t *testing.T) {
+	a := &Adapter{Mode: modeFilter}
+	cfg, err := parseConfig(map[string]any{"prompt": "x", "provides": declared})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := a.shapeFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys := a.systemPrompt(sh)
+	for _, want := range []string{
+		`"identity_key": "<copied exactly from the input>"`,
+		`"pass": true or false`,
+		`"qualify.state": "now" | "later"`,
+		`"qualify.rationale": "<text>"`,
+		`"qualify.score": <integer>`,
+		"exactly one of them, verbatim",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("system prompt lacks %q:\n%s", want, sys)
+		}
+	}
+	// The declaration order is the prompt order.
+	if strings.Index(sys, "qualify.state") > strings.Index(sys, "qualify.rationale") ||
+		strings.Index(sys, "qualify.rationale") > strings.Index(sys, "qualify.score") {
+		t.Errorf("fields should follow declaration order:\n%s", sys)
+	}
+
+	// A compose declaring nothing keeps its manifest shape (first_line, ps_line).
+	c := &Adapter{Mode: modeCompose}
+	sh, err = c.shapeFor(config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys = c.systemPrompt(sh)
+	if !strings.Contains(sys, `"first_line": "<string>", "ps_line": "<string>"`) || strings.Contains(sys, `"pass"`) {
+		t.Errorf("default compose shape:\n%s", sys)
+	}
+}
+
+// TestComposeWithDeclaredProvidesReplacesTheDefault: a compose declaring
+// its own fields emits exactly those — first_line/ps_line are gone.
+func TestComposeWithDeclaredProvidesReplacesTheDefault(t *testing.T) {
+	provides := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"outreach.subject": map[string]any{"type": "string"},
+			"outreach.body":    map[string]any{"type": "string"},
+		},
+		"required": []any{"outreach.subject", "outreach.body"},
+	}
+	engine := &scriptEngine{answers: []string{
+		`[{"identity_key":"a@x.com","outreach.subject":"Hi","outreach.body":"Long text","first_line":"ignored"}]`,
+	}}
+	a := &Adapter{Mode: modeCompose, Engine: engine}
+	msgs, err := drive(t, a, map[string]any{"prompt": "Write.", "provides": provides}, "a@x.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, m := range msgs {
+		if m.Type != protocol.TypeRecord {
+			continue
+		}
+		if m.Fields["outreach.subject"] != "Hi" || m.Fields["outreach.body"] != "Long text" {
+			t.Errorf("fields = %v", m.Fields)
+		}
+		if _, has := m.Fields["first_line"]; has {
+			t.Errorf("undeclared fields must not be emitted: %v", m.Fields)
+		}
+	}
+}
+
+// TestDeclaredValidationMessages covers what the retry tells the model.
+func TestDeclaredValidationMessages(t *testing.T) {
+	a := &Adapter{Mode: modeFilter}
+	cfg, _ := parseConfig(map[string]any{"prompt": "x", "provides": declared})
+	sh, err := a.shapeFor(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []record{{key: protocol.Key{EntityType: "company", IdentityKey: "acme.com"}}}
+	ok := `"qualify.rationale":"r","qualify.score":3`
+	cases := []struct{ name, text, want string }{
+		{"missing", `[{"identity_key":"acme.com","pass":true,"qualify.state":"now","qualify.score":3}]`, "missing qualify.rationale"},
+		{"null", `[{"identity_key":"acme.com","pass":true,"qualify.state":"now","qualify.rationale":null,"qualify.score":3}]`, "qualify.rationale must not be null"},
+		{"enum", `[{"identity_key":"acme.com","pass":true,"qualify.state":"soon",` + ok + `}]`, `qualify.state must be one of now, later (got "soon")`},
+		{"enum type", `[{"identity_key":"acme.com","pass":true,"qualify.state":3,` + ok + `}]`, "qualify.state must be a string"},
+		{"integer", `[{"identity_key":"acme.com","pass":true,"qualify.state":"now","qualify.rationale":"r","qualify.score":3.5}]`, "qualify.score must be an integer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := a.parse(tc.text, sh, records)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
 	}
 }

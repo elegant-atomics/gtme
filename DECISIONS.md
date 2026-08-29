@@ -1644,3 +1644,74 @@ offline against fixture adapters, no keys, nothing sends — so CI is the
 existing gate on a runner, not a second quality system to maintain.
 **Spec impact:** None (repo tooling; the gate it runs is already the
 CLAUDE.md rule).
+
+### 2026-08-28 — M14 step 1 internals: declared AI provides (ADR-033)
+
+**Question:** How does a step-level `provides:` reach the adapter, where
+does the `<pipeline>.<field>` namespacing happen, how do a filter's RECORD
+and VERDICT interact in the runner, how do AI manifests become
+entity-agnostic without changing the manifest format, and what does "the
+config maps a name to a canonical field" (SPEC §4a/§7) mean in this build?
+**Choice:** (1) The planner derives the schema — each declared name
+namespaced `<pipeline>.<name>` unless it already carries a dot, the
+declared `type`/`enum` carried through, every declared field `required`
+(the operator asked for it; the model must produce it), nothing else
+admitted — and the runner injects it into OPEN `config.provides`, the
+`variables` pattern's second instance (declared in the AI manifests'
+`config_schema` with the same "never authored inside `with:`" note; a
+`with: {provides:}` fails plan pointing at the step-level key). The
+adapter is a pure schema consumer: prompt shape, answer validation, and
+what it emits all derive from the injected schema, or from the manifest's
+static shape when nothing is injected — so `ai/filter` and `ai/compose`
+now share one code path and the two hardcoded shapes are gone. (2) **Bare
+names always namespace**, including a name that coincides with a
+canonical field (`state` is a canonical person field — a location; a
+judgment called `state` silently landing there is exactly the collision
+ADR-033 exists to prevent). `gtme plan` notes the coincidence. This build
+has **no** syntax for mapping a declared name onto a canonical field; the
+spec text implies one exists and does not say what it is — queued as a
+spec question in AUDIT.md (b). (3) Entity-agnosticism is a planner rule
+keyed on the `ai/` adapter-id prefix (ADR-026's operation-named AI steps,
+already how the runner recognises them): an AI step's entity type is the
+pipeline's — its source step's resolved entity type, or none after a
+group source, in which case name validation is entity-blind exactly as
+SQL steps already are. The two AI manifests keep `entity_type: person`
+because §6 and `spec/schemas/manifest.schema.json` require the key; the
+manifest-format encoding of "entity-agnostic" is the second queued spec
+question. Observable behaviour matches §10.3 either way. A compose
+declaring nothing inside a company pipeline fails plan naming
+`first_line` with the fix ("declare `provides:` on this step"), since
+its person-vocabulary default has nowhere legal to land. (4) In the
+runner a filter's RECORD is validated against the derived schema and
+written like any output, pass or fail, but never advances the record —
+only the VERDICT does (SPEC §5); a RECORD that fails validation freezes
+the record whatever the verdict says (new `failed` flag on the work item;
+previously `failItem` left a later verdict free to advance it). The
+adapter emits RECORD before VERDICT per key. The derived-schema
+validation replaces the manifest's static `ValidateProvides` only for
+steps that declared; csv/source and http/enrich keep their existing
+paths. (5) `identity_key` (every AI role) and `pass` (filter) are
+reserved — a declaration naming them fails plan; `reason` is allowed
+and, on a filter, feeds both the VERDICT and the stored field. (6) The
+fixture engine synthesises from the shape the adapter now passes in
+(`ai.Request.Fields`): first enum member, a typed sample, else
+`Fixture <bare name> for <key>` — so `--simulate` stays schema-valid for
+any declaration. (7) The plan note for a namespaced need whose prefix is
+the pipeline's own name says so ("this pipeline's own judgment field")
+instead of the vendor-coupling wording, which would mislead.
+**Why:** The M14 step-1 acceptance runs offline end to end: the
+`{state: {enum: [now, later]}, rationale: {}}` filter stores
+`qualify.state` for all three judged records (the failing one included)
+with `ai/filter @ fixture` provenance and leaves the canonical `state`
+untouched; an out-of-enum value is retried, and twice over fails the
+batch with zero rows written; a compose declaring `[subject]` writes only
+`qualify.subject`; a company pipeline plans its AI step as `company`,
+rejects `uses: [title]` against the company registry, and lands
+`accounts.tier` on company identities; `provides:` off an AI step, inside
+`with:`, or naming a reserved key fails plan naming step and key; and
+`--simulate` completes the declared pipeline on synthesized answers.
+**Spec impact:** None applied. Two spec-visible questions queued in
+AUDIT.md (b) for human decision: the canonical-mapping syntax and the
+manifest encoding of entity-agnosticism. §11 M14 is not marked built —
+step (1) of five is.
+

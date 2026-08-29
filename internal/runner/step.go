@@ -30,6 +30,7 @@ type item struct {
 	advanced bool // state moved to this step
 	verdict  bool // a VERDICT arrived (filter steps)
 	output   bool // a RECORD arrived
+	failed   bool // this step failed the record; nothing advances it now
 }
 
 // bump mutates a step's stats under the lock.
@@ -642,11 +643,12 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 	}
 	it.output = true
 
-	// Output is validated against the manifest before it reaches the ledger
-	// (SPEC §5): an invalid record fails, the run continues. Canonical fields
-	// are additionally held to the registry's type, domain and normalized form
-	// (SPEC §4a, enforcement layer 2).
-	if err := st.Manifest.ValidateProvides(m.Fields); err != nil {
+	// Output is validated against the step's provides before it reaches the
+	// ledger (SPEC §5) — the declared schema for an AI step that carries one
+	// (ADR-033), else the manifest's: an invalid record fails, the run
+	// continues. Canonical fields are additionally held to the registry's
+	// type, domain and normalized form (SPEC §4a, enforcement layer 2).
+	if err := st.ValidateProvides(m.Fields); err != nil {
 		return r.failItem(ctx, st, it, err.Error())
 	}
 	if err := r.checkRegistry(it.key.EntityType, m.Fields); err != nil {
@@ -667,6 +669,12 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 			_ = err
 		}
 	}
+	// A filter's RECORD carries its declared provides (SPEC §5, ADR-033) —
+	// stored like any output, pass or fail — but only its VERDICT advances.
+	if st.Role == adapters.RoleFilter {
+		r.emit(it.key, m.Fields)
+		return nil
+	}
 	return r.advance(ctx, st, it, map[string]any{"fields": n}, m.Fields)
 }
 
@@ -681,6 +689,11 @@ func (r *runner) applyVerdict(ctx context.Context, st *planner.Step, byKey map[s
 		return nil
 	}
 	it.verdict = true
+	if it.failed {
+		// Its RECORD already failed validation at this step: the failure
+		// stands, whatever the verdict says (SPEC §5).
+		return nil
+	}
 	pass := m.Passed()
 	if err := r.l.SetVerdict(ctx, r.runID, it.identityID, st.ID, pass); err != nil {
 		return err
@@ -696,7 +709,7 @@ func (r *runner) applyVerdict(ctx context.Context, st *planner.Step, byKey map[s
 // advance marks a record done for this step, moves its state forward, and passes
 // it downstream in pipe mode.
 func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail, fields map[string]any) error {
-	if it.advanced {
+	if it.advanced || it.failed {
 		return nil
 	}
 	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done", detail); err != nil {
@@ -731,9 +744,10 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 }
 
 func (r *runner) failItem(ctx context.Context, st *planner.Step, it *item, reason string) error {
-	if it.advanced {
+	if it.advanced || it.failed {
 		return nil
 	}
+	it.failed = true
 	r.bump(st, func(s *StepStat) { s.Failed++ })
 	return r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "failed", map[string]any{"reason": reason})
 }

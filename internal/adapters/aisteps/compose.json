@@ -26,6 +26,10 @@
         "type": "array",
         "items": {"type": "string"},
         "description": "Restrict what the model sees to these fields (default: everything known)"
+      },
+      "provides": {
+        "type": "object",
+        "description": "The step's derived provides schema (ADR-033). Injected by the runner from the step-level provides: key — never authored inside with:."
       }
     }
   },
