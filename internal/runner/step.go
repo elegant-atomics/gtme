@@ -39,6 +39,10 @@ type item struct {
 	// (ADR-038); pending marks a PENDING that covered it this session.
 	token   string
 	pending bool
+	// signature and input are the judgment cache keys (ADR-039) for an AI
+	// step's record, recorded on its done event.
+	signature string
+	input     string
 }
 
 // bump mutates a step's stats under the lock.
@@ -121,7 +125,7 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			continue
 		}
 
-		it, err := r.prepare(ctx, st, rr.IdentityID)
+		it, err := r.prepare(ctx, st, rr.IdentityID, tokens[rr.IdentityID])
 		if err != nil {
 			return err
 		}
@@ -209,7 +213,7 @@ func (r *runner) membershipGate(ctx context.Context, st *planner.Step) (func(str
 // without the adapter — a record whose needs are unsatisfiable fails here, and
 // one the ledger (or an earlier delivery) already answers is skipped. A nil item
 // with a nil error means "already dealt with".
-func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID string) (*item, error) {
+func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, token string) (*item, error) {
 	projection := ledger.Projection{Fields: st.Needs}
 	if st.NeedsAll {
 		projection.Fields = nil // everything the ledger knows
@@ -247,6 +251,22 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 	}
 	if skipped {
 		return nil, nil
+	}
+	// The judgment cache (SPEC §7, ADR-039): same question, same facts,
+	// same answer — unless the step said respend. A record being collected
+	// (ADR-038) is past this point by definition.
+	if isAIStep(st) {
+		it.signature = r.judgmentSignature(st)
+		it.input = inputHash(st, r.plan.Pipeline.Name, fields)
+		if token == "" && !st.Respend {
+			reused, err := r.judgmentSkip(ctx, st, it)
+			if err != nil {
+				return nil, err
+			}
+			if reused {
+				return nil, nil
+			}
+		}
 	}
 
 	if st.IsDeliver {
@@ -548,6 +568,45 @@ func (r *runner) cacheSkip(ctx context.Context, st *planner.Step, it *item) (boo
 	if err := r.skip(ctx, st, it, reason); err != nil {
 		return false, err
 	}
+	return true, nil
+}
+
+// judgmentSkip reuses a stored judgment when one matches the record's cache
+// keys within the step's window (ADR-039): a filter re-applies its verdict
+// (pass advances, fail freezes), a compose has nothing to write. Receipted
+// as skipped_cache with reason same_judgment.
+func (r *runner) judgmentSkip(ctx context.Context, st *planner.Step, it *item) (bool, error) {
+	var since time.Time
+	if st.Cache > 0 {
+		since = r.now().Add(-st.Cache)
+	}
+	j, found, err := r.l.LastJudgment(ctx, it.identityID, it.signature, it.input, since)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	detail := map[string]any{"reason": "same_judgment", "signature": it.signature, "input": it.input, "judged_in": j.RunID}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "skipped_cache", detail); err != nil {
+		return false, err
+	}
+	if st.Role == adapters.RoleFilter {
+		pass := j.Pass != nil && *j.Pass
+		if err := r.l.SetVerdict(ctx, r.runID, it.identityID, st.ID, pass); err != nil {
+			return false, err
+		}
+		if !pass {
+			r.bump(st, func(s *StepStat) { s.CacheSkips++; s.Filtered++; s.AvoidedUnknown = true })
+			return true, nil
+		}
+	}
+	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
+		return false, err
+	}
+	it.advanced = true
+	r.emit(it.key, nil)
+	r.bump(st, func(s *StepStat) { s.CacheSkips++; s.AvoidedUnknown = true })
 	return true, nil
 }
 
@@ -936,7 +995,7 @@ func (r *runner) applyVerdict(ctx context.Context, st *planner.Step, byKey map[s
 	if !pass {
 		r.bump(st, func(s *StepStat) { s.Filtered++ })
 		return r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done",
-			map[string]any{"pass": false, "reason": m.Reason})
+			it.judgmentDetail(map[string]any{"pass": false, "reason": m.Reason}))
 	}
 	return r.advance(ctx, st, it, map[string]any{"pass": true, "reason": m.Reason}, nil)
 }
@@ -947,7 +1006,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 	if it.advanced || it.failed {
 		return nil
 	}
-	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done", detail); err != nil {
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done", it.judgmentDetail(detail)); err != nil {
 		return err
 	}
 	if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {

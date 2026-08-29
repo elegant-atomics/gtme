@@ -171,7 +171,9 @@ type runner struct {
 	deliverSteps map[string]bool
 	// fetchedCache memoizes fetchedSource per adapter id.
 	fetchedCache map[string]bool
-	now          func() time.Time
+	// signatures memoizes each AI step's judgment signature (ADR-039).
+	signatures map[string]string
+	now        func() time.Time
 	// out is the downstream NDJSON stream in pipe mode, nil for `gtme run`.
 	out *protocol.Writer
 
@@ -207,6 +209,7 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		reg:          reg,
 		deliverSteps: map[string]bool{},
 		fetchedCache: map[string]bool{},
+		signatures:   map[string]string{},
 		now:          time.Now,
 		stats:        map[string]*StepStat{},
 	}
@@ -828,7 +831,9 @@ func (r *runner) source(st *planner.Step) string {
 		engine, _ := st.Config["engine"].(string)
 		model, _ := st.Config["model"].(string)
 		getenv := func(k string) string { return r.sessionEnv(st)[k] }
-		return st.Manifest.ID + " @ " + ai.ProvenanceModel(engine, model, getenv)
+		// The judgment signature rides in provenance (SPEC §10a, ADR-039):
+		// two prompts' outputs stay distinguishable.
+		return st.Manifest.ID + " @ " + ai.ProvenanceModel(engine, model, getenv) + "#" + r.judgmentSignature(st)
 	}
 	return st.Manifest.Source()
 }

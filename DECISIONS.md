@@ -1176,8 +1176,9 @@ the last-step rule / receipt / `gtme runs`; §9 `respend: true` and, with
 `spec/schemas/msg-pending.schema.json`, `msg-open.schema.json`.
 
 ### ADR-039: The judgment cache — no paid call twice by default
-**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Judgment
-cache", named while amending ADR-038; Accepted on merge)
+**Status:** Accepted (2026-08-29 — drafted from ROADMAP.md's "Judgment
+cache", named while amending ADR-038; input-hash exclusion added in
+review; human-approved 2026-08-29)
 **Context:** Enrich and verify steps cache-skip a record whose fields are
 current within the freshness window (§7); AI steps never do — every run
 re-judges every record and pays again, and the only guard is the
@@ -2119,4 +2120,43 @@ claude-code and dry-run warnings, the respend warning and its two
 silencers all fire as specified; the api engine's batch path is
 unit-tested against a stubbed Batches endpoint.
 **Spec impact:** None beyond v0.17 (marked built as v0.18).
+
+### 2026-08-29 — M16 internals: the judgment cache (ADR-039)
+
+**Question:** Who computes the signature (the ADR left it to the build),
+what exactly is hashed, where does the lookup sit, and how does a cached
+filter fail render?
+**Choice:** (1) The runner computes both keys in `prepare`
+(`internal/runner/judgment.go`), from what it already holds: the
+signature from the adapter id, the model `ai.ProvenanceModel` resolves
+for the step with its credentials only (never the simulate override, so
+a rehearsal skips what an armed run would), the trimmed operator prompt,
+the step's provides schema (declared or manifest) and the sorted `uses:`
+list; the input hash from the projection — the `uses:` fields when
+declared, else everything minus the step's own provides and every
+`<pipeline>.*` field — both as canonical JSON (encoding/json sorts map
+keys) → sha256 → twelve hex. The adapter is untouched. (2) The lookup
+(`ledger.LastJudgment`) is the newest `done` event for the identity, any
+run, whose detail carries the same `signature` and `input`, bounded by
+`cache:` when set; the keys are written onto every AI `done` event
+(pass, fail, collected) via the work item, and the signature joins
+provenance as `#<sig>`. (3) A reused filter fail sets the verdict, does
+not advance, and counts as cached *and* filtered on the receipt; a reused
+pass or compose advances and counts as cached; avoided cost prints `?`
+(AI manifests carry no per-record estimate). (4) `cache: 0d` on an AI
+step is read by the planner as `respend: true`. (5) The AI half of
+ADR-038's respend warning is retired in the planner; the paid-enrich
+half stays. (6) Under `--simulate` the copy of the ledger carries the
+judgments, so the rehearsal cache-skips; the two tests that re-ask the
+same question on purpose (`fence: false`, the deferred fixture) now say
+`respend: true`, which is what an operator would say.
+**Why:** The M16 acceptance runs offline: an unchanged re-run makes zero
+model calls (fixture log) with every record `same_judgment` and the fail
+verdict re-applied; a prompt change re-judges the judge and leaves the
+compose cached; one changed input re-judges one record; `cache: 1d` with
+the events aged re-judges; `respend: true` re-judges; provenance carries
+the signature and `gtme show --provenance` shows it; the AI respend
+warning is gone; `--simulate` skips; a deferred step cache-checks before
+submitting and a re-run after collection submits nothing.
+**Spec impact:** None beyond v0.19 (marked built as v0.20).
 

@@ -29,6 +29,9 @@ func TestAIPromptIsCompactAndFencesFetchedFields(t *testing.T) {
 
 	h := newHarness(t)
 	h.write("people.csv", peopleCSV)
+	// The unfenced variant asks the same question about the same facts, so
+	// the judgment cache (ADR-039) would answer it without calling the
+	// engine — respend: true is how a test (or an operator) asks again.
 	pipeline := func(fence string) string {
 		return `name: judge-site
 source:
@@ -46,6 +49,7 @@ steps:
   - id: judge
     use: ai/filter
     uses: [title, web.homepage]
+    respend: true
     with:
       prompt: Keep companies that make anvils.
 ` + fence
