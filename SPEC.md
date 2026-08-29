@@ -225,10 +225,12 @@ CREATE TABLE costs (
 CREATE TABLE deliveries (
   id             TEXT PRIMARY KEY,
   identity_id    TEXT NOT NULL,
-  target         TEXT NOT NULL,           -- adapter id
+  target         TEXT NOT NULL,           -- adapter id, or group:<name> for a handoff (ADR-032)
   idempotency    TEXT NOT NULL,           -- computed key, see §8 deliver
   run_id         TEXT NOT NULL,
   created_at     TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
+  sent_at        TEXT,                    -- set only by attestation (ADR-036)
   UNIQUE(target, idempotency)
 );
 
@@ -272,6 +274,19 @@ FROM (
   WHERE event IN ('added', 'removed')
 )
 WHERE rn = 1 AND event = 'added';
+
+-- Vocabulary views (ADR-037): the read surface user-authored SQL (§10a) and
+-- config queries (§9) are written against, so a query reads as vocabulary
+-- rather than as table internals. current_values is current_fields with the
+-- JSON encoding unwrapped; group_membership is group_members keyed by name.
+CREATE VIEW current_values AS
+SELECT identity_id, field, json_extract(value, '$') AS value, source, confidence, run_id, created_at
+FROM current_fields;
+
+CREATE VIEW group_membership AS
+SELECT g.name AS group_name, m.group_id, m.identity_id
+FROM group_members m
+JOIN groups g ON g.id = m.group_id;
 
 -- Payloads: raw vendor responses as CACHE, not facts (ADR-030). Extracted =
 -- fact (append-only, above); unextracted = cache (this table, purgeable).
@@ -329,15 +344,15 @@ which applies the per-step window against ranked rows) and `gtme query`'s
 MUST resolve through it. No second implementation of the ranking rule may
 exist.
 
-**Queued schema deltas (ADR-036, ADR-037) — land with milestone M14's
-migration and are mirrored into `spec/ledger.sql` then, never ahead of
-it:** `deliveries` gains `status` (`accepted` | `confirmed` |
+**M14's schema deltas (ADR-036, ADR-037; migration `0007`, mirrored
+above):** `deliveries` carries `status` (`accepted` | `confirmed` |
 `contradicted` | `sent`; default `accepted`) and `sent_at` (nullable —
 empty until a provider attests). Two views join the public read surface
-beside `current_fields` and `group_members`: one that presents current
-values pre-unwrapped from their JSON encoding, and one that presents
-current membership keyed by group *name*, so user-authored SQL (§10a) and
-config queries (§9) read as vocabulary rather than as table internals.
+beside `current_fields` and `group_members`: `current_values` presents
+current values pre-unwrapped from their JSON encoding, and
+`group_membership` presents current membership keyed by group *name*, so
+user-authored SQL (§10a) and config queries (§9) read as vocabulary
+rather than as table internals.
 
 ---
 
@@ -1439,7 +1454,7 @@ projected fields, and its only network access is its model engine's API
 belongs to `http/enrich` and bindings, which are deterministic and
 cacheable.
 
-### `sql/transform` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11; `sql/transform` renamed `sql/transform` by ADR-037)
+### `sql/transform` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11; `sql/enrich` renamed `sql/transform` by ADR-037)
 
 `sql/transform`: a single SELECT over the projection view (plus relations),
 scoped to the run's records, executed read-only (`mode=ro`) and
@@ -1853,7 +1868,11 @@ manifests: `"entity_type": "*"` names what §10.3 asserted without an
 encoding (AUDIT.md (b), approved 2026-08-28); a source may not declare
 it; `manifest.schema.json` describes the sentinel; the two AI manifests
 declare it.
-**Not changed:** §11 M14 stays queued — step (1) of five is built.
+**Changed:** `spec/ledger.sql` and §3's DDL — M14's migration `0007`
+landed (step (4)): `deliveries.status`/`sent_at`, the `current_values`
+and `group_membership` views; §3's queued-deltas note now records them as
+landed. §10a heading typo (`sql/enrich` renamed `sql/transform`).
+**Not changed:** §11 M14 stays queued — steps (1)–(4) of five are built.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
 **Added:** §7 declared AI provides, config values from the ledger, SQL at

@@ -25,7 +25,7 @@ Three kinds appear below:
 | `apollo/search` | source | **binding** | Apollo people search, paginated |
 | `harvest/profile` | enrich | process (built-in) | LinkedIn profile via HarvestAPI |
 | `http/enrich` | enrich | engine-inline | fetch any URL per record → markdown field or JSON extraction |
-| `sql/enrich` | enrich | runner-owned | derive fields with a read-only SELECT over the ledger |
+| `sql/transform` | enrich | runner-owned | derive fields with a read-only SELECT over the ledger — per-record or cross-record |
 | `ai/filter` | filter | process (built-in) | LLM judgment → pass/fail verdicts with reasons |
 | `sql/filter` | filter | runner-owned | deterministic verdicts from a SQL predicate |
 | `ai/compose` | compose | process (built-in) | LLM writing → `first_line`, `ps_line`, or whatever the step's `provides:` declares |
@@ -210,17 +210,17 @@ responses retained as payloads under the retention declaration.
     freshness_days: 7
 ```
 
-### `sql/enrich`
+### `sql/transform`
 
 Deterministic derivation in the ledger's own language. One read-only,
 timeboxed SELECT per step; declared contracts (`uses:` and `provides:` in
 config — never parsed from the SQL); results must include an
 `identity_id` column and apply only to the run's records. Derived values
-append like any adapter output, provenance `sql/enrich @ <query-hash>`.
+append like any adapter output, provenance `sql/transform @ <query-hash>`.
 
 ```yaml
 - id: bucket
-  use: sql/enrich
+  use: sql/transform
   with:
     uses: [title]
     provides: [sql.seniority_bucket]
@@ -283,9 +283,20 @@ evidence, not task. Default on; `with: {fence: false}` opts out. The
 prompt/records split is exposed to the engine so a cache breakpoint sits
 between them (the API engine caches the shared half).
 
+Write queries against the vocabulary views — `current_values` (current
+value per field, JSON unwrapped) and `group_membership` (membership by
+`group_name`) — rather than the raw tables; `gtme plan` runs `EXPLAIN` so
+an unknown column fails before anything runs, and annotates a query that
+joins `relations` or membership as *cross-record* (it may read any
+identity; only its results are run-scoped, and it recomputes every run).
+Any value under any step's `with:` may be `{query: SQL}` or `{segment:
+NAME}`, resolved read-only at plan (rows shown; zero rows is an error)
+and recorded in the run. `gtme help --agent` carries the read surface and
+the canonical query shapes.
+
 ### `sql/filter`
 
-Same mechanism as `sql/enrich`, producing verdicts: return a `pass`
+Same mechanism as `sql/transform`, producing verdicts: return a `pass`
 column (with optional `reason`) to judge explicitly, or just return the
 passing `identity_id`s — returned passes, absent fails, predicate named
 in the reason. Closes the "has replied ever" / "3+ known contacts at this

@@ -59,7 +59,7 @@ func (r *runner) runSQLStep(ctx context.Context, st *planner.Step, identityIDs [
 			}
 			continue
 		}
-		// sql/enrich: derived columns append like adapter output; a record the
+		// sql/transform: derived columns append like adapter output; a record the
 		// query said nothing about simply advances with nothing derived.
 		fields := map[string]any{}
 		if found {

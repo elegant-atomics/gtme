@@ -4,6 +4,7 @@ package planner
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,12 +160,48 @@ func (s *Step) ValidateProvides(fields map[string]any) error {
 }
 
 // Scope is what a step inherits from its pipeline at resolve time: the name
-// (the default namespace for declared AI outputs, SPEC §4a) and the entity
-// type its source emits (the entity type of every entity-agnostic AI step,
-// SPEC §10.3).
+// (the default namespace for declared AI outputs, SPEC §4a), the entity type
+// its source emits (the entity type of every entity-agnostic AI step, SPEC
+// §10.3), and the local ledger, read-only — what config values from the
+// ledger and plan-time EXPLAIN resolve against (SPEC §7, ADR-037). Ledger
+// may be nil, in which case a step needing it is a plan problem.
 type Scope struct {
+	Ctx        context.Context
 	Pipeline   string
 	EntityType string
+	Ledger     *ledger.Ledger
+}
+
+// SQLTransformID and SQLFilterID are the runner-owned SQL steps (SPEC §10a).
+// SQLEnrichID is the pre-ADR-037 name, kept only to name the fix.
+const (
+	SQLTransformID = "sql/transform"
+	SQLFilterID    = "sql/filter"
+	SQLEnrichID    = "sql/enrich"
+)
+
+// ResolvedPipeline is the pipeline with every step's with: replaced by its
+// resolved config — {query:}/{segment:} values substituted (SPEC §7,
+// ADR-037) — which is what runs.config_json records, so a run reproduces
+// what it actually ran against, not what it would recompute.
+func (p *Plan) ResolvedPipeline() *pipeline.Pipeline {
+	out := *p.Pipeline
+	if p.Pipeline.Source != nil {
+		src := *p.Pipeline.Source
+		out.Source = &src
+	}
+	out.Steps = append([]pipeline.Step(nil), p.Pipeline.Steps...)
+	for i := range p.Steps {
+		st := &p.Steps[i]
+		if i == 0 && out.Source != nil {
+			out.Source.With = st.Config
+			continue
+		}
+		if i-1 < len(out.Steps) {
+			out.Steps[i-1].With = st.Config
+		}
+	}
+	return &out
 }
 
 // StepByID finds a step.
@@ -227,14 +264,19 @@ func (e *Errors) ExitCode() int {
 }
 
 // Build resolves and validates a pipeline. It performs no network calls and
-// spends nothing.
-func Build(p *pipeline.Pipeline) (*Plan, error) {
+// spends nothing; the ledger, when given, is read only (SPEC §7: config
+// values from the ledger, SQL at plan). ctx and l may be nil for a pipeline
+// that needs neither.
+func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	plan := &Plan{Pipeline: p}
 	var problems []Problem
 
 	available := map[string]bool{}
 	steps := p.AllSteps()
-	scope := Scope{Pipeline: p.Name}
+	scope := Scope{Ctx: ctx, Pipeline: p.Name, Ledger: l}
 
 	for i, s := range steps {
 		isSource := i == 0
@@ -363,6 +405,19 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	if ps.Config == nil {
 		ps.Config = map[string]any{}
 	}
+	// Config values from the ledger (SPEC §7/§9, ADR-037): {query:} and
+	// {segment:} values resolve read-only before anything reads the config —
+	// the adapter's config_schema validates the substituted value.
+	// The with: map itself is never a value (a sql/* step's own `query`
+	// key lives there); only the values under its keys are.
+	if resolved, notes, valueProblems := resolveConfigMap(scope, "with", ps.Config); len(valueProblems) > 0 {
+		for _, msg := range valueProblems {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: msg})
+		}
+	} else {
+		ps.Config = resolved
+		ps.Notes = append(ps.Notes, notes...)
+	}
 	ps.Require = append([]string(nil), s.Require...)
 	ps.Exclude = append([]string(nil), s.Exclude...)
 
@@ -460,12 +515,18 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		return ps, problems
 	}
 
-	// SQL steps (SPEC §10a, ADR-027) resolve no adapter: the runner mediates
+	// SQL steps (SPEC §10a, ADR-027/037) resolve no adapter: the runner mediates
 	// their read-only ledger access, and their contracts are DECLARED —
 	// uses:/provides: in config — never parsed from the SQL.
-	if s.Use == "sql/enrich" || s.Use == "sql/filter" {
+	if s.Use == SQLEnrichID {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
+			Msg: fmt.Sprintf("%s was renamed %s (ADR-037) — a transform is a per-record derivation or a cross-record aggregate, not a provider lookup; change use: to %s", SQLEnrichID, SQLTransformID, SQLTransformID)})
+		gateDeliverKeys()
+		return ps, problems
+	}
+	if s.Use == SQLTransformID || s.Use == SQLFilterID {
 		ps.IsSQL = true
-		if s.Use == "sql/enrich" {
+		if s.Use == SQLTransformID {
 			ps.Role = adapters.RoleEnrich
 		} else {
 			ps.Role = adapters.RoleFilter
@@ -478,17 +539,29 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		} else if err := ledger.ReadOnlyStatement(ps.Query); err != nil {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 				Msg: fmt.Sprintf("%s: %v", s.Use, err)})
+		} else {
+			// SQL at plan (SPEC §7, ADR-037): EXPLAIN QUERY PLAN against the
+			// local ledger — $0, no network — so an unknown table or column
+			// fails the plan rather than the run.
+			if err := explainQuery(scope, ps.Query); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("%s: the query does not plan against the ledger: %v", s.Use, err)})
+			}
+			if refs := crossRecordRefs(ps.Query); len(refs) > 0 {
+				ps.Notes = append(ps.Notes,
+					fmt.Sprintf("cross-record: this query reads %s — it may read any identity in the ledger; only its results are scoped to the run, and it recomputes every run (SPEC §10a)", strings.Join(refs, " and ")))
+			}
 		}
 		ps.Needs = configStrings(ps.Config["uses"])
 		ps.Required = append([]string(nil), ps.Needs...)
 		provides := configStrings(ps.Config["provides"])
-		if s.Use == "sql/enrich" && len(provides) == 0 {
+		if s.Use == SQLTransformID && len(provides) == 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: "sql/enrich needs config.provides — the declared output fields (SPEC §10a)"})
+				Msg: SQLTransformID + " needs config.provides — the declared output fields (SPEC §10a)"})
 		}
-		if s.Use == "sql/filter" && len(provides) > 0 {
+		if s.Use == SQLFilterID && len(provides) > 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: "sql/filter produces verdicts, not fields — drop config.provides"})
+				Msg: SQLFilterID + " produces verdicts, not fields — drop config.provides"})
 		}
 		ps.Provides = provides
 		if reg, err := registry.Load(); err == nil {
@@ -1145,4 +1218,181 @@ func schemaProperties(raw json.RawMessage) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// crossRecordTables are the objects whose presence in a query marks it
+// cross-record (SPEC §7, ADR-037): it joins beyond the record's own facts.
+var crossRecordTables = []string{"relations", "group_members", "group_membership"}
+
+// crossRecordRefs lists the cross-record objects a query names, as whole
+// words, in a stable order.
+func crossRecordRefs(query string) []string {
+	var out []string
+	for _, name := range crossRecordTables {
+		if regexp.MustCompile(`\b` + name + `\b`).MatchString(query) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// explainQuery runs EXPLAIN QUERY PLAN on the read-only connection (SPEC
+// §7): SQLite resolves every table and column without executing anything.
+// :run_id is bound when referenced, as the runner binds it.
+func explainQuery(scope Scope, query string) error {
+	if scope.Ledger == nil {
+		return nil // no ledger to plan against; the run will check
+	}
+	db, err := ledger.OpenReadOnly(scope.Ctx, scope.Ledger.Path())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var args []any
+	if strings.Contains(query, ":run_id") {
+		args = append(args, sql.Named("run_id", "plan"))
+	}
+	rows, err := db.QueryContext(scope.Ctx, "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		return err
+	}
+	return rows.Close()
+}
+
+// maxShownRows bounds how many resolved values a plan note lists.
+const maxShownRows = 10
+
+// resolveConfigValues walks a step's config and substitutes every
+// {query: SQL} / {segment: NAME} value with the ledger's answer (SPEC §7/§9,
+// ADR-037): one column → a list, one row and one column → a scalar; zero
+// rows is a plan error (an empty list handed to a vendor search is the shape
+// that searches everything), as is any other column shape. Returns a copy;
+// the pipeline's own config is never mutated. path names the value in
+// notes and errors ("with.domains").
+func resolveConfigValues(scope Scope, path string, v any) (any, []string, []string) {
+	switch t := v.(type) {
+	case map[string]any:
+		if kind, text, ok := configQuery(t); ok {
+			value, note, err := resolveConfigQuery(scope, path, kind, text)
+			if err != nil {
+				return v, nil, []string{err.Error()}
+			}
+			return value, []string{note}, nil
+		}
+		return resolveConfigMap(scope, path, t)
+	case []any:
+		out := make([]any, len(t))
+		var notes, problems []string
+		for i, item := range t {
+			r, n, p := resolveConfigValues(scope, fmt.Sprintf("%s[%d]", path, i), item)
+			out[i] = r
+			notes = append(notes, n...)
+			problems = append(problems, p...)
+		}
+		return out, notes, problems
+	default:
+		return v, nil, nil
+	}
+}
+
+// resolveConfigMap resolves the values under a map's keys — never the map
+// itself, so a step's own with: block (or a sql/* step's with: {query: …})
+// is a container, not a value.
+func resolveConfigMap(scope Scope, path string, m map[string]any) (map[string]any, []string, []string) {
+	out := make(map[string]any, len(m))
+	var notes, problems []string
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		r, n, p := resolveConfigValues(scope, path+"."+k, m[k])
+		out[k] = r
+		notes = append(notes, n...)
+		problems = append(problems, p...)
+	}
+	return out, notes, problems
+}
+
+// configQuery recognises the two ledger-value forms: a map whose only key is
+// query or segment, with a string value.
+func configQuery(m map[string]any) (kind, text string, ok bool) {
+	if len(m) != 1 {
+		return "", "", false
+	}
+	for _, k := range []string{"query", "segment"} {
+		if v, present := m[k]; present {
+			s, isString := v.(string)
+			return k, strings.TrimSpace(s), isString && strings.TrimSpace(s) != ""
+		}
+	}
+	return "", "", false
+}
+
+// resolveConfigQuery runs one config value's SQL read-only and shapes the
+// result (SPEC §7).
+func resolveConfigQuery(scope Scope, path, kind, text string) (any, string, error) {
+	label := fmt.Sprintf("%s ← {%s: %s}", path, kind, text)
+	if scope.Ledger == nil {
+		return nil, "", fmt.Errorf("%s: resolving a config value from the ledger needs the ledger (run `gtme init`)", path)
+	}
+	query := text
+	if kind == "segment" {
+		saved, err := scope.Ledger.SavedQuery(scope.Ctx, text)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: no saved segment named %q — save one with `gtme query --save %s \"SQL\"`", path, text, text)
+		}
+		query = saved.SQL
+		label = fmt.Sprintf("%s ← {segment: %s}", path, text)
+	}
+	if err := ledger.ReadOnlyStatement(query); err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	db, err := ledger.OpenReadOnly(scope.Ctx, scope.Ledger.Path())
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(scope.Ctx, query)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	if len(cols) != 1 {
+		return nil, "", fmt.Errorf("%s: a config query must yield exactly one column (got %s) — one column is a list, one row and one column a scalar (SPEC §7)", path, strings.Join(cols, ", "))
+	}
+	var values []any
+	for rows.Next() {
+		var v any
+		if err := rows.Scan(&v); err != nil {
+			return nil, "", fmt.Errorf("%s: %v", path, err)
+		}
+		if b, ok := v.([]byte); ok {
+			v = string(b)
+		}
+		values = append(values, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("%s: %v", path, err)
+	}
+	if len(values) == 0 {
+		return nil, "", fmt.Errorf("%s: the %s yielded zero rows — an empty value handed to an adapter is the shape that matches everything; fix the %s or snapshot a group first (SPEC §7)", path, kind, kind)
+	}
+	shown := make([]string, 0, len(values))
+	for i, v := range values {
+		if i == maxShownRows {
+			shown = append(shown, fmt.Sprintf("… (+%d more)", len(values)-maxShownRows))
+			break
+		}
+		shown = append(shown, fmt.Sprint(v))
+	}
+	if len(values) == 1 {
+		return values[0], fmt.Sprintf("%s → 1 row (scalar): %s", label, shown[0]), nil
+	}
+	return values, fmt.Sprintf("%s → %d rows (list): %s", label, len(values), strings.Join(shown, ", ")), nil
 }

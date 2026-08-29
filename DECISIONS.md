@@ -1815,3 +1815,50 @@ oldest-added members of a hand-built group; `--note` is on the event; the
 warning fires only when a network send shares the pipeline.
 **Spec impact:** None — §7/§8/§9 (v0.15) state all of it.
 
+### 2026-08-28 — M14 step 4 internals: the transform floor's read surface (ADR-037)
+
+**Question:** What are the two vocabulary views called, how does the plan
+reach the ledger, what exactly is a "config value" (a `sql/*` step's own
+`with: {query: …}` must not be one), where do resolved values go, and how
+does `help --agent` learn the schema?
+**Choice:** (1) Migration `0007`: `current_values` (= `current_fields`
+with `json_extract(value, '$')` so a query sees plain values) and
+`group_membership` (= `group_members` joined to `groups` for
+`group_name`), plus ADR-036's `deliveries.status`/`sent_at` (the same
+migration §3 queued; step 5 gives them semantics). Mirrored into
+`spec/ledger.sql` and §3's DDL as §3 said they would be. (2)
+`planner.Build(ctx, p, ledger)` — the ledger is read-only at plan
+(SPEC §7), so `gtme plan` now opens it like `gtme run` does; `Scope`
+carries it. (3) A config value is a map whose ONLY key is `query` or
+`segment` with a string value, found under a `with:` key at any depth —
+never the `with:` map itself, which is a container (a `sql/*` step's
+`with: {query: …}` is exactly that). One column → list, one row and one
+column → scalar, else a plan error; zero rows a plan error; a missing
+segment names `gtme query --save`. The pipeline's own config is never
+mutated: the step's resolved config is a copy, and
+`Plan.ResolvedPipeline()` is what `CreateRun` snapshots into
+`runs.config_json`, so `gtme freeze` reproduces the values a run actually
+used rather than a segment that may have drifted. Plan notes show the
+rows (first ten, then a count). (4) `EXPLAIN QUERY PLAN` runs on the
+read-only connection with `:run_id` bound to a placeholder when
+referenced; SQLite resolves every name without executing. A step whose
+query names `relations`, `group_members` or `group_membership` (whole
+words) gets the cross-record note. (5) `help --agent` migrates a
+throwaway ledger in a temp dir and reads `sqlite_master` +
+`pragma_table_info`, so the columns are what the binary builds;
+implementation-only objects (the conformance test's allowlist) are left
+out; four query shapes and the two config-value forms are static text,
+each shape checked by the e2e to run. (6) `sql/enrich` fails plan naming
+`sql/transform`; the runner's provenance follows the step id
+automatically (`sql/transform @ <hash>`).
+**Why:** The step-4 acceptance runs offline: `{query:}` resolves a
+scalar path and `{segment:}` a list into an AI step's `fields`, the plan
+shows both, the run records them, `freeze` carries them; zero rows, a
+missing segment and two columns each fail plan; an unknown column fails
+plan with SQLite's own message; the `relations` join is annotated and
+the per-record transform is not; `help --agent` lists the views with
+their columns and its shapes run.
+**Spec impact:** §3 DDL and `spec/ledger.sql` gained the queued deltas
+(v0.16 changelog); the §10a heading typo fixed. No normative change
+beyond what v0.15 stated.
+

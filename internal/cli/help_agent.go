@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 
 	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // cmdHelpAgent emits the full CLI + adapter surface as one compact,
@@ -18,6 +22,7 @@ func cmdHelpAgent(env Env) error {
 		Verbs:    agentVerbs,
 		Adapters: agentAdapters(),
 		Examples: agentExamples,
+		Ledger:   agentLedger(),
 	}
 	enc := json.NewEncoder(env.Stdout)
 	if err := enc.Encode(doc); err != nil {
@@ -30,6 +35,10 @@ type agentDoc struct {
 	Verbs    []agentVerb    `json:"verbs"`
 	Adapters []agentAdapter `json:"adapters"`
 	Examples []agentExample `json:"examples"`
+	// Ledger is the public read surface (SPEC §3) and the canonical query
+	// shapes (ADR-037), so an agent can write a sql/* step or a {query:}
+	// value without reading spec/ledger.sql.
+	Ledger agentLedgerDoc `json:"ledger"`
 }
 
 type agentVerb struct {
@@ -195,4 +204,147 @@ steps:
     idempotency: email
 `,
 	},
+}
+
+type agentLedgerDoc struct {
+	Note    string             `json:"note"`
+	Objects []agentLedgerObj   `json:"objects"`
+	Shapes  []agentQueryShape  `json:"query_shapes"`
+	Values  []agentConfigValue `json:"config_values"`
+}
+
+type agentLedgerObj struct {
+	Name    string   `json:"name"`
+	Kind    string   `json:"kind"` // table | view
+	Columns []string `json:"columns"`
+	Does    string   `json:"does"`
+}
+
+type agentQueryShape struct {
+	Name string `json:"name"`
+	Use  string `json:"use"`
+	SQL  string `json:"sql"`
+}
+
+type agentConfigValue struct {
+	Form string `json:"form"`
+	Does string `json:"does"`
+}
+
+// ledgerObjectNotes explains each public object in one line; an object the
+// migrations create that is not listed here is implementation-only (a
+// DECISIONS.md entry records why) and is left out of the doc.
+var ledgerObjectNotes = map[string]string{
+	"identities":        "one row per person/company; identity_key per SPEC §4",
+	"field_values":      "append-only facts: (identity_id, field, value JSON, source, confidence, run_id, created_at)",
+	"relations":         "typed edges between identities, e.g. works_at (person → company)",
+	"runs":              "one row per gtme run; config_json is the resolved pipeline",
+	"run_records":       "a run's membership: state = last completed step id, verdicts = {step_id: pass|fail}",
+	"step_events":       "per-record trail: claimed|done|failed|skipped_cache|dry_run|simulated, detail JSON",
+	"costs":             "spend per step/record",
+	"deliveries":        "sends and handoffs, UNIQUE(target, idempotency); status accepted|confirmed|contradicted|sent",
+	"groups":            "named associations (ADR-021); character derived from events",
+	"group_events":      "append-only added|removed|touched events per (group, identity)",
+	"payloads":          "raw vendor responses, a purgeable cache tier (ADR-030) — never facts",
+	"field_value_ranks": "field_values ranked per (identity, field): confidence DESC, newest first",
+	"current_fields":    "rank-1 field_values — the current value per (identity, field), value still JSON-encoded",
+	"current_values":    "current_fields with value unwrapped from JSON — the view to query for plain values",
+	"group_members":     "current membership as (group_id, identity_id)",
+	"group_membership":  "current membership keyed by group_name — the view to query for membership",
+}
+
+// agentQueryShapes are the three canonical shapes SPEC §8 asks for: a
+// cross-type membership gate, a cross-record aggregate, a config-value query.
+var agentQueryShapes = []agentQueryShape{
+	{
+		Name: "cross-type membership gate (sql/filter)",
+		Use:  "keep people whose company is in a group — membership by ledger facts, via relations",
+		SQL: `SELECT r.from_id AS identity_id
+FROM relations r
+JOIN group_membership gm ON gm.identity_id = r.to_id AND gm.group_name = 'target-accounts'
+WHERE r.relation = 'works_at'`,
+	},
+	{
+		Name: "cross-record aggregate (sql/transform, company pipeline)",
+		Use:  "fan-in: count a company's known people into a field; declare provides: [acct.people_count]",
+		SQL: `SELECT r.to_id AS identity_id, count(*) AS "acct.people_count"
+FROM relations r
+WHERE r.relation = 'works_at'
+GROUP BY r.to_id`,
+	},
+	{
+		Name: "per-record derivation (sql/transform)",
+		Use:  "derive one field from another; declare provides: [sql.shout]",
+		SQL: `SELECT identity_id, upper(value) AS "sql.shout"
+FROM current_values WHERE field = 'full_name'`,
+	},
+	{
+		Name: "config value (one column → a list)",
+		Use:  "with: {domains: {query: ...}} — the list a source is parameterised by; zero rows fails plan",
+		SQL: `SELECT DISTINCT v.value
+FROM current_values v
+JOIN group_membership gm ON gm.identity_id = v.identity_id AND gm.group_name = 'qualified'
+WHERE v.field = 'company_domain'`,
+	},
+}
+
+var agentConfigValues = []agentConfigValue{
+	{"{query: \"SELECT ...\"}", "any value under with: — resolved read-only at plan and at run start; one column → a list, one row and one column → a scalar; zero rows is a plan error; the resolved rows print in the plan and land in runs.config_json (SPEC §7, §9)"},
+	{"{segment: NAME}", "the same, reading a segment saved with `gtme query --save NAME \"SQL\"` — a live computed list that may drift between plan and arm; snapshot into a group (`gtme groups add NAME --from-segment SEG`) when the list is a reviewed decision"},
+}
+
+// agentLedger renders the public read surface from a freshly migrated
+// throwaway ledger, so the columns are what the binary's migrations
+// actually build — never hand-maintained.
+func agentLedger() agentLedgerDoc {
+	doc := agentLedgerDoc{
+		Note:   "Read-only SQL (sql/transform, sql/filter, {query:} values, gtme query) is written against these. Prefer current_values and group_membership; the raw tables are for provenance. A sql/* step's result must carry identity_id; :run_id is bound when referenced.",
+		Shapes: agentQueryShapes,
+		Values: agentConfigValues,
+	}
+	dir, err := os.MkdirTemp("", "gtme-help-agent-*")
+	if err != nil {
+		return doc
+	}
+	defer os.RemoveAll(dir)
+	ctx := context.Background()
+	l, err := ledger.Open(ctx, filepath.Join(dir, "ledger.db"))
+	if err != nil {
+		return doc
+	}
+	defer l.Close()
+	// The ledger holds one connection: list the objects first, then read
+	// each one's columns — never a nested query while a result set is open.
+	rows, err := l.DB().QueryContext(ctx, `SELECT type, name FROM sqlite_master
+		WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name`)
+	if err != nil {
+		return doc
+	}
+	var objects []agentLedgerObj
+	for rows.Next() {
+		var kind, name string
+		if err := rows.Scan(&kind, &name); err != nil {
+			rows.Close()
+			return doc
+		}
+		if does, public := ledgerObjectNotes[name]; public {
+			objects = append(objects, agentLedgerObj{Name: name, Kind: kind, Does: does})
+		}
+	}
+	rows.Close()
+	for i := range objects {
+		cols, err := l.DB().QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, objects[i].Name)
+		if err != nil {
+			return doc
+		}
+		for cols.Next() {
+			var c string
+			if err := cols.Scan(&c); err == nil {
+				objects[i].Columns = append(objects[i].Columns, c)
+			}
+		}
+		cols.Close()
+	}
+	doc.Objects = objects
+	return doc
 }

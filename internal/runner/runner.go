@@ -225,7 +225,9 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		}
 		fmt.Fprintf(r.stderr, "resuming run %s (%s)\n", run.ID, run.Pipeline)
 	} else {
-		run, err := r.l.CreateRun(ctx, o.Plan.Pipeline.Name, o.Plan.Pipeline)
+		// The config snapshot is the RESOLVED pipeline (SPEC §7, ADR-037):
+		// {query:}/{segment:} values as they evaluated at this run's start.
+		run, err := r.l.CreateRun(ctx, o.Plan.Pipeline.Name, o.Plan.ResolvedPipeline())
 		if err != nil {
 			return nil, err
 		}
