@@ -19,6 +19,10 @@
         "token": {"type": "string", "minLength": 1}
       },
       "description": "ADR-038. Present only when the runner is collecting: the token the adapter emitted in a PENDING message. The adapter MUST NOT dispatch new work; it collects results for the records that follow, or emits PENDING again if they are not ready."
+    },
+    "preflight": {
+      "type": "boolean",
+      "description": "PROPOSED (ADR-040). Present (true) only in a preflight session: no records follow, and the adapter answers PREFLIGHT then END after checking the live target against this step's config (its variables: targets ride in config as ever)."
     }
   }
 }

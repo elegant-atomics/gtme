@@ -524,6 +524,7 @@ Runner → adapter:
 ```
 {"type":"OPEN","step_id":"...","run_id":"...","config":{...}}
 {"type":"OPEN","step_id":"...","run_id":"...","config":{...},"pending":{"token":"..."}}  // collecting (ADR-038)
+{"type":"OPEN","step_id":"...","run_id":"...","config":{...},"preflight":true}           // preflight session (ADR-040): no records follow
 {"type":"RECORD","key":{"entity_type":"person","identity_key":"..."},"fields":{...}}
 {"type":"END"}
 ```
@@ -536,6 +537,7 @@ Adapter → runner:
 {"type":"VERDICT","key":{...},"pass":true,"reason":"..."}  // filter steps
 {"type":"ATTEST","key":{...},"status":"confirmed|contradicted|inconclusive","reason":"..."}  // deliver steps declaring attests (§6)
 {"type":"PENDING","token":"...","detail":{...}}           // work in flight (ADR-038): collect under token
+{"type":"PREFLIGHT","status":"ok|blocked|inconclusive","checks":[{"name":"...","ok":true,"detail":"..."}]}  // deliver steps declaring preflights (§6)
 {"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"detail":{...}}
 {"type":"STATE","cursor":{...}}                            // resumable sources
 {"type":"LOG","level":"info|warn|error","msg":"..."}
@@ -591,6 +593,14 @@ Rules:
   collection does not answer fails as in any session. COST for deferred
   work arrives at collection. A runner that predates PENDING ignores it and
   fails the unanswered records — the honest degradation.
+- **Preflight (ADR-040):** a deliver adapter declaring `preflights` (§6)
+  answers a *preflight session* — OPEN with `preflight: true`, then END,
+  no records — with one PREFLIGHT then END: `ok`; `blocked`, a readable
+  fact says sends would be meaningless or wrong (the runner fails the step
+  before any record is dispatched, §8); `inconclusive`, the target could
+  not be read (reported ok with a warning). `checks` lists what was
+  examined for the receipt. An adapter that does not declare `preflights`
+  is never asked; one that is asked MUST NOT send anything in that session.
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
@@ -689,6 +699,12 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   `ai/compose` set this; it is what makes their one-call-per-batch-of-25
   behavior (§10.3, §10.5) a manifest fact the runner reads, not a
   special case hard-coded to those two adapter ids.
+- **Preflight (ADR-040):** a deliver adapter MAY declare `preflights:
+  true`, meaning it can check the live target against what a step is
+  about to send — read-only, zero spend, once per run — and answer
+  PREFLIGHT (§5) in a preflight session. The checks derive from the
+  step's own config and `variables:`; the operator configures nothing, and
+  `preflight: false` in adapter config skips them.
 - **Attestation (ADR-036):** a deliver adapter MAY declare `attests:
   true`, meaning that after a successful create it re-reads the target
   and reports a three-way verdict per record — `confirmed` (every
@@ -1064,6 +1080,27 @@ The group source (§9) takes `limit: N`: members served in `group_events`
 insertion order, oldest first. Ranked serve order is deliberately not
 provided; an upstream `sql/filter` narrows, `limit:` bounds.
 
+### Deliver preflight — the target is checked before anything sends (ADR-040)
+
+`gtme plan` proves gtme's contracts with zero network; it cannot know the
+target's state. For a deliver step whose adapter declares `preflights`
+(§6), the runner opens a preflight session (§5) **before any record
+session** — at `--dry-run` and at the start of an armed run — and reads
+the answer: `ok` proceeds; `inconclusive` proceeds with a receipt
+warning; **`blocked` fails the step before a single record is dispatched**
+— its records stay at the previous state, the run finishes `failed`, and
+`--resume` after the fix preflights again. A dry run reports the checks
+either way:
+
+```
+send: preflight ok — 4 checks (campaign active, 3 sequence steps, every variable referenced, no unfilled variants)
+send: preflight BLOCKED — sequence step 2 does not reference {{body_step_2}}
+```
+
+This is the class of failure attestation cannot see: every request
+succeeds and nothing meaningful sends. `plan` stays zero-network; under
+`--simulate` a stubbed adapter's preflight is part of the counted gap.
+
 ### Dry-run and the armed gate (ADR-019)
 
 `gtme run --dry-run` executes the pipeline normally **except** deliver
@@ -1414,6 +1451,11 @@ contract, pure YAML.
    `company_name`, `personalization`) maps into the lead body, and any
    other target name becomes a custom variable of that name. No merge
    field is hard-coded in the adapter.
+   Declares `preflights` (ADR-040): before sending, it checks that the
+   campaign exists and is Active, that the sequence has at least as many
+   steps as the copy assumes (the highest `_step_N` suffix among the
+   `variables:` targets), that every `variables:` target appears as
+   `{{name}}` in some step body, and that no A/B variant lacks one.
 7. **`mock-enrich-py`** (external, Python 3 stdlib only) — reads protocol
    from stdin, adds field `mock_score` (random but seeded from identity
    key), emits COST 0. Proves the external adapter path.
@@ -1818,22 +1860,6 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Built 2026-08-29
-  (changelog v0.20).** Signature and input hash computed in the runner's prepare
-  from the step config, the adapter's shape and the projection; lookup
-  over `done` events; verdict re-application for filters; the provenance
-  suffix; the AI respend warning retired; receipt wording.
-  ✅ E2E, offline: a re-run of a judgment pipeline with unchanged prompt
-  and inputs dispatches nothing (every record `skipped_cache` with reason
-  `same_judgment`, filter verdicts re-applied so downstream gating and
-  the terminus behave as in the first run, zero AI calls asserted via the
-  fixture log); changing the prompt re-judges every record; changing one
-  record's input field re-judges only that record; `cache: 1d` with a
-  ledger clock past the window re-judges; `respend: true` re-judges; a
-  compose's provenance carries the signature and `gtme show --provenance`
-  shows it; the AI respend warning no longer appears while the
-  paid-enrich one still does; `--simulate` of a judged pipeline
-  cache-skips; a deferred step cache-checks before submitting.
 - **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Built
   2026-08-29 (changelog v0.18).** PENDING and OPEN `pending` in `internal/protocol` and the
   schemas; the `pending`/`collected` step events and the `pending` run
@@ -1857,6 +1883,39 @@ decided contract, not shipped behavior.
   it; a credentialed enrich with no window warns the same way. The API
   engine's batch path is unit-tested against a stubbed Batches endpoint
   (submit, poll, results keyed by `custom_id`).
+- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Built 2026-08-29
+  (changelog v0.20).** Signature and input hash computed in the runner's prepare
+  from the step config, the adapter's shape and the projection; lookup
+  over `done` events; verdict re-application for filters; the provenance
+  suffix; the AI respend warning retired; receipt wording.
+  ✅ E2E, offline: a re-run of a judgment pipeline with unchanged prompt
+  and inputs dispatches nothing (every record `skipped_cache` with reason
+  `same_judgment`, filter verdicts re-applied so downstream gating and
+  the terminus behave as in the first run, zero AI calls asserted via the
+  fixture log); changing the prompt re-judges every record; changing one
+  record's input field re-judges only that record; `cache: 1d` with a
+  ledger clock past the window re-judges; `respend: true` re-judges; a
+  compose's provenance carries the signature and `gtme show --provenance`
+  shows it; the AI respend warning no longer appears while the
+  paid-enrich one still does; `--simulate` of a judged pipeline
+  cache-skips; a deferred step cache-checks before submitting.
+- **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Proposed
+  2026-08-29.** PREFLIGHT and OPEN `preflight` in `internal/protocol` and
+  the schemas; `preflights` in the manifest; the preflight session in the
+  runner ahead of a deliver step's record sessions at `--dry-run` and arm;
+  receipt wording; Instantly's four checks in its HTTP file; a fixture
+  adapter for the acceptance.
+  ✅ E2E, offline: a fixture deliver adapter declaring `preflights` answers
+  `ok`, `blocked`, and `inconclusive` in turn — `ok` delivers with the
+  checks on the receipt; `blocked` under `--dry-run` reports the check and
+  writes nothing, and armed fails the step with zero deliveries, zero
+  adapter record sessions, records at the previous state, run `failed`,
+  and `--resume` after flipping the fixture delivers; `inconclusive`
+  delivers with a warning; a non-preflighting adapter is never asked; a
+  pipeline with two deliver steps preflights each. Instantly's checks are
+  unit-tested against stubbed campaign and sequence endpoints: active,
+  paused, too few steps, an unreferenced variable, an unfilled variant, and
+  an unreadable target.
 
 Repo layout:
 ```
@@ -1997,6 +2056,15 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.21 — 2026-08-29 (ADR-040 packet: deliver preflight — PROPOSED, not yet accepted)
+**Added (proposed):** §5 PREFLIGHT and OPEN `preflight`; §6 `preflights`
+capability; §8 deliver preflight (dry-run/arm behaviour, receipt); §10
+item 6 Instantly's checks; §11 milestone M17;
+`spec/schemas/msg-preflight.schema.json`, `msg-open.schema.json`,
+`manifest.schema.json`, the wire README. Editorial: §11's M15/M16 order.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.20 — 2026-08-29 (M16 build: the judgment cache, built)
 **Changed:** §11 M16 marked built; no normative text changed — v0.19's
