@@ -1667,10 +1667,15 @@ now share one code path and the two hardcoded shapes are gone. (2) **Bare
 names always namespace**, including a name that coincides with a
 canonical field (`state` is a canonical person field — a location; a
 judgment called `state` silently landing there is exactly the collision
-ADR-033 exists to prevent). `gtme plan` notes the coincidence. This build
-has **no** syntax for mapping a declared name onto a canonical field; the
-spec text implies one exists and does not say what it is — queued as a
-spec question in AUDIT.md (b). (3) Entity-agnosticism is a planner rule
+ADR-033 exists to prevent); `gtme plan` notes the coincidence and names
+the opt-in. The opt-in is `canonical: true` on the declaration — the
+explicit form §4a/§7 implied without naming; queued as a spec question,
+human-approved and applied the same day (SPEC v0.16): the name must be
+canonical for the pipeline's entity type and a declared `type`/`enum`
+must agree with the registry entry, checked at plan. No aliasing (the
+declared name IS the field): the realistic need is "make this one
+global", and a rename would put a second name in the prompt for nothing.
+(3) Entity-agnosticism is a planner rule
 keyed on the `ai/` adapter-id prefix (ADR-026's operation-named AI steps,
 already how the runner recognises them): an AI step's entity type is the
 pipeline's — its source step's resolved entity type, or none after a
@@ -1710,8 +1715,8 @@ rejects `uses: [title]` against the company registry, and lands
 `accounts.tier` on company identities; `provides:` off an AI step, inside
 `with:`, or naming a reserved key fails plan naming step and key; and
 `--simulate` completes the declared pipeline on synthesized answers.
-**Spec impact:** None applied. Two spec-visible questions queued in
-AUDIT.md (b) for human decision: the canonical-mapping syntax and the
-manifest encoding of entity-agnosticism. §11 M14 is not marked built —
-step (1) of five is.
+**Spec impact:** v0.16 — `canonical: true` added to §7/§9 and the
+pipeline schema, §4a reworded (approved 2026-08-28). One spec-visible
+question remains queued in AUDIT.md (b): the manifest encoding of
+entity-agnosticism. §11 M14 is not marked built — step (1) of five is.
 

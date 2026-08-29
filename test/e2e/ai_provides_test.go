@@ -71,7 +71,7 @@ func TestAIDeclaredProvidesStoreNamespacedAndRejectEnum(t *testing.T) {
 		"projects:  qualify.state, qualify.rationale",
 		"provides:  qualify.subject",
 		`needs this pipeline's own judgment field "qualify.state" (declared by an earlier AI step, ADR-033)`,
-		`provides: "state" lands as "qualify.state" (per-campaign, ADR-033); the canonical person field "state" is untouched`,
+		`provides: "state" lands as "qualify.state" (per-campaign, ADR-033); the canonical person field "state" is untouched — add canonical: true to write it instead`,
 	} {
 		contains(t, plan.stderr, want, "plan output")
 	}
@@ -204,6 +204,72 @@ steps:
 		WHERE fv.field = 'accounts.tier' AND fv.value = '"a"' AND i.entity_type = 'company'`)
 	if n != 2 {
 		t.Errorf("accounts.tier on company identities = %d, want 2", n)
+	}
+}
+
+// TestCanonicalProvidesLandGlobally: `canonical: true` (SPEC §7) lands a
+// declared field on the canonical field of that name — global, so a deliver
+// step's variables: reach it unchanged — beside namespaced siblings; the
+// claim is registry-checked at plan, type and domain included.
+func TestCanonicalProvidesLandGlobally(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	pipeline := func(decl string) string {
+		return `name: outreach
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: write
+    use: ai/compose
+    uses: [title]
+    provides:
+` + decl + `    with:
+      prompt: Write.
+`
+	}
+	h.write("ok.yaml", pipeline(`      first_line: {canonical: true, type: string}
+      subject: {}
+`))
+	plan := h.mustRun("plan", "ok.yaml")
+	contains(t, plan.stderr, "provides:  first_line, outreach.subject", "plan output")
+	if strings.Contains(plan.stderr, "note:      provides:") {
+		t.Errorf("a canonical declaration is not a coincidence to note:\n%s", plan.stderr)
+	}
+
+	env := h.fixtureScript("ai.json", "$auto")
+	res := h.runWithEnv(env, "", "run", "ok.yaml")
+	if res.code != 0 {
+		t.Fatalf("exit = %d\nstderr:\n%s", res.code, res.stderr)
+	}
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'first_line' AND source = 'ai/compose @ fixture'`); n != 3 {
+		t.Errorf("canonical first_line rows = %d, want 3", n)
+	}
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field IN ('outreach.first_line', 'ps_line')`); n != 0 {
+		t.Errorf("first_line must land canonically and ps_line not at all: %d stray rows", n)
+	}
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'outreach.subject'`); n != 3 {
+		t.Errorf("outreach.subject rows = %d, want 3", n)
+	}
+
+	for _, tc := range []struct{ name, decl, want string }{
+		{"not canonical", "      opener: {canonical: true}\n",
+			`provides: "opener" is marked canonical but is not a canonical person field`},
+		{"near miss", "      first_lines: {canonical: true}\n", `did you mean "first_line"?`},
+		{"type mismatch", "      follower_count: {canonical: true, type: string}\n",
+			`provides: "follower_count" declares type string but the canonical person field is integer`},
+		{"enum on non-string", "      follower_count: {canonical: true, enum: [a]}\n",
+			`declares an enum but the canonical person field is integer, not string`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := h.write(strings.ReplaceAll(tc.name, " ", "-")+".yaml", pipeline(tc.decl))
+			res := h.run("plan", path)
+			if res.code != 2 {
+				t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+			}
+			contains(t, res.stderr, tc.want, "stderr")
+		})
 	}
 }
 

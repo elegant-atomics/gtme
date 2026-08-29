@@ -448,8 +448,9 @@ Three tiers:
    range string).
 3. **Vendor namespace**: everything else as `<vendor>.<field>` (e.g.
    `apollo.id`). Declared AI outputs (ADR-033) default into this tier
-   under the *pipeline's* name — `<pipeline>.<field>` — unless the step's
-   config maps a name to a canonical field: a judgment is a fact about
+   under the *pipeline's* name — `<pipeline>.<field>` — unless the
+   declaration marks the field `canonical: true` (§7, §9), in which case
+   it lands on the canonical field of that name: a judgment is a fact about
    working the entity in one campaign, and two campaigns' judgments about
    one identity MUST NOT collide in `field_values`. Stored with provenance, queryable, usable in `uses:` and
    `variables:`. A canonical name MUST NOT contain a dot; a dot marks a
@@ -718,9 +719,15 @@ the derived provides exactly as it validates static provides (§5).
 
 **Declared AI provides (ADR-033):** an AI-role step MAY carry a step-level
 `provides:` — a list of field names, or a JSON-Schema object whose
-property names are the fields and whose values MAY declare `type` and
-`enum`. The planner treats it as dynamic provides above; names MUST be
-canonical or namespaced and default into `<pipeline>.<field>` (§4a). The
+property names are the fields and whose values MAY declare `type`,
+`enum`, and `canonical`. The planner treats it as dynamic provides above.
+Every bare name defaults into `<pipeline>.<field>` (§4a) — a name that
+happens to coincide with a canonical field included, which `gtme plan`
+MUST note — and a name written with a dot is kept as written. A field
+marked `canonical: true` lands on the canonical field of that name
+instead (global, not per-campaign): the name MUST be canonical for the
+pipeline's entity type, and a declared `type` or `enum` MUST agree with
+the registry entry, or the plan fails naming the step and field. The
 runtime validates the model's output against the derived schema with the
 existing retry (§10.3), and an `enum` violation is a validation failure,
 never stored. A filter with `provides:` emits VERDICT and RECORD (§5). A
@@ -1124,7 +1131,8 @@ Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
 it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
 valid only on AI-backed roles: the step's declared output fields, a list
-of names or a JSON-Schema object (§7); the planner rejects it elsewhere. Deliver adapters are ordinary
+of names or a map of name → `{type, enum, canonical}` (§7); the planner
+rejects it elsewhere. Deliver adapters are ordinary
 `steps:` entries (ADR-031): a pipeline MAY carry zero, one, or many, at
 any position — steps execute strictly in order, so a deliver step sends
 exactly the records that survived everything before it. `variables:`
@@ -1823,6 +1831,16 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.16 — 2026-08-28 (M14 step 1 build: `canonical: true` on declared AI provides)
+**Added:** §7/§9 `canonical: true` on a declared AI output field — the
+explicit mapping onto a canonical field that §4a/§7 implied without
+naming (found building ADR-033, queued in AUDIT.md (b), human-approved
+2026-08-28); §4a tier 3 reworded to point at it. Every bare name
+namespaces otherwise, canonical-looking or not, and `gtme plan` notes the
+coincidence. `spec/schemas/pipeline.schema.json`: a `provides` map value
+is null or an object of `type`/`enum`/`canonical`.
+**Not changed:** §11 M14 stays queued — step (1) of five is built.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
 **Added:** §7 declared AI provides, config values from the ledger, SQL at

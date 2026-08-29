@@ -242,6 +242,15 @@ func TestProvidesDeclarationShapes(t *testing.T) {
 		t.Errorf("map form order = %+v", fields)
 	}
 
+	s, err = parse(t, "      first_line: {canonical: true, type: string}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err = s.ProvidesFields()
+	if err != nil || len(fields) != 1 || !fields[0].Canonical || fields[0].Type != "string" {
+		t.Errorf("canonical form = %+v, %v", fields, err)
+	}
+
 	for _, tc := range []struct{ name, yaml, want string }{
 		{"empty list", "      []\n", "at least one field"},
 		{"blank name", `      [""]` + "\n", "non-empty field names"},
@@ -252,6 +261,8 @@ func TestProvidesDeclarationShapes(t *testing.T) {
 		{"enum repeat", "      x: {enum: [a, a]}\n", "repeats"},
 		{"unknown keyword", "      x: {description: hi}\n", `unknown keyword "description"`},
 		{"enum vs type", "      x: {type: integer, enum: [a]}\n", "contradicts"},
+		{"canonical not bool", "      x: {canonical: yes}\n", "canonical must be true or false"},
+		{"canonical with dot", "      v.x: {canonical: true}\n", "must not contain a dot"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parse(t, tc.yaml)

@@ -145,24 +145,19 @@ second implementation would need the answer to interoperate — so the code
 takes the conservative reading and the question is queued here.
 
 1. **How does a step's config "map a name to a canonical field"?** §4a
-   tier 3 and §7 both say declared AI outputs default to
+   tier 3 and §7 both said declared AI outputs default to
    `<pipeline>.<field>` "unless the step's config maps a name to a
    canonical field", but neither §9 nor `spec/schemas/pipeline.schema.json`
-   defines a mapping form — a `provides:` value may carry only `type` and
-   `enum`. The build namespaces every bare name, canonical-looking or not
-   (`state` is a canonical person field; a judgment must not land in a
-   location), and notes the coincidence at plan time; there is currently
-   no way to declare a canonical output on an AI step.
-   **Proposed diff (pick one):** (i) name-matching is the mapping — a
-   declared bare name that is canonical for the pipeline's entity type
-   stays canonical (global), everything else namespaces; §4a/§7 reworded
-   to say so and `gtme plan` keeps the note. Simple, mirrors `http/enrich`,
-   but a judgment named `state` silently becomes a location fact. (ii) An
-   explicit keyword on the declaration, e.g. `provides: {first_line:
-   {canonical: true}}` or `{opener: {as: first_line}}` — §7 lists it beside
-   `type`/`enum`, `pipeline.schema.json` gains it. Explicit, no silent
-   global write; one more keyword. The build is one function away from
-   either (`planner.deriveAIProvides`).
+   defined a mapping form — a `provides:` value could carry only `type`
+   and `enum`. Name-matching was rejected (`state` is a canonical person
+   field; a judgment must not land in a location).
+   **Applied (approved 2026-08-28, SPEC v0.16):** `canonical: true` on the
+   declaration — §7 states the rule (the name must be canonical for the
+   pipeline's entity type; declared `type`/`enum` must agree with the
+   registry), §9 lists the keyword, §4a points at it, the pipeline schema
+   constrains a map value to null or `{type, enum, canonical}`. Every
+   other bare name namespaces, and `gtme plan` notes a coincidence with a
+   canonical field and names the opt-in.
 
 2. **How does a manifest declare that it is entity-agnostic?** §10.3
    (items 3 and 5) says "the manifest is entity-agnostic: the step's

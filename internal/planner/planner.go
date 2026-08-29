@@ -721,9 +721,10 @@ var reservedOutputNames = map[string]string{
 
 // deriveAIProvides turns a step's provides: declaration into its effective
 // provides schema (SPEC §7, ADR-033): each name lands as written when it is
-// already namespaced, else as <pipeline>.<name> (SPEC §4a — a judgment is a
-// fact about working the entity in one campaign; two campaigns' judgments
-// about one identity must not collide). The schema carries the declared type
+// already namespaced or marked canonical (a registry-checked claim), else as
+// <pipeline>.<name> (SPEC §4a — a judgment is a fact about working the entity
+// in one campaign; two campaigns' judgments about one identity must not
+// collide). The schema carries the declared type
 // and enum per field, requires every field, and admits nothing else. Notes
 // surface where a bare name coincides with a canonical field, so the operator
 // sees that the canonical field is untouched.
@@ -737,11 +738,42 @@ func deriveAIProvides(decl []pipeline.ProvidesField, role, pipelineName, entityT
 			continue
 		}
 		name := f.Name
-		if !registry.IsNamespaced(name) {
+		switch {
+		case f.Canonical:
+			// The declared name IS the canonical field (SPEC §7): global, not
+			// per-campaign — so the claim is checked against the registry,
+			// type and domain included, before anything can land there.
+			if reg != nil && reg.Known(entityType) {
+				entry, ok := reg.Lookup(entityType, f.Name)
+				if !ok {
+					msg := fmt.Sprintf("provides: %q is marked canonical but is not a canonical %s field (see spec/fields/%s.json)", f.Name, entityType, entityType)
+					if sugg := reg.Suggest(entityType, f.Name); sugg != "" {
+						msg += fmt.Sprintf(" — did you mean %q?", sugg)
+					}
+					problems = append(problems, msg)
+					continue
+				}
+				if f.Type != "" && f.Type != entry.Type {
+					problems = append(problems, fmt.Sprintf("provides: %q declares type %s but the canonical %s field is %s", f.Name, f.Type, entityType, entry.Type))
+					continue
+				}
+				if len(f.Enum) > 0 && entry.Type != "string" {
+					problems = append(problems, fmt.Sprintf("provides: %q declares an enum but the canonical %s field is %s, not string", f.Name, entityType, entry.Type))
+					continue
+				}
+				if len(entry.Enum) > 0 {
+					for _, v := range f.Enum {
+						if !containsStr(entry.Enum, v) {
+							problems = append(problems, fmt.Sprintf("provides: %q enum value %q is outside the canonical domain %v", f.Name, v, entry.Enum))
+						}
+					}
+				}
+			}
+		case !registry.IsNamespaced(name):
 			name = pipelineName + "." + f.Name
 			if reg != nil {
 				if _, canonical := reg.Lookup(entityType, f.Name); canonical {
-					notes = append(notes, fmt.Sprintf("provides: %q lands as %q (per-campaign, ADR-033); the canonical %s field %q is untouched",
+					notes = append(notes, fmt.Sprintf("provides: %q lands as %q (per-campaign, ADR-033); the canonical %s field %q is untouched — add canonical: true to write it instead",
 						f.Name, name, entityType, f.Name))
 				}
 			}

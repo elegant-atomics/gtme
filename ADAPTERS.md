@@ -263,6 +263,10 @@ call. Declared fields land namespaced by pipeline — `qualify.state`,
 `qualify.rationale` for a pipeline named `qualify` — so two campaigns'
 judgments about one identity never collide; a later step reads them as
 `uses: [qualify.state]`. A name written with a dot is kept as written.
+To write a canonical field instead (global, shared across campaigns —
+`first_line`, say, so a deliver step's `variables:` keep reaching it),
+mark it `canonical: true`; the plan checks the name, type and domain
+against the registry.
 AI steps are entity-agnostic: inside a company pipeline they plan and
 validate against the company registry.
 
@@ -283,7 +287,9 @@ Batched LLM writing: provides `first_line` and `ps_line` by default, or
 whatever the step's `provides:` declares (ADR-033 — same declaration,
 same namespacing and validation as `ai/filter` above; a compose declaring
 `provides: [subject, body]` in pipeline `outreach` writes
-`outreach.subject` and `outreach.body` and nothing else). Output is
+`outreach.subject` and `outreach.body` and nothing else; `provides:
+{first_line: {canonical: true}, subject: {}}` writes canonical
+`first_line` beside `outreach.subject`). Output is
 validated against the schema with one retry on malformed output. `uses:`
 declares what the prompt may reference — including fields `http/enrich`
 fetched, which is how compose gets grounded in a prospect's actual

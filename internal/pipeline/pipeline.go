@@ -59,8 +59,9 @@ type Step struct {
 	Uses []string `yaml:"uses,omitempty" json:"uses,omitempty"`
 	// Provides declares an AI-backed step's output fields (SPEC §7, §9,
 	// DECISIONS.md ADR-033): a list of field names, or a map of field name →
-	// {type?, enum?}. The planner derives the step's effective provides from
-	// it (namespaced by pipeline unless already namespaced) and the runtime
+	// {type?, enum?, canonical?}. The planner derives the step's effective
+	// provides from it (namespaced by pipeline unless already namespaced or
+	// marked canonical) and the runtime
 	// validates the model's output against the derived schema. Valid only on
 	// AI-backed filter/compose steps; the planner enforces that, as with Uses.
 	// Kept as decoded YAML here; ProvidesFields is the parsed form.
@@ -288,6 +289,10 @@ type ProvidesField struct {
 	// Enum is the value domain when declared; a value outside it is a
 	// validation failure at run time, never stored (SPEC §7).
 	Enum []string
+	// Canonical marks the declared name as a canonical field of the
+	// pipeline's entity type (SPEC §7): the output lands there, global,
+	// instead of namespaced by pipeline. The planner validates the claim.
+	Canonical bool
 }
 
 // providesTypes are the JSON-Schema types a declared field may carry.
@@ -386,9 +391,18 @@ func parseProvidesField(name string, raw any) (ProvidesField, error) {
 				seen[str] = true
 				f.Enum = append(f.Enum, str)
 			}
+		case "canonical":
+			b, ok := v.(bool)
+			if !ok {
+				return f, fmt.Errorf("provides: %s: canonical must be true or false (got %#v)", name, v)
+			}
+			f.Canonical = b
 		default:
-			return f, fmt.Errorf("provides: %s: unknown keyword %q (a declared field may carry type and enum, SPEC §7)", name, k)
+			return f, fmt.Errorf("provides: %s: unknown keyword %q (a declared field may carry type, enum and canonical, SPEC §7)", name, k)
 		}
+	}
+	if f.Canonical && strings.Contains(name, ".") {
+		return f, fmt.Errorf("provides: %s: a canonical name must not contain a dot (SPEC §4a) — drop canonical: true or the namespace", name)
 	}
 	if len(f.Enum) > 0 && f.Type != "" && f.Type != "string" {
 		return f, fmt.Errorf("provides: %s: an enum is a string domain; type %q contradicts it", name, f.Type)
