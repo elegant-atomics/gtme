@@ -10,6 +10,15 @@
     "type": {"const": "OPEN"},
     "step_id": {"type": "string", "description": "The pipeline step id this session serves."},
     "run_id": {"type": "string", "description": "ULID of the run."},
-    "config": {"type": "object", "description": "The step's resolved `with:` block, validated against the manifest's config_schema before it is sent."}
+    "config": {"type": "object", "description": "The step's resolved `with:` block, validated against the manifest's config_schema before it is sent."},
+    "pending": {
+      "type": "object",
+      "required": ["token"],
+      "additionalProperties": false,
+      "properties": {
+        "token": {"type": "string", "minLength": 1}
+      },
+      "description": "PROPOSED (ADR-038). Present only when the runner is collecting: the token the adapter emitted in a PENDING message. The adapter MUST NOT dispatch new work; it collects results for the records that follow, or emits PENDING again if they are not ready."
+    }
   }
 }

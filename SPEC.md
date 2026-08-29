@@ -190,7 +190,7 @@ CREATE TABLE runs (
   config_json TEXT NOT NULL,              -- resolved pipeline config snapshot
   started_at  TEXT NOT NULL,
   finished_at TEXT,
-  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed
+  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed|pending (ADR-038: ended with a step in flight)
 );
 
 CREATE TABLE run_records (
@@ -206,7 +206,7 @@ CREATE TABLE step_events (
   run_id      TEXT NOT NULL,
   step_id     TEXT NOT NULL,
   identity_id TEXT,                       -- null for step-level events
-  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache
+  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)
   detail      TEXT,                       -- JSON
   created_at  TEXT NOT NULL
 );
@@ -523,6 +523,7 @@ this section; the examples here MUST match them.
 Runner → adapter:
 ```
 {"type":"OPEN","step_id":"...","run_id":"...","config":{...}}
+{"type":"OPEN","step_id":"...","run_id":"...","config":{...},"pending":{"token":"..."}}  // collecting (ADR-038)
 {"type":"RECORD","key":{"entity_type":"person","identity_key":"..."},"fields":{...}}
 {"type":"END"}
 ```
@@ -534,6 +535,7 @@ Adapter → runner:
 {"type":"RECORD","key":{...},"fields":{...},"confidence":{"email":0.93}}
 {"type":"VERDICT","key":{...},"pass":true,"reason":"..."}  // filter steps
 {"type":"ATTEST","key":{...},"status":"confirmed|contradicted|inconclusive","reason":"..."}  // deliver steps declaring attests (§6)
+{"type":"PENDING","token":"...","detail":{...}}           // work in flight (ADR-038): collect under token
 {"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"detail":{...}}
 {"type":"STATE","cursor":{...}}                            // resumable sources
 {"type":"LOG","level":"info|warn|error","msg":"..."}
@@ -577,6 +579,18 @@ Rules:
   that says nothing about a record is `inconclusive`. An adapter that does
   not declare `attests` MUST NOT emit ATTEST; a runner ignores one that
   does. Runners that predate the message ignore it, per the rule above.
+- **In flight (ADR-038):** a session MAY end with work it cannot answer
+  yet by emitting one PENDING carrying a provider-opaque `token`, after any
+  records it could answer and before END. Every dispatched record the
+  session did not answer is then pending under that token: the runner
+  records it, does not advance it, and finishes the run `pending` (§8). To
+  collect, the runner opens a session whose OPEN carries `pending: {token}`
+  followed by the same records and END; the adapter MUST NOT dispatch new
+  work in such a session — it answers from the token with the ordinary
+  messages, or emits PENDING again if the work is not ready. A record a
+  collection does not answer fails as in any session. COST for deferred
+  work arrives at collection. A runner that predates PENDING ignores it and
+  fails the unanswered records — the honest degradation.
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
@@ -918,6 +932,38 @@ table's `UNIQUE(target, idempotency)` constraint (§3) — replaying the same
 event through the pipeline twice produces at most one delivery. Per-event
 low latency is explicitly out of scope for v0.
 
+### In-flight steps — `deferred: true` and `--resume` collects (ADR-038)
+
+An AI step MAY carry `deferred: true` in its config (§10.3, §10.5): the
+`api` engine submits the batch to the provider's batch surface (the
+Message Batches API, `custom_id` = identity key) instead of answering in
+the request, and the session ends with PENDING (§5). The run then finishes
+with status **`pending`** — a run that ended with a step in flight is not
+`done` — and the receipt reports, per step, how many records are in
+flight, the token, and the verb that collects:
+
+```
+judge: 25 in, 0 out — 25 in flight (msgbatch_01…); collect with `gtme run --resume 01J…`
+```
+
+`gtme run --resume RUN_ID|last` is the collection verb: it reaches the
+step, finds the records pending under this step, and collects (§5). If the
+provider is still processing, the step emits PENDING again and the run
+stays `pending`; resume again later — from a shell, a cron, whatever
+invokes gtme, since gtme has no daemon and nothing waits (§13). Once every
+pending record is answered the run continues through the remaining steps
+in the same invocation and finishes `done` (or `failed`). Strict ordering
+(§7) is what holds everything downstream: a deliver step after a deferred
+judgment does not run until the judgment has landed, and it is gated by
+the same plan and the same dry run as ever. `gtme runs` lists `pending`
+runs with their in-flight count. `--simulate` runs a deferred step
+synchronously on the fixture engine (a rehearsal that ended in flight
+would rehearse nothing) and says so; `--dry-run` defers exactly as an
+armed run does, since a deferred judgment spends the same tokens either
+way. A record pending under a token is never re-dispatched by a new run
+of the same pipeline: it is not done, so a fresh run sources it again and
+judges it again — collect first.
+
 ### deliver idempotency
 
 Per deliver step: idempotency key = the value of the field named by the
@@ -1159,7 +1205,9 @@ steps:
     idempotency: email
 ```
 
-Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
+Schema rules: `deferred: true` inside an AI step's `with:` sends its batch
+to the provider's batch surface and ends the run in flight (§8, ADR-038);
+it is adapter config, not grammar. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
 it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
@@ -1301,7 +1349,11 @@ contract, pure YAML.
    shared/payload split exposed so the order is A/B-able and a cache
    breakpoint can sit between them. AI steps hold no tools. The manifest is
    entity-agnostic (`"entity_type": "*"`, §6): the step's entity type is
-   the pipeline's.
+   the pipeline's. `deferred: true` (ADR-038) routes the batch to the
+   Message Batches API under `custom_id` = identity key and ends the
+   session with PENDING (§5, §8); the `claude-code` engine has no batch
+   surface and ignores it with a plan warning; the fixture engine answers
+   synchronously.
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
    lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
    one-of `linkedin_url` | `linkedin_internal_url` |
@@ -1726,6 +1778,24 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
+- **M15 — asynchronous steps (ADR-038; §3, §5, §8, §9, §10). Proposed
+  2026-08-28.** PENDING and OPEN `pending` in `internal/protocol` and the
+  schemas; the `pending`/`collected` step events and the `pending` run
+  status; collection in the runner's dispatch behind `--resume`; the API
+  engine's batch submit/collect path (`custom_id` = identity key);
+  `deferred` in the AI manifests' `config_schema`; receipt and `gtme runs`
+  wording; the fixture engine's scripted PENDING for tests.
+  ✅ E2E, offline: a deferred `ai/filter` ends the run `pending` with zero
+  verdicts, zero cost, and a receipt naming the token and the resume
+  command; a first `--resume` whose collection is still processing leaves
+  the run `pending`; a second `--resume` collects — verdicts land, COST
+  lands under the same run, downstream steps run, the run finishes `done`;
+  a third `--resume` does nothing twice; a non-deferred step in the same
+  pipeline is unaffected; `--simulate` runs the deferred step synchronously
+  and says so; a fresh run of the same pipeline before collection judges
+  the records again rather than touching the token. The API engine's batch
+  path is unit-tested against a stubbed Batches endpoint (submit, poll,
+  results keyed by `custom_id`).
 
 Repo layout:
 ```
@@ -1866,6 +1936,17 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.17 — 2026-08-28 (ADR-038 packet: asynchronous steps — PROPOSED, not yet accepted)
+**Added (proposed):** §5 PENDING message and OPEN `pending`, with the
+in-flight rules; §8 in-flight steps (`deferred: true`, the `pending` run
+status, `--resume` as the collection verb, receipt wording); §9/§10 items 3
+and 5 `deferred: true`; §11 milestone M15; `spec/schemas/msg-pending.schema.json`,
+`msg-open.schema.json`. §3 DDL comments: `runs.status` gains `pending`,
+`step_events.event` gains `pending|collected` — comments only, no
+migration, mirrored to `spec/ledger.sql`.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.16 — 2026-08-28 (M14 step 1 build: `canonical: true` on declared AI provides)
 **Added:** §7/§9 `canonical: true` on a declared AI output field — the
