@@ -23,6 +23,18 @@ person-entity members partway through? Does `expand` mint a sub-run, or
 does `run_records` need a third dimension? Unresolved; needs a design pass
 before `expand` gets a manifest shape.
 
+**Retired by composition (2026-08-28, ADR-037).** A runnable test built the
+account shape from shipped atoms: three of its four cardinality moves ran
+today (the cross-type gate as `sql/filter`, the fan-in as a cross-record
+transform, the company judged on the aggregate), and the fourth — a
+company fanning into its people — needed a config value drawn from the
+ledger, not a role. Fan-out at a pipeline boundary never raises the open
+run-membership question above, because membership is fresh per run. What
+remains of `expand` is single-file ergonomics, and single-file would
+*remove* a review gate (ADR-031 arms every deliver in a run at once), so
+it is not a safety improvement. Kept here as a convenience item only;
+the open question is retired, not solved — nothing needs it answered.
+
 ## Pipes as a transport, not a syntax
 
 DECISIONS.md ADR-005 killed pipe syntax as a v0 *authoring* surface (`gtme
@@ -75,6 +87,25 @@ groups that *own* behavior, parked here so it isn't built early:
   `<group>`, via `works_at`": real, and the same relation-traversal
   territory as the `expand` role above; they should be designed together.
 
+**Tested and held (2026-08-28, ADR-032).** The excluded half — group-owned
+lifecycle state machines — was put under the strongest pressure available:
+a real multi-stage system whose operational layer is built from exactly
+the refused primitives (holds requiring an explicit release to authorise
+spend, leases with TTLs, attempt counters with backoff, a third worker
+outcome that returns a subject uncharged, ranked serve order). Read
+compositionally, that whole layer collapses into ADR-032: the handoff to
+the next stage is a *delivery*, so it inherits the review artifact, the
+arming gate, idempotency, suppression, completeness policy, and touch
+history already built for one. One step and one config key against six
+keys, a table, a migration, and a shared invariant. **Consequence: holds,
+releases, leases, attempt counters, and ranked serve order will not be
+built.** This is now a tested position rather than a design instinct, and
+the test generalizes: atoms compose and mechanisms do not — a candidate
+that does one specific thing one specific way, combines with nothing, and
+introduces a shared invariant is a mechanism, and mechanisms arrive
+disguised as the obvious fix. The cross-type traversal item above turned
+out not to need `expand` at all: it is a `sql/filter` today.
+
 ## SQL segments as pipeline sources
 
 Named in SPEC §1's long-term list; sharpened by the groups discussion
@@ -90,6 +121,14 @@ decided, extensional half); a segment-as-source remains the intensional
 half, still needing the design pass above. The
 `gtme groups add --from-segment` snapshot affordance (ADR-021) covers the
 common case in the meantime.
+
+**Half delivered (2026-08-28, ADR-037).** A segment (or an inline query) may
+now feed any *config value* — `domains: {segment: qualified-domains}` on a
+source — resolved at plan time with rows shown, recorded per run. That
+touches neither run membership nor identity minting, so it needs none of
+the snapshotting semantics above; when stability matters, snapshot into a
+group first. Segments as the run's *records themselves* still needs the
+design pass and stays parked.
 
 ## Floor→ceiling growth loop
 
@@ -171,3 +210,41 @@ and launching pipelines, monitoring runs, or doing the fuzzy per-record
 research step, sitting *on top of* the CLI rather than replacing it. If
 this gets built, it's a thin control-plane wrapper that shells out to `gtme`
 — the wire protocol and ledger stay the single source of truth.
+
+## Patterns as runnable bundles
+
+If capability grows by documented assembly rather than by new grammar,
+the pattern library becomes the real growth surface over time, and its
+*form* is a design question. Prose pattern libraries rot silently. A
+pattern shipped as a campaign bundle (ADR-029) would mean an agent does
+not read about an assembly — it runs it, reads the receipt, and diffs its
+own variant against a known-good one, free and deterministic under
+`--simulate`; staleness becomes detectable, because a pattern that stops
+simulating is out of date and CI can say so. Adds no surface. Needs a
+design pass on where such bundles live, how they are indexed for an
+agent, and whether they belong in-repo or in a companion catalog. The
+limit worth recording alongside: patterns transfer structure, never
+judgment — which fields a campaign should judge on and what to conclude
+is empirical knowledge about a market, and the ledger (verdicts and
+reasons persist) is how that gets earned, run by run.
+
+## Asynchronous steps
+
+Named 2026-08-28, not specified. A step that may return PENDING with a
+token instead of records, so a run ends with the step in flight and a
+later run (or `--resume`) hands the token back and collects. One
+mechanism serves two needs: the Message Batches API — AI steps at 50% of
+the per-token price, results keyed by `custom_id` in any order, which is
+gtme's record shape — and `listen`-style provider polling. Additive to
+the wire protocol (unknown message types are already ignored). Needs an
+ADR on run-record state and receipt rendering for in-flight steps.
+
+## Deliver preflight
+
+Named 2026-08-28, not specified. A deliver adapter MAY declare checks
+against the live target that `plan` or `--dry-run` runs before arming:
+campaign status is Active, step count matches, every merge field the
+copy expects is actually referenced by the template, no A/B variants —
+the class of failure where every request succeeds and nothing sends.
+Manifest capability, per adapter; the Instantly adapter is the first
+candidate.
