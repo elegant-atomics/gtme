@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtme.spec/schemas/msg-preflight.schema.json",
+  "title": "PREFLIGHT (adapter → runner)",
+  "description": "PROPOSED (ADR-040, not yet accepted). A deliver adapter's answer, in a preflight session (OPEN with preflight: true, no records), to whether the live target is fit to send to: ok; blocked (a readable fact says sends would be meaningless or wrong — the runner fails the step before any record is dispatched); inconclusive (the target could not be read — reported ok with a warning). checks is what was examined, for the receipt.",
+  "type": "object",
+  "required": ["type", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {"const": "PREFLIGHT"},
+    "status": {"enum": ["ok", "blocked", "inconclusive"]},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "ok"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "ok": {"type": "boolean"},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "reason": {"type": "string", "description": "Why blocked or inconclusive. Omitted when empty."}
+  }
+}

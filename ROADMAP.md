@@ -279,3 +279,33 @@ copy expects is actually referenced by the template, no A/B variants —
 the class of failure where every request succeeds and nothing sends.
 Manifest capability, per adapter; the Instantly adapter is the first
 candidate.
+
+**Promoted (2026-08-29, ADR-040 — proposed).** At `--dry-run` and arm
+time, not `plan` (which stays zero-network): a short preflight session
+per deliver step, a three-way answer (`ok` / `blocked` / `inconclusive`),
+checks derived from the step's own `variables:`; Instantly first.
+
+## Email waterfall as a pattern, not a provider
+
+Named 2026-08-29. §13 keeps email waterfall *providers* and the
+`waterfall:` syntax as non-goals, and neither is needed: N `http/enrich`
+steps each providing `email` are a waterfall by construction, because a
+step whose provides are already current cache-skips (§7) — the chain
+falls through on its own. A verifier is one more `http/enrich` providing
+`email_status` (a canonical field already) and a `sql/filter` on it.
+Ships as a *pattern* — runnable, fixture-served, under "patterns as
+runnable bundles" — not as vendor adapters; an operator's finder is their
+own binding in `~/.gtme/adapters/`. The one reach gap: finders that are
+asynchronous (submit, poll later) need bindings to emit PENDING
+(ADR-038's mechanism, not yet extended to the binding engine).
+
+## Seat-coordinated composition (the A-4 question)
+
+Named 2026-08-29. Writing several people at one account as one story with
+a different angle per seat wants the composer to see the siblings. The
+mechanism-shaped answer is a batching key ("batch by company"); the
+accepted answer for now is a `sql/transform` that writes each person the
+committee's titles as a field, so every prompt carries the sibling facts
+and the model writes one person at a time knowing who else is written
+to. Revisit only if receipts show seat copy converging; a batching key is
+then a small change to how the runner chunks, not a new step.

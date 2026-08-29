@@ -78,6 +78,10 @@
       "type": "boolean",
       "description": "ADR-036, deliver adapters only: after a successful create the adapter re-reads the target and emits an ATTEST per record (SPEC.md §5) — confirmed | contradicted | inconclusive. Absent, every delivery stays `accepted` and is reported inconclusive (the honest default)."
     },
+    "preflights": {
+      "type": "boolean",
+      "description": "PROPOSED (ADR-040), deliver adapters only: the adapter can check the live target against what a step is about to send (SPEC.md §5 PREFLIGHT) — read-only, at --dry-run and arm time. Absent, no preflight runs."
+    },
     "payload_ttl_days": {
       "type": "integer",
       "minimum": 0,

@@ -1248,6 +1248,64 @@ and the respend warning narrowed; §10a provenance format
 `ai/<op> @ <model-id>#<signature>`; §3 `step_events.detail` keys
 (prose, no DDL); §11 milestone M16.
 
+### ADR-040: Deliver preflight — the target is checked before anything sends
+**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Deliver
+preflight"; Accepted on merge)
+**Context:** `gtme plan` proves gtme's own contracts — needs, provides,
+credentials, config — with zero network (§7). It knows nothing about the
+*target's* state, and the class of failure that produces is the one
+attestation (ADR-036) cannot see: every request returns 200 and nothing
+meaningful sends. The incident that names it: 269 leads added to a
+campaign whose template never referenced the merge variable the copy was
+in — 0 replies, no error anywhere, days lost before anyone looked at the
+template. The same class: a campaign that is paused, a sequence with
+fewer steps than the copy assumes, an A/B variant pulling a template the
+variables do not fill. Low reply numbers are ambiguous between "the pack
+is wrong" and "the plumbing is wrong"; without a preflight the two cannot
+be told apart, so the wrong thing gets tuned.
+**Decision:** (1) **A deliver adapter MAY declare `preflights: true`** in
+its manifest (§6, beside `attests`), meaning it can check the live target
+against what the step is about to send — read-only, zero spend, one or
+two calls per run, never per record. (2) **The runner asks before it
+sends.** At `--dry-run` and at the start of an armed run, before any
+record session, the runner opens a short session per preflighting deliver
+step — OPEN with `preflight: true` and END, no records — and the adapter
+answers `PREFLIGHT {status, checks}` (§5): `ok`, `blocked` (a readable
+fact says sends would be meaningless or wrong), or `inconclusive` (the
+target could not be read — reported ok with a warning, since the sends
+themselves would surface an unreachable target and a false block is the
+dangerous direction here too). `checks` is a list of `{name, ok, detail}`
+for the receipt. A `blocked` armed run fails the step before a single
+record is dispatched — its records stay at the previous state, the run
+finishes `failed`, and `--resume` after the fix preflights again; a dry
+run reports the checks either way. (3) **The checks derive from the step,
+not from config.** The adapter knows the campaign and the `variables:`
+targets; the operator writes nothing. The one knob is adapter config
+`preflight: false` to skip. (4) **Instantly is the first preflighting
+adapter**, with four checks: the campaign exists and is Active; the
+sequence has at least the step count the copy assumes (the highest
+`_step_N` suffix among the variable targets); every `variables:` target
+appears as `{{name}}` in some step body; no A/B variant lacks one. (5)
+`plan` stays zero-network — preflight is a rehearsal-time and arm-time
+act, which is where the target's state is a fact rather than a forecast.
+Under `--simulate` a credentialed process adapter is stubbed (SPEC §8) and
+so is its preflight — a counted gap, as ever.
+**Consequences:** The receipt gains the target's side of the story:
+"send: preflight ok (4 checks)" or the exact check that blocked, before
+anything is spent on a broken campaign. Closes the last "succeeded and
+sent nothing" class the campaign story had open, beside attestation's
+"persisted nothing". Additive to the wire (unknown message types are
+ignored); one manifest key; no migration. ~60 LOC runner, ~150 in the
+Instantly adapter's HTTP file (the sequence representation is the only
+vendor-shaped part, fixture-tested), a fixture adapter for the
+acceptance. The maintenance exposure is "Instantly changes its sequence
+JSON" — one file, one fixture, the exposure the adapter already carries.
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§5 PREFLIGHT message and OPEN `preflight`; §6 `preflights` capability;
+§8 dry-run/arm behaviour and receipt wording; §10 item 6 (Instantly's
+checks); §11 milestone M17; `spec/schemas/msg-preflight.schema.json`,
+`msg-open.schema.json`, `manifest.schema.json`.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
