@@ -256,7 +256,7 @@ spec-visible format change). Sources stay excluded by design: a source's
 spend is the query, and "search once, consume the group" already covers
 it. Retires ADR-038's respend warning when it lands. Needs its own ADR.
 
-**Promoted (2026-08-28, ADR-038 — proposed).** The ADR answers the two
+**Promoted (2026-08-28, ADR-038 — accepted 2026-08-29; build queued as M15).** The ADR answers the two
 questions above without new state grammar: in flight is a `pending` step
 event plus a `pending` run status, `--resume` is the collection verb, and
 opting in is `deferred: true` on an AI step. Batches only; `listen`

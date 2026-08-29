@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtme.spec/schemas/msg-pending.schema.json",
   "title": "PENDING (adapter → runner)",
-  "description": "PROPOSED (ADR-038, not yet accepted). A step ended its session with work in flight: every dispatched record the session did not answer is pending under `token`, which the runner stores opaquely and hands back on a later OPEN (`pending.token`) so the adapter can collect. Step-level — one per session, emitted after any records the session could answer and before END. Runners that predate this message ignore it (§5), and then fail the unanswered records as they would any unanswered record.",
+  "description": "ADR-038. A step ended its session with work in flight: every dispatched record the session did not answer is pending under `token`, which the runner stores opaquely and hands back on a later OPEN (`pending.token`) so the adapter can collect. Step-level — one per session, emitted after any records the session could answer and before END. Runners that predate this message ignore it (§5), and then fail the unanswered records as they would any unanswered record.",
   "type": "object",
   "required": ["type", "token"],
   "additionalProperties": false,

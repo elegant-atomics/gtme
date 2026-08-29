@@ -1078,8 +1078,9 @@ section; §9 `{query:}`/`{segment:}` config form; §10a rename and the
 two stated semantics; ROADMAP.md `expand`, Groups option C, SQL segments.
 
 ### ADR-038: Asynchronous steps — a step may end a run in flight; `--resume` collects
-**Status:** Proposed (2026-08-28 — drafted from ROADMAP.md's "Asynchronous
-steps" for human approval as this packet; Accepted on merge)
+**Status:** Accepted (2026-08-28 — drafted from ROADMAP.md's "Asynchronous
+steps"; amended in review 2026-08-29 — last-step rule, collect-first
+`run`, respend warning; human-approved 2026-08-29)
 **Context:** Every step answers within the run that dispatched it. That is
 the right default and the wrong ceiling: the Anthropic Message Batches API
 answers the same prompts at half the per-token price, keyed by

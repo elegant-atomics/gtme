@@ -18,7 +18,7 @@
       "properties": {
         "token": {"type": "string", "minLength": 1}
       },
-      "description": "PROPOSED (ADR-038). Present only when the runner is collecting: the token the adapter emitted in a PENDING message. The adapter MUST NOT dispatch new work; it collects results for the records that follow, or emits PENDING again if they are not ready."
+      "description": "ADR-038. Present only when the runner is collecting: the token the adapter emitted in a PENDING message. The adapter MUST NOT dispatch new work; it collects results for the records that follow, or emits PENDING again if they are not ready."
     }
   }
 }

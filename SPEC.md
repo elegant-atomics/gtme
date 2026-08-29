@@ -1799,8 +1799,8 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Proposed
-  2026-08-28.** PENDING and OPEN `pending` in `internal/protocol` and the
+- **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Queued
+  2026-08-29.** PENDING and OPEN `pending` in `internal/protocol` and the
   schemas; the `pending`/`collected` step events and the `pending` run
   status; the last-step rule and the respend warning in the planner;
   collect-first `gtme run` and collection in the runner's dispatch; the
@@ -1963,8 +1963,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.17 — 2026-08-28 (ADR-038 packet: asynchronous steps — PROPOSED, not yet accepted)
-**Added (proposed):** §5 PENDING message and OPEN `pending`, with the
+### v0.17 — 2026-08-29 (ADR-038 reconciliation: asynchronous steps; build queued as M15)
+**Added:** §5 PENDING message and OPEN `pending`, with the
 in-flight rules; §8 in-flight steps (`deferred: true` as the pipeline's
 last step, the `pending` run status, collect-first `gtme run` with
 `--resume` as its explicit form, receipt wording); §7 the respend warning
@@ -1973,8 +1973,7 @@ milestone M15; `spec/schemas/msg-pending.schema.json`,
 `msg-open.schema.json`. §3 DDL comments: `runs.status` gains `pending`,
 `step_events.event` gains `pending|collected` — comments only, no
 migration, mirrored to `spec/ledger.sql`.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M15 is queued.
 
 ### v0.16 — 2026-08-28 (M14 step 1 build: `canonical: true` on declared AI provides)
 **Added:** §7/§9 `canonical: true` on a declared AI output field — the
