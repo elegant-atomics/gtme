@@ -239,6 +239,30 @@ gtme's record shape — and `listen`-style provider polling. Additive to
 the wire protocol (unknown message types are already ignored). Needs an
 ADR on run-record state and receipt rendering for in-flight steps.
 
+## Judgment cache — no paid call twice by default
+
+Named 2026-08-29 while amending ADR-038. Enrich/verify steps already
+cache-skip within a freshness window; AI steps never do, so a re-run
+re-judges every record unless the author remembered `exclude:`. The
+symmetric rule: a paid per-record call is never made twice for the same
+(identity, judgment signature = adapter + model + prompt hash + provides
+schema) within the window unless the step says `respend: true`. Needs: a
+durable verdict to reuse (filter verdicts live only in `run_records`;
+a step-event detail carrying the signature is enough — no table) and the
+re-application of a reused verdict (pass advances, fail freezes);
+composes get it almost free through the enrich cache once the prompt
+hash joins the provenance string (ADR-026's `ai/compose @ <model>` — a
+spec-visible format change). Sources stay excluded by design: a source's
+spend is the query, and "search once, consume the group" already covers
+it. Retires ADR-038's respend warning when it lands. Needs its own ADR.
+
+**Promoted (2026-08-28, ADR-038 — accepted 2026-08-29; build queued as M15).** The ADR answers the two
+questions above without new state grammar: in flight is a `pending` step
+event plus a `pending` run status, `--resume` is the collection verb, and
+opting in is `deferred: true` on an AI step. Batches only; `listen`
+polling reuses the mechanism later but keeps its own design pass (identity
+correlation for events). Waiting of any kind stays out — no daemon.
+
 ## Deliver preflight
 
 Named 2026-08-28, not specified. A deliver adapter MAY declare checks

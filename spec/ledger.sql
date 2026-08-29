@@ -50,7 +50,7 @@ CREATE TABLE runs (
   config_json TEXT NOT NULL,              -- resolved pipeline config snapshot
   started_at  TEXT NOT NULL,
   finished_at TEXT,
-  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed
+  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed|pending (ADR-038: ended with a step in flight)
 );
 
 CREATE TABLE run_records (
@@ -66,7 +66,7 @@ CREATE TABLE step_events (
   run_id      TEXT NOT NULL,
   step_id     TEXT NOT NULL,
   identity_id TEXT,                       -- null for step-level events
-  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache
+  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)
   detail      TEXT,                       -- JSON
   created_at  TEXT NOT NULL
 );
