@@ -329,6 +329,16 @@ which applies the per-step window against ranked rows) and `gtme query`'s
 MUST resolve through it. No second implementation of the ranking rule may
 exist.
 
+**Queued schema deltas (ADR-036, ADR-037) — land with milestone M14's
+migration and are mirrored into `spec/ledger.sql` then, never ahead of
+it:** `deliveries` gains `status` (`accepted` | `confirmed` |
+`contradicted` | `sent`; default `accepted`) and `sent_at` (nullable —
+empty until a provider attests). Two views join the public read surface
+beside `current_fields` and `group_members`: one that presents current
+values pre-unwrapped from their JSON encoding, and one that presents
+current membership keyed by group *name*, so user-authored SQL (§10a) and
+config queries (§9) read as vocabulary rather than as table internals.
+
 ---
 
 ## 4. Identity keys — DECIDED
@@ -437,7 +447,11 @@ Three tiers:
    canonical types are exact (`company_employees` is an integer, never a
    range string).
 3. **Vendor namespace**: everything else as `<vendor>.<field>` (e.g.
-   `apollo.id`). Stored with provenance, queryable, usable in `uses:` and
+   `apollo.id`). Declared AI outputs (ADR-033) default into this tier
+   under the *pipeline's* name — `<pipeline>.<field>` — unless the step's
+   config maps a name to a canonical field: a judgment is a fact about
+   working the entity in one campaign, and two campaigns' judgments about
+   one identity MUST NOT collide in `field_values`. Stored with provenance, queryable, usable in `uses:` and
    `variables:`. A canonical name MUST NOT contain a dot; a dot marks a
    namespaced name. Namespaced fields in a pipeline's needs make vendor
    coupling visible; `gtme plan` MUST note them.
@@ -533,6 +547,10 @@ back on any outbound RECORD/VERDICT/COST it emits for that record.
 
 Rules:
 - Sources MUST NOT receive RECORDs; they emit them (after SCHEMA).
+- A filter-role step MAY emit both a VERDICT and a RECORD for the same
+  key (ADR-033): the VERDICT gates advancement as ever; the RECORD's
+  fields are its declared provides (§7), stored like any adapter output,
+  so a judge's reasoning is queryable without a second call.
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
@@ -623,6 +641,13 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   `ai/compose` set this; it is what makes their one-call-per-batch-of-25
   behavior (§10.3, §10.5) a manifest fact the runner reads, not a
   special case hard-coded to those two adapter ids.
+- **Attestation (ADR-036):** a deliver adapter MAY declare `attests:
+  true`, meaning that after a successful create it re-reads the target
+  and reports a three-way verdict per record — `confirmed` (every
+  non-blank field sent is present), `contradicted` (a readable value says
+  it did not persist; hard fail), `inconclusive` (the re-read failed or
+  the shape was unrecognised; reported ok with a warning). An adapter that
+  does not declare it yields `inconclusive` — the honest default.
 - Sources additionally MAY declare `emits_key_fields` (which output fields
   the runner should build the identity key from).
 
@@ -681,7 +706,7 @@ kind of LinkedIn URL (§10.4), which no flat `required` list can say.
 **Dynamic provides (ADR-024; decided 2026-08-16, build queued — see
 §11):** the mirror of dynamic needs. A step whose *output* field names are
 defined by user config rather than a static manifest — `http/enrich`'s
-configured content field, a `sql/enrich` step's declared `provides:`
+configured content field, a `sql/transform` step's declared `provides:`
 (§10a) — MAY declare its manifest `provides` as dynamic; its *effective*
 provides are then derived from config. The planner MUST add the derived
 names to the available-field set for downstream validation exactly as it
@@ -690,6 +715,16 @@ validate normally. A derived name MUST be canonical or vendor-namespaced
 per §4a — an ad-hoc name is namespaced unless the config maps it to a
 canonical field — and the runtime MUST validate the step's output against
 the derived provides exactly as it validates static provides (§5).
+
+**Declared AI provides (ADR-033):** an AI-role step MAY carry a step-level
+`provides:` — a list of field names, or a JSON-Schema object whose
+property names are the fields and whose values MAY declare `type` and
+`enum`. The planner treats it as dynamic provides above; names MUST be
+canonical or namespaced and default into `<pipeline>.<field>` (§4a). The
+runtime validates the model's output against the derived schema with the
+existing retry (§10.3), and an `enum` violation is a validation failure,
+never stored. A filter with `provides:` emits VERDICT and RECORD (§5). A
+step declaring nothing keeps its manifest's static shape.
 
 **Ingress mapping checks (ADR-018):** for a source with a `columns:`
 mapping (§10.1), the planner MUST additionally verify, still with no
@@ -715,6 +750,29 @@ membership gates, and MUST call out each deliver step — target adapter
 and touch scope — so the pipeline's full send surface is reviewable in
 one place (ADR-031: with delivers as ordinary steps, plan output is
 where the send points are obvious at a glance, not YAML position).
+
+**Config values from the ledger (ADR-037):** any value inside a step's
+`with:` MAY be `{query: <SQL>}` or `{segment: <name>}` (a saved query,
+§8). The planner resolves it read-only against the local ledger — no
+network, no spend — *before* validating the step's config against the
+adapter's `config_schema`, substitutes the result (one column → a list;
+one row and one column → a scalar), prints the resolved rows in plan
+output, and fails the plan on zero rows (an empty list handed to a vendor
+search is the shape that searches everything). The run resolves again at
+start and records the resolved config in `runs.config_json`. A missing
+segment is a plan error naming the fix (`gtme query --save`).
+
+**SQL steps at plan (ADR-037):** a `sql/*` step's query is run through
+`EXPLAIN QUERY PLAN` against the local ledger at plan time, so an unknown
+table or column fails the plan rather than the run. Plan output annotates
+a SQL step whose query references `relations` or `group_members` as
+*cross-record*, so a reviewer sees its character without reading the
+join.
+
+**One commit point (ADR-032):** plan MUST warn when a pipeline carries
+both a `group/deliver` step and a network-side deliver step — ADR-031
+arms every deliver in a run at once, so approving the handoff would
+approve the send.
 
 At execution time, per step, per record:
 - **Membership gates (ADR-021):** a step with `require:` processes only
@@ -799,7 +857,12 @@ verb and flag from this section, and every installed adapter's manifest
 (`needs`/`provides`, in the shape of §6), plus 3 canonical example
 pipelines. Acceptance criterion: the document MUST round-trip — an agent
 given only `gtme help --agent`'s output and no other context MUST be able to
-author a valid `pipeline.yaml` that passes `gtme plan`.
+author a valid `pipeline.yaml` that passes `gtme plan`. It MUST also
+include the ledger's public read surface — the tables and views of §3 —
+and the canonical query shapes (a cross-type membership gate, a
+cross-record aggregate, a config-value query), so an agent can write a
+`sql/*` step or a `{query:}` value without reading `spec/ledger.sql`
+(ADR-037).
 
 ### Event-driven pipelines: webhook/source + cron (ADR-009)
 
@@ -822,7 +885,14 @@ step's `idempotency` config (default: the identity key). Before calling
 the adapter for a record, the runner MUST check `deliveries`; on hit, it
 MUST skip (`skipped_cache` semantics, reason `already_delivered`). On
 successful adapter RECORD/END for that record, the runner MUST insert
-into `deliveries`. The `(target, idempotency)` key means each deliver
+into `deliveries` with `status = accepted` (ADR-036; column lands with
+M14). `accepted` means the provider took the request; `sent` is written
+only when a provider attests it and `sent_at` carries the provider's own
+timestamp — a 2xx is never a delivery. Adapters declaring `attests` (§6)
+refine `accepted` to `confirmed` or `contradicted` per record after a
+re-read; `inconclusive` stays `accepted` with a receipt warning. Promotion
+to `sent` is the `listen` verb's job (ROADMAP.md) and MUST be
+compare-and-swap on the observed `(status, sent_at)` pair. The `(target, idempotency)` key means each deliver
 step's dedupe scope is its own target (ADR-031): a pipeline delivering
 to a campaign and to a CRM dedupes each independently.
 
@@ -852,6 +922,27 @@ still deliver it); `fail` fails the *record* (§5 semantics — state
 freezes, it does not advance). Deliver-step fail verdicts in
 `run_records.verdicts` record withheld sends; unlike a filter's
 `pass=false` (§7), they do not stop the record.
+
+### `group/deliver` — the handoff is a delivery (ADR-032)
+
+A deliver-role step, runner-owned like the SQL steps (no adapter, no
+network), whose target is a group: `use: group/deliver`, `with: {group:
+<name>}`, created on demand. Every deliver-step key applies — `variables:`
+(the receipt renders them per record, which is how a review gate shows a
+brief rather than a list of keys), `on_missing:`, `idempotency:`,
+`record:`, `suppress:`, `require:`/`exclude:` — and `--dry-run` withholds
+it like any deliver. Committing a record to a downstream stage authorises
+downstream spend, which is why it takes the send's gate. A pipeline MAY
+carry several, routing different `when:` outcomes to different groups. A
+group with no consumer pipeline is a hold; release is `gtme groups add`;
+review is `gtme groups show`. It is a write, not a trigger: nothing runs
+the consumer, which pulls on its own schedule. One commit point per
+pipeline (§7): a `group/deliver` and a network-side deliver do not share
+a pipeline.
+
+The group source (§9) takes `limit: N`: members served in `group_events`
+insertion order, oldest first. Ranked serve order is deliberately not
+provided; an upstream `sql/filter` narrows, `limit:` bounds.
 
 ### Dry-run and the armed gate (ADR-019)
 
@@ -924,7 +1015,7 @@ gtme groups                          # list groups with derived character
 gtme groups show NAME                # members (current), recent events
 gtme groups add NAME KEY...          # hand-edit membership by identity key
 gtme groups add NAME --from-segment SEGMENT | --query "SQL"
-gtme groups remove NAME KEY...
+gtme groups remove NAME KEY... [--note TEXT]
 ```
 `gtme groups` lists each group with member count and event tallies
 (added/removed/touched) — character is derived, never stored. The
@@ -935,7 +1026,9 @@ naturally join `identities`), and each `added` event's detail records
 what was evaluated and when. A KEY is matched against
 `identities.identity_key`; if it matches more than one entity type, the
 command fails asking for `--type`. All writes are events — membership
-edits are append-only like everything else.
+edits are append-only like everything else. `--note` (ADR-032) records
+the reason for a removal in the event's `detail` — the reject-with-reason
+a review gate needs.
 
 ### Simulation gate — `gtme run --simulate` (ADR-028; built in M8)
 
@@ -1029,7 +1122,9 @@ steps:
 Schema rules: `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
-it exactly as `needs.required` (§7). Deliver adapters are ordinary
+it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
+valid only on AI-backed roles: the step's declared output fields, a list
+of names or a JSON-Schema object (§7); the planner rejects it elsewhere. Deliver adapters are ordinary
 `steps:` entries (ADR-031): a pipeline MAY carry zero, one, or many, at
 any position — steps execute strictly in order, so a deliver step sends
 exactly the records that survived everything before it. `variables:`
@@ -1094,6 +1189,28 @@ group: q3-qualified         # terminus: records completing the run are added
   per deliver step (ADR-031: steps sharing the default share the scope).
 - Top-level `group: <name>` is the membership terminus (§8), valid with
   or without deliver steps; a pipeline with neither simply enriches.
+- A group source MAY carry `limit: N` (ADR-032, §8): at most N members,
+  oldest-added first. `use: group/deliver` with `with: {group: <name>}`
+  is a deliver step targeting a group (§8).
+
+**Config values from the ledger (ADR-037).** Any value under `with:` MAY
+be `{query: <SQL>}` or `{segment: <name>}`; the planner resolves it
+against the local ledger before config validation, shows the rows, and
+fails on zero (§7). This is how a pipeline's source is parameterised by
+what an earlier pipeline decided — fan-out at the pipeline boundary,
+where run membership is fresh:
+
+```yaml
+source:
+  use: apollo/search
+  with:
+    domains: {segment: qualified-domains}   # a saved SELECT yielding one column
+    titles: [CFO, "Head of RevOps"]
+```
+
+Read a *segment* when the list is a live computed fact that should
+drift; read a *group* (snapshot first with `gtme groups add
+--from-segment`) when it is a reviewed decision that should not.
 
 ---
 
@@ -1130,7 +1247,19 @@ contract, pure YAML.
    is unaffected).
 3. **`ai/filter`** (filter) — batch records into the prompt with a strict
    JSON-array output schema `[{identity_key, pass, reason}]`; emit VERDICTs;
-   config supports `uses:` (§9, ADR-004).
+   config supports `uses:` (§9, ADR-004); MAY declare `provides:` (ADR-033),
+   in which case the required output shape is generated from the declared
+   schema and the step also emits RECORDs (§5). Prompt assembly (ADR-035):
+   records encoded compactly, never pretty-printed; long values wrapped at
+   structural breaks so no line exceeds what the engine's tooling reads
+   intact; fields whose provenance is an external fetch wrapped in a
+   delimiter and labelled in-band as subject-supplied data, the delimiter
+   neutralised inside the body *before* wrapping (encode → neutralise →
+   wrap) — default on, `fence: false` in config opts out; the operator
+   prompt precedes the records as a stated default, with the
+   shared/payload split exposed so the order is A/B-able and a cache
+   breakpoint can sit between them. AI steps hold no tools. The manifest is
+   entity-agnostic: the step's entity type is the pipeline's.
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
    lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
    one-of `linkedin_url` | `linkedin_internal_url` |
@@ -1141,7 +1270,9 @@ contract, pure YAML.
    (the key upgrade to the slug tier follows automatically, §4). Emit COST
    from response metadata if present, else config-estimated.
 5. **`ai/compose`** (compose) — batch; provides `first_line`, `ps_line`
-   (strings); output schema enforced; config supports `uses:`.
+   (strings) by default, or whatever the step's `provides:` declares
+   (ADR-033); output schema enforced; config supports `uses:`; prompt
+   assembly and entity-agnosticism as item 3.
 6. **`instantly/add-to-campaign`** (deliver, person) — Instantly v2 API,
    `Authorization: Bearer $INSTANTLY_API_KEY`: create/attach lead to
    campaign by name (resolve campaign name → id via list endpoint once per
@@ -1176,7 +1307,7 @@ be behind an interface so fixture tests never touch the network.
 
 The binding tier, the conformance-kit extension, the naming rule with its
 ai/* provenance format, and the OpenAPI rule below were built in milestone
-M8 (§11, changelog v0.6); `http/enrich` and `sql/enrich`/`sql/filter` in
+M8 (§11, changelog v0.6); `http/enrich` and `sql/transform`/`sql/filter` in
 milestone M11 (changelog v0.9), together with ADR-030's payload retention.
 
 ### Two-tier adapters (ADR-022)
@@ -1291,13 +1422,13 @@ projected fields, and its only network access is its model engine's API
 belongs to `http/enrich` and bindings, which are deterministic and
 cacheable.
 
-### `sql/enrich` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11)
+### `sql/transform` and `sql/filter` — the deterministic transform floor (ADR-027; built in M11; `sql/transform` renamed `sql/transform` by ADR-037)
 
-`sql/enrich`: a single SELECT over the projection view (plus relations),
+`sql/transform`: a single SELECT over the projection view (plus relations),
 scoped to the run's records, executed read-only (`mode=ro`) and
 timeboxed, with no side effects. Result columns become field values
 appended by the ENGINE like any adapter output — the step never writes
-storage directly; append-only, provenance `sql/enrich @ <query-hash>`,
+storage directly; append-only, provenance `sql/transform @ <query-hash>`,
 freshness semantics all preserved. Contracts are DECLARED, not parsed
 from SQL: the step's config carries `uses:` and `provides:`; `gtme plan`
 validates both (§7 dynamic needs and provides), and the engine MUST check
@@ -1315,19 +1446,32 @@ escape hatch to nearly nothing.)
 Contract as built (M11): like the group source, SQL steps are
 runner-owned — no adapter, no wire protocol, ledger access the runner
 mediates. Config carries `query` plus declared `uses:` (fields the plan
-validates as available) and, for `sql/enrich`, `provides:` (the declared
+validates as available) and, for `sql/transform`, `provides:` (the declared
 output fields, canonical or namespaced). The query runs ONCE per step —
 set-based, not per record — on the read-only connection, timeboxed
 (30s), with the run id bound as `:run_id` for scoping convenience; the
 engine guarantees scope regardless by applying result rows only to the
 run's eligible records (out-of-run rows are dropped and counted). The
-result MUST yield an `identity_id` column. `sql/enrich`: every declared
+result MUST yield an `identity_id` column. `sql/transform`: every declared
 provides field must appear as a result column; values append through the
-engine with provenance `sql/enrich @ <query-hash>`. `sql/filter`: a
+engine with provenance `sql/transform @ <query-hash>`. `sql/filter`: a
 `pass` column (with optional `reason`) judges explicitly, or — with no
 `pass` column — membership-style: returned records pass, absent records
 fail with the predicate named. SQL steps run normally under `--simulate`
 (they are offline by construction).
+
+Two semantics were true from M11 and are normative from ADR-037. A SQL
+step's query MAY read any identity in the ledger — only its *results* are
+scoped to the run — so a cross-record aggregate (a company's related
+people via `works_at`, a fan-in) is in-contract, not a trick. SQL steps
+never cache-skip: they recompute on every run, which is what makes a
+cross-record value safe — it cannot go stale when related records
+change. "Transform" is the honest name for both a per-record derivation
+and a cross-record aggregate, since the output is always this record plus
+fields; `sql/filter` keeps its name because a verdict is a different
+output and the reviewer should see the role in the id. Plan-time
+`EXPLAIN`, the cross-record annotation, and the two vocabulary views are
+in §7 and §3.
 
 ### The universal floor (ADR-023; Out half built in M12)
 
@@ -1465,7 +1609,7 @@ decided contract, not shipped behavior.
   pipelines carry group references against built semantics from day one.
 - **M11 — the transform floor + payload retention (ADR-024, ADR-027,
   ADR-030; §10a, §3, §5, §6, §8).** `http/enrich` (markdown + inline JSON
-  modes, mandatory freshness, size cap), `sql/enrich`/`sql/filter`
+  modes, mandatory freshness, size cap), `sql/transform`/`sql/filter`
   (runner-owned, declared contracts, query-hash provenance), the
   `payloads` cache tier with RECORD payload attachments, declared
   retention, opportunistic eviction, and `gtme vacuum`.
@@ -1473,7 +1617,7 @@ decided contract, not shipped behavior.
   (identity_id required, provides columns checked, run-scoped
   application). ✅ E2E, offline: `http/enrich` fetches a local page to
   markdown into a declared field with a payload retained, and a re-run
-  within the freshness window cache-skips the fetch; `sql/enrich` writes
+  within the freshness window cache-skips the fetch; `sql/transform` writes
   a derived field with `sql/enrich @ <hash>` provenance; `sql/filter`
   gates records by predicate, both explicit-`pass` and membership-style;
   a `require:`d plan names missing `uses:` fields; `gtme vacuum` reports
@@ -1506,6 +1650,39 @@ decided contract, not shipped behavior.
   suppressed at the final deliver step completes and joins it;
   `variables:` on a non-deliver step fails plan naming step and key; a
   document with a top-level `deliver:` block fails validation.
+- **M14 — the composition pass (ADR-032, ADR-033, ADR-035, ADR-036,
+  ADR-037; §3, §5, §6, §7, §8, §9, §10, §10a). Queued 2026-08-28.**
+  Build in this order, each step `make check` green: (1) ADR-033 —
+  step-level `provides:` on AI roles, schema-generated output shape,
+  `enum`, VERDICT+RECORD from filters, entity-agnostic AI manifests,
+  `<pipeline>.<field>` default; (2) ADR-035 — compact encoding, wrapping,
+  default-on fencing with `fence: false`, stated order with the split
+  exposed; (3) ADR-032 — `group/deliver`, group-source `limit:`,
+  `groups remove --note`, the one-commit-point plan warning; (4) ADR-037 —
+  rename `sql/enrich` → `sql/transform` (examples, e2e fixtures,
+  ADAPTERS.md, README follow), the two views (migration `0007`, mirrored
+  to `spec/ledger.sql`), plan-time `EXPLAIN` and the cross-record
+  annotation, `{query:}`/`{segment:}` config resolution ahead of
+  config-schema validation, ledger read surface in `help --agent`;
+  (5) ADR-036 — `deliveries.status`/`sent_at` (same migration), `attests`
+  manifest capability, receipt and `gtme show` wording, Instantly as the
+  first attesting adapter.
+  ✅ E2E, offline: an `ai/filter` declaring `provides: {state: {enum:
+  [a, b]}, rationale: {}}` stores `<pipeline>.state` and rejects a value
+  outside the enum; a company-entity pipeline plans an AI step against
+  the company registry; a pipeline with two `group/deliver` steps
+  dry-runs to two rendered receipts with zero group events and, armed,
+  routes passers and failers to different groups; a group source with
+  `limit: 2` sources the two oldest members; a source `with:` carrying
+  `{query: …}` plans with the rows shown and fails on zero; `sql/enrich`
+  fails plan naming `sql/transform`; a `sql/transform` joining
+  `relations` is annotated cross-record; a query naming an unknown column
+  fails plan; a delivery lands `accepted` and a fixture adapter declaring
+  `attests` yields `confirmed`, `contradicted`, and `inconclusive` in
+  turn with the documented receipt behavior; the AI fixture engine
+  receives compact, fenced records and `fence: false` removes the fence.
+  The account pattern (four pipelines chained through groups) simulates
+  end to end with zero network calls.
 
 Repo layout:
 ```
@@ -1646,6 +1823,28 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
+**Added:** §7 declared AI provides, config values from the ledger, SQL at
+plan (EXPLAIN, cross-record annotation), the one-commit-point warning;
+§8 `group/deliver`, group-source `limit:`, `groups remove --note`,
+delivery `status` semantics (`accepted`, attestation, `sent` only by
+attestation), ledger read surface in `help --agent`; §9 `provides:` on AI
+steps, `limit:` on the group source, `{query:}`/`{segment:}` config
+values with example; §6 `attests` capability; §5 VERDICT+RECORD from a
+filter; §4a `<pipeline>.<field>` default for AI outputs; §3 queued schema
+deltas (`deliveries.status`/`sent_at`, two vocabulary views — DDL lands
+with M14's migration); §11 milestone M14.
+**Changed:** §10 items 3 and 5 (declared provides, prompt assembly rules,
+`fence`, entity-agnostic manifests, AI steps hold no tools); §10a
+`sql/enrich` renamed `sql/transform` throughout the normative text with
+its two semantics stated (reads any identity; never caches).
+`spec/schemas/pipeline.schema.json`: step gains `provides`; group source
+gains `limit`.
+**Not changed:** `spec/ledger.sql` — DDL moves with its migration, as
+always. ROADMAP.md: `expand` retired by composition; Groups option C
+refusal recorded as tested; SQL segments half delivered; three new
+entries (patterns as bundles, asynchronous steps, deliver preflight).
 
 ### v0.14 — 2026-08-17 (M13 build: delivers as steps, built)
 **Changed:** §11 M13 marked built; no normative text changed — v0.13's
