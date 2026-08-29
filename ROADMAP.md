@@ -239,6 +239,13 @@ gtme's record shape — and `listen`-style provider polling. Additive to
 the wire protocol (unknown message types are already ignored). Needs an
 ADR on run-record state and receipt rendering for in-flight steps.
 
+**Promoted (2026-08-28, ADR-038 — proposed).** The ADR answers the two
+questions above without new state grammar: in flight is a `pending` step
+event plus a `pending` run status, `--resume` is the collection verb, and
+opting in is `deferred: true` on an AI step. Batches only; `listen`
+polling reuses the mechanism later but keeps its own design pass (identity
+correlation for events). Waiting of any kind stays out — no daemon.
+
 ## Deliver preflight
 
 Named 2026-08-28, not specified. A deliver adapter MAY declare checks

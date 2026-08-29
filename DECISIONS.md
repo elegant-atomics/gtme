@@ -1077,6 +1077,81 @@ views; §7 config-value resolution and EXPLAIN; §8 `help --agent` schema
 section; §9 `{query:}`/`{segment:}` config form; §10a rename and the
 two stated semantics; ROADMAP.md `expand`, Groups option C, SQL segments.
 
+### ADR-038: Asynchronous steps — a step may end a run in flight; `--resume` collects
+**Status:** Proposed (2026-08-28 — drafted from ROADMAP.md's "Asynchronous
+steps" for human approval as this packet; Accepted on merge)
+**Context:** Every step answers within the run that dispatched it. That is
+the right default and the wrong ceiling: the Anthropic Message Batches API
+answers the same prompts at half the per-token price, keyed by
+`custom_id` in any order — which is already gtme's record shape — but it
+answers in minutes to hours, not in the request. Every AI judgment gtme
+makes is a candidate, and a campaign that judges thousands of records is
+where the price matters. The same shape — dispatch now, collect later
+under a token — is what provider polling for `listen` (ROADMAP.md) will
+need. Two facts make this cheap: unknown wire message types are already
+ignored (§5), so the protocol extends without breaking an adapter or a
+runner that predates it; and `gtme run --resume` already exists as the
+verb that continues a run without redoing done work (§8, M4). gtme has no
+daemon (§13) and this ADR does not add one: nothing waits, nothing polls
+on its own; a human or a cron invokes the collection exactly as it invokes
+a run.
+**Decision:** (1) **A step MAY end a session with work in flight.** An
+adapter that has dispatched a batch it cannot answer yet emits
+`PENDING {token, detail?}` — one per session, step-level, after any
+records it *could* answer — and END. The runner records a `pending`
+step event for every dispatched record the session did not answer
+(detail: the token), leaves their `run_records.state` where it was (the
+step is not completed; nothing downstream sees them), and finishes the
+run with a new status, **`pending`** — a run that ended with work in
+flight is not `done`. The receipt says so per step, names the token, and
+names the verb that collects. (2) **`--resume` collects.** Resuming a
+`pending` run (or a `running` one that stopped) reaches the step, finds
+records at the previous state with a `pending` event for this step, and
+opens a session whose OPEN carries `pending: {token}` — then sends the
+same records and END as it would for a fresh dispatch. The adapter, seeing
+a token, does not dispatch: it fetches results and answers with the
+ordinary RECORD/VERDICT/ATTEST/COST messages, or emits PENDING again if
+the batch is still processing (the run stays `pending`; resume again
+later). A record the collection does not answer fails as it would in a
+synchronous session. COST lands at collection, under the same run. (3)
+**Opting in is per step, in config:** `with: {deferred: true}` on an AI
+step; the `api` engine then submits the batch to the Message Batches API
+under `custom_id = identity_key` and returns the batch id as the token;
+`claude-code` has no batch surface and ignores `deferred` with a plan
+warning; the fixture engine answers synchronously under `--simulate` (a
+rehearsal that ended in flight would rehearse nothing) and, in tests only,
+can be scripted to answer PENDING first. (4) **Bounded by what exists:**
+no new run-record state grammar (`state` stays "last completed step id"),
+no new table, no migration — `pending` is a step event and a run status;
+`gtme runs` counts in-flight records; `gtme show --run` shows their state
+unchanged. A token is provider-opaque; the runner never interprets it.
+Two things are explicitly out of scope: any form of waiting (`--wait`,
+polling loops) — the cron/webhook recipe already covers "run it again
+later" — and `listen`-style event sources, which reuse this mechanism but
+still need their own identity-correlation design.
+**Consequences:** AI steps at half price with one config key and no
+change to how a pipeline is authored, reviewed, or armed: a deferred
+judgment step is still gated by the same plan and the same dry run, and a
+deliver step after it simply does not run until the collection lands —
+strict ordering does the holding. The receipt gains a fifth per-step
+outcome (in flight) beside in/out/cached/filtered/failed, and `gtme runs`
+a fifth status. `--resume` becomes the collection verb, which is the
+right verb: it already means "continue this run without redoing what is
+done." Additive to the wire protocol; an old adapter never sees a token
+it did not ask for, and an old runner ignores PENDING (and would then
+fail the unanswered records as "no verdict returned" — the honest
+degradation). ~300 LOC: PENDING/OPEN in `internal/protocol`, the pending
+event and status in `internal/ledger`, collection in the runner's
+dispatch, a batch submit/collect path in `internal/ai`'s API engine, the
+`deferred` key in the AI manifests, receipt and `gtme runs` wording.
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§3 `runs.status` gains `pending` and `step_events.event` gains
+`pending`/`collected` (DDL comments, mirrored to `spec/ledger.sql`; no
+migration); §5 PENDING message and the OPEN `pending` field with the
+rules; §8 `gtme run` / `--resume` / receipt / `gtme runs`; §9 and §10
+items 3 and 5 `deferred: true`; §11 milestone M15;
+`spec/schemas/msg-pending.schema.json`, `msg-open.schema.json`.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
