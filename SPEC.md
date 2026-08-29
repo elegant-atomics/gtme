@@ -823,6 +823,16 @@ a SQL step whose query references `relations` or `group_members` as
 *cross-record*, so a reviewer sees its character without reading the
 join.
 
+**Respend (ADR-038):** plan MUST warn when a paid step would pay for the
+same records again on a re-run with nothing to remember the answer: an
+AI step with no judgment memory — no `exclude:` naming a group this
+pipeline writes (its `group:` terminus or a `group/deliver` target) — or
+an enrich/verify step whose adapter declares credentials or a cost
+estimate and that has no freshness window (no manifest `freshness_days`,
+no `cache:`). `respend: true` on the step (§9) silences the warning; it is
+the operator saying so in the reviewable file. (A default judgment cache
+that makes the warning unnecessary is a queued design, ROADMAP.md.)
+
 **One commit point (ADR-032):** plan MUST warn when a pipeline carries
 both a `group/deliver` step and a network-side deliver step — ADR-031
 arms every deliver in a run at once, so approving the handoff would
@@ -932,39 +942,47 @@ table's `UNIQUE(target, idempotency)` constraint (§3) — replaying the same
 event through the pipeline twice produces at most one delivery. Per-event
 low latency is explicitly out of scope for v0.
 
-### In-flight steps — `deferred: true` and `--resume` collects (ADR-038)
+### In-flight steps — `deferred: true`, the pipeline's last step; `run` collects (ADR-038)
 
 An AI step MAY carry `deferred: true` in its config (§10.3, §10.5): the
 `api` engine submits the batch to the provider's batch surface (the
 Message Batches API, `custom_id` = identity key) instead of answering in
-the request, and the session ends with PENDING (§5). The run then finishes
-with status **`pending`** — a run that ended with a step in flight is not
-`done` — and the receipt reports, per step, how many records are in
-flight, the token, and the verb that collects:
+the request, and the session ends with PENDING (§5). **A deferred step
+MUST be the pipeline's last step**; `gtme plan` rejects it anywhere else,
+naming the fix: land the step's output through what already carries it —
+declared `provides:` fields (§7) and the `group:` terminus (§8) — and let
+a consumer pipeline pull from the group. The consequence is the point: no
+deliver step can follow a deferred judgment, so a send is always its own
+pipeline with its own dry-run receipt showing the judgments as
+*collected*, and approval never precedes the judgment. One deferred step
+per pipeline follows.
+
+The run then finishes with status **`pending`** — a run that ended with a
+step in flight is not `done` — and the receipt reports how many records
+are in flight, the token, and that the next `gtme run` collects:
 
 ```
-judge: 25 in, 0 out — 25 in flight (msgbatch_01…); collect with `gtme run --resume 01J…`
+judge: 25 in, 0 out — 25 in flight (msgbatch_01…); the next `gtme run judge.yaml` collects
 ```
 
-`gtme run --resume RUN_ID|last` is the collection verb: it reaches the
-step, finds the records pending under this step, and collects (§5). If the
-provider is still processing, the step emits PENDING again and the run
-stays `pending`; resume again later — from a shell, a cron, whatever
+**`gtme run` collects before it starts.** When the most recent run of the
+same pipeline is `pending`, `gtme run <pipeline>` resumes that run — it
+says so on stderr — rather than sourcing anew, so the cron recipe (§8) is
+unchanged and nothing is ever submitted twice by habit. `gtme run
+--resume RUN_ID|last` is the explicit form of the same thing. Collection
+reaches the step, finds the records pending under it, and collects (§5).
+If the provider is still processing, the step emits PENDING again and the
+run stays `pending`; run again later — from a shell, a cron, whatever
 invokes gtme, since gtme has no daemon and nothing waits (§13). Once every
-pending record is answered the run continues through the remaining steps
-in the same invocation and finishes `done` (or `failed`). Strict ordering
-(§7) is what holds everything downstream: a deliver step after a deferred
-judgment does not run until the judgment has landed, and it is gated by
-the same plan and the same dry run as ever. `gtme runs` lists `pending`
-runs with their in-flight count. `--simulate` runs a deferred step
-synchronously on the fixture engine (a rehearsal that ended in flight
-would rehearse nothing) and says so; `--dry-run` defers exactly as an
-armed run does, since a deferred judgment spends the same tokens either
-way. A record pending under a token is never re-dispatched by a new run
-of the same pipeline: it is not done, so a fresh run sources it again and
-judges it again — collect first.
+pending record is answered the terminus asserts and the run finishes
+`done` (or `failed`). Only after that does a `gtme run` of the pipeline
+source fresh records. `gtme runs` lists `pending` runs with their
+in-flight count. `--simulate` runs a deferred step synchronously on the
+fixture engine (a rehearsal that ended in flight would rehearse nothing)
+and says so; `--dry-run` on a deferred pipeline is a plan warning — there
+is no deliver step to hold back.
 
-### deliver idempotency
+### deliver idempotency### deliver idempotency
 
 Per deliver step: idempotency key = the value of the field named by the
 step's `idempotency` config (default: the identity key). Before calling
@@ -1207,7 +1225,10 @@ steps:
 
 Schema rules: `deferred: true` inside an AI step's `with:` sends its batch
 to the provider's batch surface and ends the run in flight (§8, ADR-038);
-it is adapter config, not grammar. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
+it is adapter config, not grammar, and valid only on the last step.
+`respend: true` on a step (grammar, any paid step) declares that re-running
+the pipeline MAY pay for that step's records again — it silences the §7
+respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/an AI-backed role; the planner validates
 it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
@@ -1778,24 +1799,29 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M15 — asynchronous steps (ADR-038; §3, §5, §8, §9, §10). Proposed
+- **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Proposed
   2026-08-28.** PENDING and OPEN `pending` in `internal/protocol` and the
   schemas; the `pending`/`collected` step events and the `pending` run
-  status; collection in the runner's dispatch behind `--resume`; the API
-  engine's batch submit/collect path (`custom_id` = identity key);
-  `deferred` in the AI manifests' `config_schema`; receipt and `gtme runs`
-  wording; the fixture engine's scripted PENDING for tests.
-  ✅ E2E, offline: a deferred `ai/filter` ends the run `pending` with zero
-  verdicts, zero cost, and a receipt naming the token and the resume
-  command; a first `--resume` whose collection is still processing leaves
-  the run `pending`; a second `--resume` collects — verdicts land, COST
-  lands under the same run, downstream steps run, the run finishes `done`;
-  a third `--resume` does nothing twice; a non-deferred step in the same
-  pipeline is unaffected; `--simulate` runs the deferred step synchronously
-  and says so; a fresh run of the same pipeline before collection judges
-  the records again rather than touching the token. The API engine's batch
-  path is unit-tested against a stubbed Batches endpoint (submit, poll,
-  results keyed by `custom_id`).
+  status; the last-step rule and the respend warning in the planner;
+  collect-first `gtme run` and collection in the runner's dispatch; the
+  API engine's batch submit/collect path (`custom_id` = identity key);
+  `deferred` in the AI manifests' `config_schema` and `respend:` in the
+  pipeline schema; receipt and `gtme runs` wording; the fixture engine's
+  scripted PENDING for tests.
+  ✅ E2E, offline: a deferred `ai/filter` as the last step ends the run
+  `pending` with zero verdicts, zero cost, and a receipt naming the token;
+  a plain `gtme run` of the same pipeline while it is pending collects
+  rather than re-submitting — zero new batch submits, asserted — and,
+  while the provider is still processing, leaves the run `pending`; the
+  next `gtme run` collects — verdicts land, COST lands under the same run,
+  the terminus asserts, the run finishes `done`; the following `gtme run`
+  sources fresh records; a deferred step anywhere but last fails plan
+  naming the fix; `--dry-run` on a deferred pipeline warns; `--simulate`
+  runs the step synchronously and says so; a judgment step with no
+  `exclude:` plans with the respend warning and `respend: true` silences
+  it; a credentialed enrich with no window warns the same way. The API
+  engine's batch path is unit-tested against a stubbed Batches endpoint
+  (submit, poll, results keyed by `custom_id`).
 
 Repo layout:
 ```
@@ -1939,9 +1965,11 @@ pass that produced them.
 
 ### v0.17 — 2026-08-28 (ADR-038 packet: asynchronous steps — PROPOSED, not yet accepted)
 **Added (proposed):** §5 PENDING message and OPEN `pending`, with the
-in-flight rules; §8 in-flight steps (`deferred: true`, the `pending` run
-status, `--resume` as the collection verb, receipt wording); §9/§10 items 3
-and 5 `deferred: true`; §11 milestone M15; `spec/schemas/msg-pending.schema.json`,
+in-flight rules; §8 in-flight steps (`deferred: true` as the pipeline's
+last step, the `pending` run status, collect-first `gtme run` with
+`--resume` as its explicit form, receipt wording); §7 the respend warning
+and §9 `respend: true`; §9/§10 items 3 and 5 `deferred: true`; §11
+milestone M15; `spec/schemas/msg-pending.schema.json`,
 `msg-open.schema.json`. §3 DDL comments: `runs.status` gains `pending`,
 `step_events.event` gains `pending|collected` — comments only, no
 migration, mirrored to `spec/ledger.sql`.
