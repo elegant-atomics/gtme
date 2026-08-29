@@ -1818,7 +1818,7 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Proposed
+- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Queued
   2026-08-29.** Signature and input hash computed in the runner's prepare
   from the step config, the adapter's shape and the projection; lookup
   over `done` events; verdict re-application for filters; the provenance
@@ -1998,14 +1998,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.19 — 2026-08-29 (ADR-039 packet: the judgment cache — PROPOSED, not yet accepted)
-**Added (proposed):** §7 judgment cache for AI roles (signature + input
+### v0.19 — 2026-08-29 (ADR-039 reconciliation: the judgment cache; build queued as M16)
+**Added:** §7 judgment cache for AI roles (signature + input
 hash, no window by default, `cache:`/`respend:` as the knobs); §11
 milestone M16. **Changed (proposed):** §7 respend warning narrowed to
 paid enrich/verify; §10a provenance `ai/<op> @ <model-id>#<signature>` and
 the `done` event's `signature`/`input` detail keys (prose; no DDL).
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M16 is queued.
 
 ### v0.18 — 2026-08-29 (M15 build: asynchronous steps, built)
 **Changed:** §11 M15 marked built; no normative text changed — v0.17's

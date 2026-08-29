@@ -256,7 +256,7 @@ spec-visible format change). Sources stay excluded by design: a source's
 spend is the query, and "search once, consume the group" already covers
 it. Retires ADR-038's respend warning when it lands. Needs its own ADR.
 
-**Promoted (2026-08-29, ADR-039 — proposed).** Keyed on a signature over
+**Promoted (2026-08-29, ADR-039 — accepted 2026-08-29; build queued as M16).** Keyed on a signature over
 the question (adapter, model, prompt, output shape, uses) and a hash of
 the record's projected inputs — no clock by default, `cache: Nd` to
 bound, `respend: true` to opt out — recorded in the `done` event and the

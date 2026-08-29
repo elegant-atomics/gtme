@@ -1176,8 +1176,9 @@ the last-step rule / receipt / `gtme runs`; §9 `respend: true` and, with
 `spec/schemas/msg-pending.schema.json`, `msg-open.schema.json`.
 
 ### ADR-039: The judgment cache — no paid call twice by default
-**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Judgment
-cache", named while amending ADR-038; Accepted on merge)
+**Status:** Accepted (2026-08-29 — drafted from ROADMAP.md's "Judgment
+cache", named while amending ADR-038; input-hash exclusion added in
+review; human-approved 2026-08-29)
 **Context:** Enrich and verify steps cache-skip a record whose fields are
 current within the freshness window (§7); AI steps never do — every run
 re-judges every record and pays again, and the only guard is the
