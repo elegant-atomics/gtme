@@ -23,10 +23,12 @@
         "additionalProperties": {"type": "string", "minLength": 1},
         "description": "Egress mapping, target merge-field name → ledger field (ADR-018). Injected by the runner from the step-level variables: key — never authored inside with:."
       },
-      "base_url": {"type": "string", "description": "Override the API host (testing)"}
+      "base_url": {"type": "string", "description": "Override the API host (testing)"},
+      "preflight": {"type": "boolean", "description": "ADR-040: check the live campaign before sending (default true); false skips"}
     }
   },
   "credentials": ["INSTANTLY_API_KEY"],
   "attests": true,
+  "preflights": true,
   "cost_estimate_usd": 0
 }

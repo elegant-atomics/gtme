@@ -1,7 +1,9 @@
 package instantly
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -18,10 +20,22 @@ const leadID = "99999999-8888-7777-6666-555555555555"
 func routes(t *testing.T) map[string]adaptertest.Response {
 	t.Helper()
 	return map[string]adaptertest.Response{
-		"GET /api/v2/campaigns":       {Body: adaptertest.Fixture(t, "campaigns.json")},
-		"POST /api/v2/leads":          {Body: adaptertest.Fixture(t, "lead.json")},
-		"GET /api/v2/leads/" + leadID: {Body: adaptertest.Fixture(t, "lead-read.json")},
+		"GET /api/v2/campaigns":               {Body: adaptertest.Fixture(t, "campaigns.json")},
+		"POST /api/v2/leads":                  {Body: adaptertest.Fixture(t, "lead.json")},
+		"GET /api/v2/leads/" + leadID:         {Body: adaptertest.Fixture(t, "lead-read.json")},
+		"GET /api/v2/campaigns/" + campaignID: {Body: adaptertest.Fixture(t, "campaign.json")},
 	}
+}
+
+// preflights returns the PREFLIGHT messages.
+func preflights(msgs []protocol.Message) []protocol.Message {
+	var out []protocol.Message
+	for _, m := range msgs {
+		if m.Type == protocol.TypePreflight {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // attests returns the ATTEST messages.
@@ -396,5 +410,97 @@ func TestManifestDeclaresAttestation(t *testing.T) {
 	}
 	if !resolved.Manifest.Attests {
 		t.Error("instantly/add-to-campaign is the first attesting adapter (ADR-036)")
+	}
+}
+
+// TestPreflightChecksTheLiveCampaign is ADR-040 at the adapter: a preflight
+// session sends nothing and answers from the campaign read — ok when the
+// campaign is active, the sequence long enough, every variable referenced
+// and every variant carrying it; blocked, naming the check, otherwise;
+// inconclusive when the campaign cannot be read or the shape is unreadable.
+func TestPreflightChecksTheLiveCampaign(t *testing.T) {
+	ResetCampaignCache()
+	run := func(r map[string]adaptertest.Response, variables map[string]any) (*adaptertest.Stub, []protocol.Message) {
+		t.Helper()
+		stub := &adaptertest.Stub{Routes: r}
+		inR, inW := io.Pipe()
+		outR, outW := io.Pipe()
+		go func() {
+			w := protocol.NewWriter(inW)
+			w.Write(protocol.Message{Type: protocol.TypeOpen, StepID: "send", RunID: "run1", Preflight: true,
+				Config: map[string]any{"campaign": campaignID, "base_url": "https://instantly.test", "variables": variables}})
+			w.Write(protocol.End())
+			inW.Close()
+		}()
+		go func() {
+			outW.CloseWithError((&Adapter{HTTP: stub}).Run(context.Background(),
+				adapters.Ports{In: inR, Out: outW, Log: io.Discard, Env: map[string]string{"INSTANTLY_API_KEY": "secret"}}))
+		}()
+		var msgs []protocol.Message
+		rd := protocol.NewReader(outR)
+		for {
+			m, err := rd.Next()
+			if err != nil {
+				break
+			}
+			msgs = append(msgs, m)
+		}
+		return stub, msgs
+	}
+	vars := map[string]any{"first_name": "first_name", "personalization": "first_line",
+		"body_step_1": "outreach.body_1", "body_step_2": "outreach.body_2", "body_step_3": "outreach.body_3",
+		"ps_line": "ps_line", "title": "title"}
+
+	// ok: the fixture campaign references everything, three steps, and its
+	// only A/B step carries body_step_3 in both variants.
+	stub, msgs := run(routes(t), vars)
+	got := preflights(msgs)
+	if len(got) != 1 || got[0].Status != protocol.PreflightOK {
+		t.Fatalf("preflight = %+v, want ok", got)
+	}
+	if stub.CallsTo("POST") != 0 {
+		t.Errorf("a preflight session must send nothing; calls = %+v", stub.Calls)
+	}
+	if len(got[0].Checks) < 6 {
+		t.Errorf("checks = %+v, want status, step count, and one per merge variable", got[0].Checks)
+	}
+	for _, m := range msgs {
+		if m.Type == protocol.TypeRecord || m.Type == protocol.TypeAttest || m.Type == protocol.TypeCost {
+			t.Errorf("preflight session emitted %s", m.Type)
+		}
+	}
+
+	campaign := adaptertest.Fixture(t, "campaign.json")
+	cases := []struct {
+		name, body string
+		vars       map[string]any
+		status     string
+		reason     string
+	}{
+		{"paused", strings.Replace(campaign, `"status": 1`, `"status": 2`, 1), vars, protocol.PreflightBlocked, "campaign is not Active"},
+		{"too few steps", campaign, map[string]any{"body_step_4": "outreach.body_4"}, protocol.PreflightBlocked, "the copy assumes 4 step(s) but the sequence has 3"},
+		{"unreferenced variable", campaign, map[string]any{"opener": "first_line"}, protocol.PreflightBlocked, "no sequence step references {{opener}}"},
+		{"unfilled variant", strings.Replace(campaign, `{{body_step_3}} — {{title}}`, `{{title}}`, 1), vars, protocol.PreflightBlocked, "step 3 has a variant without {{body_step_3}}"},
+		{"unreadable shape", `{"id":"` + campaignID + `","name":"Q3 VP Marketing"}`, vars, protocol.PreflightInconclusive, "no readable status, sequence"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := routes(t)
+			r["GET /api/v2/campaigns/"+campaignID] = adaptertest.Response{Body: tc.body}
+			_, msgs := run(r, tc.vars)
+			got := preflights(msgs)
+			if len(got) != 1 || got[0].Status != tc.status || !strings.Contains(got[0].Reason, tc.reason) {
+				t.Errorf("preflight = %+v, want %s naming %q", got, tc.status, tc.reason)
+			}
+		})
+	}
+
+	// Unreadable target: the read fails → inconclusive, not blocked.
+	r := routes(t)
+	r["GET /api/v2/campaigns/"+campaignID] = adaptertest.Response{Status: 503, Body: `{"error":"down"}`}
+	_, msgs = run(r, vars)
+	got = preflights(msgs)
+	if len(got) != 1 || got[0].Status != protocol.PreflightInconclusive || !strings.Contains(got[0].Reason, "campaign could not be read") {
+		t.Errorf("preflight = %+v, want inconclusive", got)
 	}
 }

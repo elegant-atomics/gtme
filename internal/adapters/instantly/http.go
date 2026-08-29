@@ -6,6 +6,7 @@ package instantly
 // Endpoints: GET  https://api.instantly.ai/api/v2/campaigns   (resolve name → id)
 //            POST https://api.instantly.ai/api/v2/leads       (add lead)
 //            GET  https://api.instantly.ai/api/v2/leads/{id}  (re-read, attestation — ADR-036)
+//            GET  https://api.instantly.ai/api/v2/campaigns/{id} (sequence + status, preflight — ADR-040)
 // Auth:      Authorization: Bearer $INSTANTLY_API_KEY
 // Docs:      https://developer.instantly.ai/api/v2/lead/createlead
 //            https://developer.instantly.ai/api/v2/lead/getlead
@@ -229,4 +230,80 @@ func looksLikeID(s string) bool {
 func str(v any) string {
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
+}
+
+// campaignDetail is what a campaign read returns, decoded loosely: the
+// status and the sequence steps with their variants' subject and body —
+// the parts preflight reads (ADR-040). Anything the response does not
+// carry is unreadable, never assumed.
+type campaignDetail struct {
+	Fields map[string]any
+}
+
+// getCampaign reads one campaign by id, for preflight.
+func (a *Adapter) getCampaign(ctx context.Context, cfg config, apiKey, id string) (campaignDetail, error) {
+	var out map[string]any
+	err := httpx.JSON(ctx, a.HTTP, httpx.Request{
+		Method:   "GET",
+		URL:      strings.TrimRight(cfg.BaseURL, "/") + campaignsPath + "/" + id,
+		Provider: "instantly",
+		Headers:  map[string]string{"Authorization": "Bearer " + apiKey},
+		Attempts: 1,
+	}, &out)
+	return campaignDetail{Fields: out}, err
+}
+
+// campaignStatusActive is Instantly's numeric status for an active campaign.
+const campaignStatusActive = 1
+
+// active reports the campaign's status, and whether the response carried
+// one at all.
+func (c campaignDetail) active() (bool, bool) {
+	v, ok := c.Fields["status"]
+	if !ok || v == nil {
+		return false, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n) == campaignStatusActive, true
+	case string:
+		return strings.EqualFold(n, "active") || n == "1", true
+	}
+	return false, false
+}
+
+// steps flattens the sequence into its email steps, each a list of variant
+// bodies (subject + body joined, since a merge field may sit in either).
+// ok=false when the response carried no readable sequence.
+func (c campaignDetail) steps() ([][]string, bool) {
+	sequences, ok := c.Fields["sequences"].([]any)
+	if !ok {
+		return nil, false
+	}
+	var out [][]string
+	for _, seq := range sequences {
+		m, _ := seq.(map[string]any)
+		stepList, _ := m["steps"].([]any)
+		for _, st := range stepList {
+			sm, _ := st.(map[string]any)
+			if t, _ := sm["type"].(string); t != "" && t != "email" {
+				continue
+			}
+			var variants []string
+			for _, v := range asList(sm["variants"]) {
+				vm, _ := v.(map[string]any)
+				variants = append(variants, str(vm["subject"])+"\n"+str(vm["body"]))
+			}
+			if len(variants) == 0 {
+				variants = append(variants, str(sm["subject"])+"\n"+str(sm["body"]))
+			}
+			out = append(out, variants)
+		}
+	}
+	return out, len(out) > 0
+}
+
+func asList(v any) []any {
+	l, _ := v.([]any)
+	return l
 }

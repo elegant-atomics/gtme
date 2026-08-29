@@ -103,6 +103,12 @@ type StepStat struct {
 	// provider, and the tokens they are pending under.
 	InFlight int
 	Tokens   []string
+
+	// Preflight (SPEC §8, ADR-040): the target's answer before anything
+	// sent — "" when the adapter does not preflight.
+	Preflight       string
+	PreflightReason string
+	PreflightChecks []protocol.Check
 }
 
 // Attestation is one inconclusive (or otherwise noteworthy) attestation.

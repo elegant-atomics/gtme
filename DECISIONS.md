@@ -1249,8 +1249,8 @@ and the respend warning narrowed; §10a provenance format
 (prose, no DDL); §11 milestone M16.
 
 ### ADR-040: Deliver preflight — the target is checked before anything sends
-**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Deliver
-preflight"; Accepted on merge)
+**Status:** Accepted (2026-08-29 — drafted from ROADMAP.md's "Deliver
+preflight"; human-approved 2026-08-29)
 **Context:** `gtme plan` proves gtme's own contracts — needs, provides,
 credentials, config — with zero network (§7). It knows nothing about the
 *target's* state, and the class of failure that produces is the one
@@ -2217,4 +2217,44 @@ the signature and `gtme show --provenance` shows it; the AI respend
 warning is gone; `--simulate` skips; a deferred step cache-checks before
 submitting and a re-run after collection submits nothing.
 **Spec impact:** None beyond v0.19 (marked built as v0.20).
+
+### 2026-08-29 — M17 internals: deliver preflight (ADR-040)
+
+**Question:** Where in the runner does the preflight session sit, what
+does a blocked run leave behind, which of Instantly's `variables:`
+targets are template variables, and how does an adapter opt out?
+**Choice:** (1) `runStep` runs the preflight before preparing any record
+of a preflighting deliver step, at dry-run and armed alike; the session is
+OPEN (`preflight: true`) + END, and the adapter's PREFLIGHT is recorded
+as a step-level `preflight` event with status, reason and checks. A
+`blocked` armed run returns an error from the step: no record was
+prepared, so nothing is `claimed`, nothing delivered, `run_records.state`
+stays at the previous step, the run finishes `failed`, and `--resume`
+preflights again; a dry run reports the block and continues. An adapter
+that emits a RECORD, VERDICT or ATTEST in a preflight session is an
+error; one that emits nothing is `inconclusive`. (2) Instantly reads
+`GET /api/v2/campaigns/{id}` once, decoded loosely (an unreadable status
+or sequence is inconclusive, never a guess); its first-class targets
+(`first_name`, `last_name`, `company_name`, `personalization`) map into
+the lead body and are not template variables, so only the remaining
+targets are checked for `{{name}}`; the assumed step count is the
+highest `_step_N` suffix among the targets; the variant check applies to
+a step's own copy — `<x>_step_N` must be in every variant of step N —
+while other variables are decoration a variant may omit (the first draft
+checked every variable in every variant and blocked on a `{{title}}`
+present in one variant only, which is not a hole). (3) Opt-out is
+adapter config (`preflight: false`), read by the runner before it opens
+the session, so an adapter never sees a preflight it was told to skip.
+(4) The `mock/preflight` fixture adapter (`MOCK_PREFLIGHT=ok|blocked|
+inconclusive|silent`) is the acceptance's instrument, delivering to
+`MOCK_DELIVER_LOG` like `mock/deliver`.
+**Why:** The M17 acceptance runs offline: blocked dry reports the check
+and writes nothing; blocked armed leaves zero deliveries, zero record
+sessions, three records at `sourced`, a failed run, and a resume after
+the fix delivers all three; inconclusive and silent deliver with a
+warning; `preflight: false` skips; a non-preflighting adapter beside a
+preflighting one is never asked. Instantly's checks are unit-tested for
+active, paused, too few steps, an unreferenced variable, an unfilled
+variant, an unreadable shape and an unreadable target.
+**Spec impact:** None beyond v0.21 (marked built as v0.22).
 

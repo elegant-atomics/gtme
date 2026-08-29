@@ -349,6 +349,21 @@ mapping, `on_missing` completeness (blank merge fields never send),
 idempotency via the `deliveries` table, dry-run receipts, `record:` touch
 scoping, and `suppress:` windows.
 
+**The target is checked before anything sends (ADR-040).** An adapter
+whose manifest declares `preflights: true` is asked, at `--dry-run` and at
+the start of an armed run, whether the live target is fit to send to —
+read-only, once per run, before any record. `ok` proceeds; `inconclusive`
+(the target could not be read) proceeds with a warning; **`blocked`
+fails the step before a single record moves** — records stay put, the run
+finishes `failed`, `--resume` after the fix preflights again. The checks
+come from the step's own `variables:`; nothing to configure;
+`preflight: false` in adapter config skips. This is the class of failure
+attestation cannot see: every request succeeds and nothing meaningful
+sends. `gtme plan` stays zero-network. Instantly is the first preflighting
+adapter: campaign Active, sequence step count vs the highest `_step_N`
+among the targets, every target referenced as `{{name}}` in some step,
+no A/B variant lacking one.
+
 **A 2xx is not a delivery (ADR-036).** Every delivery lands `accepted` —
 the provider took the request. `sent` is written only when a provider
 attests execution (the `listen` verb, not built). An adapter whose
@@ -366,9 +381,11 @@ Adds a lead to an Instantly campaign. Accepts a campaign *name* (resolved
 to an id once per run — a deliberate process-adapter extra) or the id
 itself. `variables:` targets matching Instantly's first-class lead fields
 (`first_name`, `last_name`, `company_name`, `personalization`) map into
-the lead body; anything else becomes a custom variable. Attests: after
-the create it re-reads the lead (`GET /api/v2/leads/{id}`) and compares
-every field it sent. Credential: `INSTANTLY_API_KEY`.
+the lead body; anything else becomes a custom variable. Preflights: reads
+the campaign (`GET /api/v2/campaigns/{id}`) and checks status, step count,
+variable references and variants before sending. Attests: after the
+create it re-reads the lead (`GET /api/v2/leads/{id}`) and compares every
+field it sent. Credential: `INSTANTLY_API_KEY`.
 
 ### `attio/assert` — binding
 

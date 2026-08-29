@@ -80,7 +80,7 @@
     },
     "preflights": {
       "type": "boolean",
-      "description": "PROPOSED (ADR-040), deliver adapters only: the adapter can check the live target against what a step is about to send (SPEC.md §5 PREFLIGHT) — read-only, at --dry-run and arm time. Absent, no preflight runs."
+      "description": "ADR-040, deliver adapters only: the adapter can check the live target against what a step is about to send (SPEC.md §5 PREFLIGHT) — read-only, at --dry-run and arm time. Absent, no preflight runs."
     },
     "payload_ttl_days": {
       "type": "integer",

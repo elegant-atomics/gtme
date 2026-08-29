@@ -22,7 +22,7 @@
     },
     "preflight": {
       "type": "boolean",
-      "description": "PROPOSED (ADR-040). Present (true) only in a preflight session: no records follow, and the adapter answers PREFLIGHT then END after checking the live target against this step's config (its variables: targets ride in config as ever)."
+      "description": "ADR-040. Present (true) only in a preflight session: no records follow, and the adapter answers PREFLIGHT then END after checking the live target against this step's config (its variables: targets ride in config as ever)."
     }
   }
 }

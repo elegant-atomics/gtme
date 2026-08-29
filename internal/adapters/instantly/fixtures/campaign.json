@@ -1,0 +1,21 @@
+{
+  "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "name": "Q3 VP Marketing",
+  "status": 1,
+  "sequences": [
+    {
+      "steps": [
+        {"type": "email", "delay": 0, "variants": [
+          {"subject": "{{first_name}}, quick one", "body": "{{personalization}}\n\n{{body_step_1}}"}
+        ]},
+        {"type": "email", "delay": 3, "variants": [
+          {"subject": "re: quick one", "body": "{{body_step_2}}\n\n{{ps_line}}"}
+        ]},
+        {"type": "email", "delay": 5, "variants": [
+          {"subject": "last note", "body": "{{body_step_3}}"},
+          {"subject": "last note (b)", "body": "{{body_step_3}} — {{title}}"}
+        ]}
+      ]
+    }
+  ]
+}

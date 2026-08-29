@@ -280,7 +280,7 @@ the class of failure where every request succeeds and nothing sends.
 Manifest capability, per adapter; the Instantly adapter is the first
 candidate.
 
-**Promoted (2026-08-29, ADR-040 — proposed).** At `--dry-run` and arm
+**Promoted (2026-08-29, ADR-040 — accepted 2026-08-29; build queued as M17).** At `--dry-run` and arm
 time, not `plan` (which stays zero-network): a short preflight session
 per deliver step, a three-way answer (`ok` / `blocked` / `inconclusive`),
 checks derived from the step's own `variables:`; Instantly first.
