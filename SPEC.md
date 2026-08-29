@@ -627,6 +627,14 @@ The canonical schema for this file is `spec/schemas/manifest.schema.json`.
   `entity_type` or vendor-namespaced (`<vendor>.<field>`). Schemas that
   name no properties (the needs-all wildcard, an open source schema) have
   nothing to check.
+- **Entity-agnostic manifests (ADR-033):** an adapter whose contract does
+  not depend on the entity type — the AI steps (§10.3, §10.5) — declares
+  `"entity_type": "*"`. Its steps take the pipeline's entity type (the
+  source's; none after a group source, in which case name validation is
+  entity-blind), and a static `needs`/`provides` schema on such a manifest
+  is validated against that type at plan time. A source MUST NOT be
+  entity-agnostic: it has no pipeline type to take, and the planner
+  rejects one.
 - `freshness_days`: default cache window for fields this adapter provides;
   overridable per step (`cache:` in YAML).
 - **Payload retention (ADR-030):** `keep_payloads` (default true) and
@@ -1267,7 +1275,8 @@ contract, pure YAML.
    prompt precedes the records as a stated default, with the
    shared/payload split exposed so the order is A/B-able and a cache
    breakpoint can sit between them. AI steps hold no tools. The manifest is
-   entity-agnostic: the step's entity type is the pipeline's.
+   entity-agnostic (`"entity_type": "*"`, §6): the step's entity type is
+   the pipeline's.
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
    lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
    one-of `linkedin_url` | `linkedin_internal_url` |
@@ -1839,7 +1848,11 @@ naming (found building ADR-033, queued in AUDIT.md (b), human-approved
 2026-08-28); §4a tier 3 reworded to point at it. Every bare name
 namespaces otherwise, canonical-looking or not, and `gtme plan` notes the
 coincidence. `spec/schemas/pipeline.schema.json`: a `provides` map value
-is null or an object of `type`/`enum`/`canonical`.
+is null or an object of `type`/`enum`/`canonical`. §6 entity-agnostic
+manifests: `"entity_type": "*"` names what §10.3 asserted without an
+encoding (AUDIT.md (b), approved 2026-08-28); a source may not declare
+it; `manifest.schema.json` describes the sentinel; the two AI manifests
+declare it.
 **Not changed:** §11 M14 stays queued — step (1) of five is built.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)

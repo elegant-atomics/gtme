@@ -160,20 +160,18 @@ takes the conservative reading and the question is queued here.
    canonical field and names the opt-in.
 
 2. **How does a manifest declare that it is entity-agnostic?** §10.3
-   (items 3 and 5) says "the manifest is entity-agnostic: the step's
+   (items 3 and 5) said "the manifest is entity-agnostic: the step's
    entity type is the pipeline's", but §6 and
-   `spec/schemas/manifest.schema.json` require `entity_type` (min length
-   1) and describe it as `'person' | 'company' (extensible)`. The build
-   applies the §10.3 behaviour by a planner rule keyed on the `ai/` id
-   prefix (ADR-026) and leaves the two AI manifests saying `person`,
-   which `gtme help --agent` prints as-is.
-   **Proposed diff:** §6 gains "an adapter whose contract does not depend
-   on the entity type MAY omit `entity_type` (or declare `"*"`): its
-   steps take the pipeline's entity type, and a static `needs`/`provides`
-   schema on such a manifest is validated against that type at plan
-   time"; `manifest.schema.json` drops `entity_type` from `required` (or
-   admits the sentinel); the AI manifests follow. Until then the planner
-   rule stands and external adapters cannot opt in.
+   `spec/schemas/manifest.schema.json` required `entity_type` (min length
+   1) described as `'person' | 'company' (extensible)`, and the build
+   initially applied the §10.3 behaviour by a planner rule keyed on the
+   `ai/` id prefix with the two AI manifests still saying `person`.
+   **Applied (approved 2026-08-28, SPEC v0.16):** `"entity_type": "*"` —
+   §6 states the rule (steps take the pipeline's entity type; static
+   schemas validate against it at plan; a source may not declare it), the
+   manifest schema describes the sentinel, §10.3 points at §6, the AI
+   manifests declare it, and the planner keys on the declaration rather
+   than the id prefix — so external adapters can opt in.
 
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 

@@ -267,8 +267,9 @@ To write a canonical field instead (global, shared across campaigns —
 `first_line`, say, so a deliver step's `variables:` keep reaching it),
 mark it `canonical: true`; the plan checks the name, type and domain
 against the registry.
-AI steps are entity-agnostic: inside a company pipeline they plan and
-validate against the company registry.
+AI steps are entity-agnostic (`"entity_type": "*"` in the manifest — any
+adapter may declare it): inside a company pipeline they plan and validate
+against the company registry.
 
 ### `sql/filter`
 

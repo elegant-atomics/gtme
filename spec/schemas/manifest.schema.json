@@ -24,7 +24,7 @@
     "entity_type": {
       "type": "string",
       "minLength": 1,
-      "description": "'person' | 'company' (extensible)."
+      "description": "'person' | 'company' (extensible), or '*' for an entity-agnostic adapter (SPEC.md §6, ADR-033): its steps take the pipeline's entity type, and its static needs/provides are validated against that type at plan time. A source may not declare '*'."
     },
     "needs": {
       "oneOf": [

@@ -2,7 +2,7 @@
   "id": "ai/compose",
   "version": 1,
   "role": "compose",
-  "entity_type": "person",
+  "entity_type": "*",
   "needs": "dynamic",
   "provides": {
     "type": "object",

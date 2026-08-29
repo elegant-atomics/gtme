@@ -64,10 +64,17 @@ const AIPrefix = "ai/"
 // second instance: never authored inside with:.
 const ProvidesConfigKey = "provides"
 
-// IsAI reports an AI step (ADR-026). AI manifests are entity-agnostic
-// (SPEC §10.3, ADR-033): the step's entity type is the pipeline's, and they
-// are the adapters that derive their provides from a step-level declaration.
+// IsAI reports an AI step (ADR-026): the adapters that derive their provides
+// from a step-level declaration (SPEC §7, ADR-033).
 func (m *Manifest) IsAI() bool { return strings.HasPrefix(m.ID, AIPrefix) }
+
+// EntityAny is the entity_type an entity-agnostic manifest declares
+// (SPEC §6, ADR-033): its steps take the pipeline's entity type.
+const EntityAny = "*"
+
+// EntityAgnostic reports a manifest whose contract does not depend on the
+// entity type (SPEC §6).
+func (m *Manifest) EntityAgnostic() bool { return m.EntityType == EntityAny }
 
 // DefaultPayloadTTLDays is ADR-030's default retention window.
 const DefaultPayloadTTLDays = 90

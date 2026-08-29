@@ -319,3 +319,65 @@ steps:
 		})
 	}
 }
+
+// anyEntityManifest is an external enrich adapter declaring entity_type "*"
+// (SPEC §6): its steps take the pipeline's entity type.
+const anyEntityManifest = `{
+  "id": "any-entity",
+  "version": 1,
+  "role": "enrich",
+  "entity_type": "*",
+  "needs": {"type":"object","additionalProperties":true},
+  "provides": {"type":"object","additionalProperties":false,"properties":{"headline":{"type":"string"}}}
+}`
+
+// TestEntityAgnosticManifestTakesThePipelinesType: "*" is not an AI-only
+// trick — any adapter may declare it. Its static provides validate against
+// the pipeline's registry at plan (headline is a person field, so a company
+// pipeline rejects it), and a source may not declare it at all.
+func TestEntityAgnosticManifestTakesThePipelinesType(t *testing.T) {
+	h := newHarness(t)
+	h.writeAdapter("any-entity", anyEntityManifest, echoAdapterScript)
+	h.write("people.csv", peopleCSV)
+	h.write("companies.csv", companiesCSV)
+
+	h.write("person.yaml", `name: p
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: any
+    use: any-entity
+`)
+	plan := h.mustRun("plan", "person.yaml")
+	contains(t, plan.stderr, "2. any [enrich] — any-entity@1 (external:", "plan output")
+	contains(t, plan.stderr, "entity:    person", "the step takes the pipeline's entity type")
+
+	h.write("company.yaml", `name: c
+source:
+  use: csv/source
+  with:
+    path: companies.csv
+    entity_type: company
+steps:
+  - id: any
+    use: any-entity
+`)
+	res := h.run("plan", "company.yaml")
+	if res.code != 2 {
+		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `manifest provides: "headline" is not a canonical company field`, "static provides validate against the pipeline's type")
+
+	h.writeAdapter("any-source", strings.NewReplacer(`"any-entity"`, `"any-source"`, `"enrich"`, `"source"`).Replace(anyEntityManifest), echoAdapterScript)
+	h.write("source.yaml", `name: s
+source:
+  use: any-source
+`)
+	res = h.run("plan", "source.yaml")
+	if res.code != 2 {
+		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `any-source declares entity_type "*" and cannot be the source`, "stderr")
+}

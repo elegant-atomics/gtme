@@ -429,11 +429,16 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	ps.Role = resolved.Manifest.Role
 	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
-	// AI manifests are entity-agnostic (SPEC §10.3, ADR-033): the step's
-	// entity type is the pipeline's, so uses:/provides: validate against the
-	// registry the records actually belong to.
+	// An entity-agnostic manifest (SPEC §6, ADR-033 — the AI steps) takes
+	// the pipeline's entity type, so uses:/provides: and its static schemas
+	// validate against the registry the records actually belong to. A source
+	// has no pipeline type to take.
 	isAI := resolved.Manifest.IsAI()
-	if isAI && !isSource {
+	if resolved.Manifest.EntityAgnostic() {
+		if isSource {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("%s declares entity_type \"*\" and cannot be the source — a source names the entity type its records are (SPEC §6)", s.Use)})
+		}
 		ps.EntityType = scope.EntityType
 	}
 	ps.Needs = resolved.Manifest.NeedsFields()

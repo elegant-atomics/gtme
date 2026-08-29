@@ -1675,15 +1675,15 @@ canonical for the pipeline's entity type and a declared `type`/`enum`
 must agree with the registry entry, checked at plan. No aliasing (the
 declared name IS the field): the realistic need is "make this one
 global", and a rename would put a second name in the prompt for nothing.
-(3) Entity-agnosticism is a planner rule
-keyed on the `ai/` adapter-id prefix (ADR-026's operation-named AI steps,
-already how the runner recognises them): an AI step's entity type is the
-pipeline's — its source step's resolved entity type, or none after a
-group source, in which case name validation is entity-blind exactly as
-SQL steps already are. The two AI manifests keep `entity_type: person`
-because §6 and `spec/schemas/manifest.schema.json` require the key; the
-manifest-format encoding of "entity-agnostic" is the second queued spec
-question. Observable behaviour matches §10.3 either way. A compose
+(3) Entity-agnosticism is a manifest declaration,
+`"entity_type": "*"` (SPEC §6, the second queued question — approved and
+applied the same day): an agnostic step's entity type is the pipeline's —
+its source step's resolved entity type, or none after a group source, in
+which case name validation is entity-blind exactly as SQL steps already
+are — and its static needs/provides validate against that type. The
+planner keys on the declaration, not on the `ai/` id prefix, so external
+adapters can opt in; a source declaring `"*"` fails plan (it has no
+pipeline type to take). A compose
 declaring nothing inside a company pipeline fails plan naming
 `first_line` with the fix ("declare `provides:` on this step"), since
 its person-vocabulary default has nowhere legal to land. (4) In the
@@ -1716,7 +1716,8 @@ rejects `uses: [title]` against the company registry, and lands
 `with:`, or naming a reserved key fails plan naming step and key; and
 `--simulate` completes the declared pipeline on synthesized answers.
 **Spec impact:** v0.16 — `canonical: true` added to §7/§9 and the
-pipeline schema, §4a reworded (approved 2026-08-28). One spec-visible
-question remains queued in AUDIT.md (b): the manifest encoding of
-entity-agnosticism. §11 M14 is not marked built — step (1) of five is.
+pipeline schema, §4a reworded; `"entity_type": "*"` added to §6 and the
+manifest schema, §10.3 pointed at it (both approved 2026-08-28). Nothing
+remains queued from this step. §11 M14 is not marked built — step (1) of
+five is.
 

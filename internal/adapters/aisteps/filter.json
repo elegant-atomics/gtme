@@ -2,7 +2,7 @@
   "id": "ai/filter",
   "version": 1,
   "role": "filter",
-  "entity_type": "person",
+  "entity_type": "*",
   "needs": "dynamic",
   "config_schema": {
     "type": "object",
