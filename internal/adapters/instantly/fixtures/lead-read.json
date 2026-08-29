@@ -1,0 +1,13 @@
+{
+  "id": "99999999-8888-7777-6666-555555555555",
+  "email": "jane.doe@acme.com",
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "company_name": "Acme Inc",
+  "personalization": "Saw your post on killing three channels.",
+  "campaign": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "payload": {
+    "ps_line": "PS: the CAC math checks out.",
+    "title": "VP Marketing"
+  }
+}

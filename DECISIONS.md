@@ -1862,3 +1862,46 @@ their columns and its shapes run.
 (v0.16 changelog); the §10a heading typo fixed. No normative change
 beyond what v0.15 stated.
 
+### 2026-08-28 — M14 step 5 internals: attestation (ADR-036)
+
+**Question:** How does an attesting adapter report its verdict (the ADR's
+spec-impact list named §3/§6/§8 but not §5), when does an attesting
+delivery advance, what does a contradicted delivery leave behind, and how
+does the Instantly re-read decide?
+**Choice:** (1) A new §5 message, `ATTEST {key, status, reason}`, emitted
+after the acknowledgement RECORD — approved 2026-08-28 over an optional
+field on the ack RECORD and over reusing VERDICT: it parallels VERDICT, the
+ack stays untouched, and §5's "unknown message types are ignored" makes
+old runners forward-compatible for free. `msg-attest.schema.json`, the
+wire README table, and `attests` in the manifest schema follow. (2) The
+runner hears ATTEST only from a step whose manifest declares `attests`
+(an undeclared adapter's ATTEST is logged and ignored). For such a step
+the ack RECORD does not advance the record; the ATTEST does — confirmed
+advances and refines the row; inconclusive advances, the row stays
+accepted, the receipt names the record and why; contradicted writes the
+`deliveries` row (the lead exists at the target — idempotency must hold so
+a re-run never re-sends into a duplicate), marks it `contradicted`, and
+fails the record. An attesting adapter that acknowledged a record but
+never attested it is settled inconclusive at session end. (3) `sent_at`
+is never written by this build; `SetDeliveryStatus` refuses `sent` —
+promotion is the listen verb's compare-and-swap. (4) Instantly re-reads
+`GET /api/v2/leads/{id}` once per lead with no retries (a failed re-read
+is inconclusive, not a retry storm) and compares the first-class fields
+by name and custom variables under `payload` or `custom_variables`; a
+field the response carries no readable value for is inconclusive, never
+confirmed by omission. (5) `gtme show <key>` gains a `deliveries` list
+with `target`, `status`, `run_id`, `created_at`, and `sent_at` only when
+set; the receipt prints one attestation line per attesting step and one
+line per inconclusive record. (6) The `mock/attest` fixture adapter
+(`MOCK_ATTEST=confirmed|contradicted|inconclusive|silent`) is the §11
+acceptance's instrument.
+**Why:** The step-5 acceptance runs offline four ways: confirmed refines
+all three rows and advances; contradicted keeps three rows marked, fails
+three records, and a re-run sends nothing; inconclusive and silent both
+leave rows accepted, advance, and name every record in the receipt; a
+non-attesting adapter is accepted with no attestation lines; `show`
+carries the status and never a `sent_at`. The Instantly unit test drives
+all four outcomes against stubbed re-reads.
+**Spec impact:** §5 ATTEST (v0.16 changelog) — approved; nothing else
+beyond v0.15.
+

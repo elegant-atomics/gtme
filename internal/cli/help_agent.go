@@ -76,6 +76,7 @@ type agentAdapter struct {
 	ConfigSchema        json.RawMessage `json:"config_schema,omitempty"`
 	FreshnessDays       int             `json:"freshness_days,omitempty"`
 	CostEstimateUSD     *float64        `json:"cost_estimate_usd,omitempty"`
+	Attests             bool            `json:"attests,omitempty"`
 }
 
 // agentAdapters reads the live registry (built-ins + anything on
@@ -97,6 +98,7 @@ func agentAdapters() []agentAdapter {
 			ConfigSchema:        m.ConfigSchema,
 			FreshnessDays:       m.FreshnessDays,
 			CostEstimateUSD:     m.CostEstimate,
+			Attests:             m.Attests,
 		})
 	}
 	return out

@@ -49,6 +49,8 @@ func schemaFor(dir, msgType string) (string, error) {
 			return "msg-record-out.schema.json", nil
 		case protocol.TypeVerdict:
 			return "msg-verdict.schema.json", nil
+		case protocol.TypeAttest:
+			return "msg-attest.schema.json", nil
 		case protocol.TypeCost:
 			return "msg-cost.schema.json", nil
 		case protocol.TypeState:

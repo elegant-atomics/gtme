@@ -326,14 +326,26 @@ mapping, `on_missing` completeness (blank merge fields never send),
 idempotency via the `deliveries` table, dry-run receipts, `record:` touch
 scoping, and `suppress:` windows.
 
+**A 2xx is not a delivery (ADR-036).** Every delivery lands `accepted` —
+the provider took the request. `sent` is written only when a provider
+attests execution (the `listen` verb, not built). An adapter whose
+manifest declares `attests: true` re-reads what it just wrote and emits a
+three-way verdict per record: `confirmed` (every non-blank field sent is
+stored), `contradicted` (a stored value disagrees — the record fails; the
+row is kept, marked, so nothing re-sends into a duplicate), or
+`inconclusive` (the re-read failed or the shape was unrecognised — the
+record advances, `accepted`, and the receipt names it). The receipt and
+`gtme show` carry the status. Instantly is the first attesting adapter.
+
 ### `instantly/add-to-campaign`
 
 Adds a lead to an Instantly campaign. Accepts a campaign *name* (resolved
 to an id once per run — a deliberate process-adapter extra) or the id
 itself. `variables:` targets matching Instantly's first-class lead fields
 (`first_name`, `last_name`, `company_name`, `personalization`) map into
-the lead body; anything else becomes a custom variable. Credential:
-`INSTANTLY_API_KEY`.
+the lead body; anything else becomes a custom variable. Attests: after
+the create it re-reads the lead (`GET /api/v2/leads/{id}`) and compares
+every field it sent. Credential: `INSTANTLY_API_KEY`.
 
 ### `attio/assert` — binding
 

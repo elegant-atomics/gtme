@@ -533,6 +533,7 @@ Adapter → runner:
 {"type":"SCHEMA","provides":{...json schema...}}          // first message
 {"type":"RECORD","key":{...},"fields":{...},"confidence":{"email":0.93}}
 {"type":"VERDICT","key":{...},"pass":true,"reason":"..."}  // filter steps
+{"type":"ATTEST","key":{...},"status":"confirmed|contradicted|inconclusive","reason":"..."}  // deliver steps declaring attests (§6)
 {"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"detail":{...}}
 {"type":"STATE","cursor":{...}}                            // resumable sources
 {"type":"LOG","level":"info|warn|error","msg":"..."}
@@ -567,6 +568,15 @@ Rules:
   key (ADR-033): the VERDICT gates advancement as ever; the RECORD's
   fields are its declared provides (§7), stored like any adapter output,
   so a judge's reasoning is queryable without a second call.
+- A deliver adapter declaring `attests` (§6) MAY emit an ATTEST after the
+  RECORD that acknowledges a delivery (ADR-036): `confirmed` and
+  `inconclusive` let the record advance — the latter with a receipt
+  warning, its delivery still `accepted` — and `contradicted` fails it,
+  keeping the `deliveries` row with that status, since the record exists
+  at the target and re-sending would duplicate it. An attesting adapter
+  that says nothing about a record is `inconclusive`. An adapter that does
+  not declare `attests` MUST NOT emit ATTEST; a runner ignores one that
+  does. Runners that predate the message ignore it, per the rule above.
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
@@ -1868,11 +1878,16 @@ manifests: `"entity_type": "*"` names what §10.3 asserted without an
 encoding (AUDIT.md (b), approved 2026-08-28); a source may not declare
 it; `manifest.schema.json` describes the sentinel; the two AI manifests
 declare it.
+**Added:** §5 ATTEST — the wire form of ADR-036's three-way verdict,
+which its spec-impact list left out (found building step (5); approved
+2026-08-28): `spec/schemas/msg-attest.schema.json`, the wire README's
+table, and the `attests` key in `manifest.schema.json`.
 **Changed:** `spec/ledger.sql` and §3's DDL — M14's migration `0007`
 landed (step (4)): `deliveries.status`/`sent_at`, the `current_values`
 and `group_membership` views; §3's queued-deltas note now records them as
 landed. §10a heading typo (`sql/enrich` renamed `sql/transform`).
-**Not changed:** §11 M14 stays queued — steps (1)–(4) of five are built.
+**Not changed:** §11 M14 stays queued — all five steps are built; the
+milestone is marked built when its acceptance is confirmed.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
 **Added:** §7 declared AI provides, config values from the ledger, SQL at

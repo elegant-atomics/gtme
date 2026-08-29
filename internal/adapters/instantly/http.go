@@ -5,8 +5,10 @@ package instantly
 //
 // Endpoints: GET  https://api.instantly.ai/api/v2/campaigns   (resolve name → id)
 //            POST https://api.instantly.ai/api/v2/leads       (add lead)
+//            GET  https://api.instantly.ai/api/v2/leads/{id}  (re-read, attestation — ADR-036)
 // Auth:      Authorization: Bearer $INSTANTLY_API_KEY
 // Docs:      https://developer.instantly.ai/api/v2/lead/createlead
+//            https://developer.instantly.ai/api/v2/lead/getlead
 
 import (
 	"context"
@@ -52,6 +54,35 @@ type leadResponse struct {
 	ID       string `json:"id"`
 	Email    string `json:"email"`
 	Campaign string `json:"campaign"`
+}
+
+// storedLead is what a re-read returns (ADR-036), decoded loosely: the
+// first-class fields by name, and custom variables under `payload` (the
+// documented shape) or `custom_variables` (the create body's name), whichever
+// the API answers with. Anything else is left in Rest so an unrecognised
+// shape is detectable rather than silently "confirmed".
+type storedLead struct {
+	ID              string            `json:"id"`
+	Email           string            `json:"email"`
+	FirstName       string            `json:"first_name"`
+	LastName        string            `json:"last_name"`
+	CompanyName     string            `json:"company_name"`
+	Personalization string            `json:"personalization"`
+	Payload         map[string]any    `json:"payload"`
+	CustomVariables map[string]string `json:"custom_variables"`
+}
+
+// getLead re-reads one lead by id, for attestation.
+func (a *Adapter) getLead(ctx context.Context, cfg config, apiKey, id string) (storedLead, error) {
+	var out storedLead
+	err := httpx.JSON(ctx, a.HTTP, httpx.Request{
+		Method:   "GET",
+		URL:      strings.TrimRight(cfg.BaseURL, "/") + leadsPath + "/" + id,
+		Provider: "instantly",
+		Headers:  map[string]string{"Authorization": "Bearer " + apiKey},
+		Attempts: 1,
+	}, &out)
+	return out, err
 }
 
 // campaignIDs caches resolved name → id for the life of the process, so one
@@ -113,7 +144,7 @@ func (a *Adapter) resolveCampaign(ctx context.Context, cfg config, apiKey string
 // a custom variable of that name. Blank values never send — the runner's
 // on_missing policy has already skipped or failed such records (SPEC §8), so
 // the omission here is defense in depth, not the policy itself.
-func (a *Adapter) addLead(ctx context.Context, cfg config, apiKey, campaignID string, fields map[string]any) (leadResponse, error) {
+func (a *Adapter) addLead(ctx context.Context, cfg config, apiKey, campaignID string, fields map[string]any) (leadRequest, leadResponse, error) {
 	body := leadRequest{
 		Campaign:         campaignID,
 		Email:            strings.ToLower(strings.TrimSpace(str(fields["email"]))),
@@ -151,7 +182,7 @@ func (a *Adapter) addLead(ctx context.Context, cfg config, apiKey, campaignID st
 		Headers:  map[string]string{"Authorization": "Bearer " + apiKey},
 		Body:     body,
 	}, &out)
-	return out, err
+	return body, out, err
 }
 
 // looksLikeID recognizes a UUID, which is what Instantly uses for campaign ids.

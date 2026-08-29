@@ -48,6 +48,10 @@ type Manifest struct {
 	// defaults to true, TTL to 90 days; a step config may override keep.
 	KeepPayloads   *bool `json:"keep_payloads,omitempty"`
 	PayloadTTLDays *int  `json:"payload_ttl_days,omitempty"`
+	// Attests marks a deliver adapter that re-reads what it wrote and emits
+	// an ATTEST per record (SPEC §5/§6, ADR-036). Absent, every delivery
+	// stays accepted and is reported inconclusive.
+	Attests bool `json:"attests,omitempty"`
 
 	needs, provides, config *jsonschema.Schema
 }

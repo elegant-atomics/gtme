@@ -399,3 +399,60 @@ func (l *Ledger) RecordDelivery(ctx context.Context, identityID, target, idempot
 	}
 	return nil
 }
+
+// Delivery statuses (SPEC §8, ADR-036). A 2xx is never a delivery: a row is
+// born accepted; attestation refines it to confirmed or contradicted; sent is
+// written only by a provider attesting execution (the listen verb, ROADMAP).
+const (
+	DeliveryAccepted     = "accepted"
+	DeliveryConfirmed    = "confirmed"
+	DeliveryContradicted = "contradicted"
+	DeliverySent         = "sent"
+)
+
+// Delivery is one deliveries row, as gtme show reports it.
+type Delivery struct {
+	Target      string
+	Idempotency string
+	Status      string
+	SentAt      string
+	RunID       string
+	CreatedAt   string
+}
+
+// SetDeliveryStatus refines a delivery's status after attestation (ADR-036).
+// Promotion to sent is not done here: it must be compare-and-swap on the
+// observed (status, sent_at) pair, which is the listen verb's job.
+func (l *Ledger) SetDeliveryStatus(ctx context.Context, target, idempotency, status string) error {
+	switch status {
+	case DeliveryAccepted, DeliveryConfirmed, DeliveryContradicted:
+	default:
+		return fmt.Errorf("ledger: %q is not a status attestation may set", status)
+	}
+	_, err := l.db.ExecContext(ctx,
+		`UPDATE deliveries SET status = ? WHERE target = ? AND idempotency = ?`, status, target, idempotency)
+	if err != nil {
+		return fmt.Errorf("ledger: updating delivery status: %w", err)
+	}
+	return nil
+}
+
+// Deliveries lists an identity's deliveries, oldest first.
+func (l *Ledger) Deliveries(ctx context.Context, identityID string) ([]Delivery, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT target, idempotency, status, coalesce(sent_at, ''), run_id, created_at
+		 FROM deliveries WHERE identity_id = ? ORDER BY created_at, id`, identityID)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: reading deliveries: %w", err)
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		var d Delivery
+		if err := rows.Scan(&d.Target, &d.Idempotency, &d.Status, &d.SentAt, &d.RunID, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

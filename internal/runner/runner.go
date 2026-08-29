@@ -89,6 +89,21 @@ type StepStat struct {
 	TargetGroup string
 	GroupAdded  int
 	GroupWould  int
+
+	// Attestation (SPEC §8, ADR-036): what an attesting deliver adapter
+	// reported after re-reading the target. Confirmed and Contradicted are
+	// counts; Inconclusive lists each record whose delivery stays accepted
+	// but unconfirmed, with why — the receipt warns about them.
+	Attests      bool
+	Confirmed    int
+	Contradicted int
+	Inconclusive []Attestation
+}
+
+// Attestation is one inconclusive (or otherwise noteworthy) attestation.
+type Attestation struct {
+	IdentityKey string
+	Reason      string
 }
 
 // SuppressedRecord is one record a suppression window held back (SPEC §8).

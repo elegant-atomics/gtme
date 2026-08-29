@@ -75,6 +75,26 @@ func showIdentity(ctx context.Context, env Env, l *ledger.Ledger, key string, on
 		"identity_key": ident.IdentityKey,
 		"fields":       renderFields(rec, provenance),
 	}
+	// Deliveries with their status (SPEC §8, ADR-036): accepted is what the
+	// provider took; confirmed/contradicted what a re-read said; sent only
+	// when a provider attested execution, with its own timestamp.
+	deliveries, err := l.Deliveries(ctx, ident.ID)
+	if err != nil {
+		return fail(ExitOther, "%v", err)
+	}
+	if len(deliveries) > 0 {
+		list := make([]map[string]any, 0, len(deliveries))
+		for _, d := range deliveries {
+			entry := map[string]any{
+				"target": d.Target, "status": d.Status, "run_id": d.RunID, "created_at": d.CreatedAt,
+			}
+			if d.SentAt != "" {
+				entry["sent_at"] = d.SentAt
+			}
+			list = append(list, entry)
+		}
+		out["deliveries"] = list
+	}
 	return writeJSON(env, out)
 }
 

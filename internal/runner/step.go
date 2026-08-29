@@ -34,6 +34,7 @@ type item struct {
 	verdict  bool // a VERDICT arrived (filter steps)
 	output   bool // a RECORD arrived
 	failed   bool // this step failed the record; nothing advances it now
+	attested bool // an ATTEST arrived (attesting deliver steps)
 }
 
 // bump mutates a step's stats under the lock.
@@ -622,6 +623,10 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 			if err := r.applyVerdict(ctx, st, byKey, m); err != nil {
 				return err
 			}
+		case protocol.TypeAttest:
+			if err := r.applyAttest(ctx, st, byKey, m); err != nil {
+				return err
+			}
 		case protocol.TypeCost:
 			id := ""
 			if m.Key != nil {
@@ -668,8 +673,95 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 			if err := r.advance(ctx, st, it, map[string]any{"fields": 0}, nil); err != nil {
 				return err
 			}
+			continue
+		}
+		// An attesting deliver adapter that acknowledged a record but said
+		// nothing about what the target stored: inconclusive (SPEC §5).
+		if attesting(st) && !it.attested && !it.failed {
+			if err := r.attestInconclusive(ctx, st, it, "the adapter reported no attestation for this record"); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
+}
+
+// attesting reports a deliver step whose adapter declares attests (SPEC §6).
+func attesting(st *planner.Step) bool {
+	return st.IsDeliver && st.Manifest != nil && st.Manifest.Attests
+}
+
+// applyAttest applies a deliver adapter's three-way verdict (SPEC §5/§8,
+// ADR-036). confirmed: the delivery advances and its row is refined;
+// contradicted: the row is kept with that status (the record exists at the
+// target — re-sending would duplicate it) and the record fails;
+// inconclusive: advances, accepted, with a receipt warning. Only an adapter
+// declaring attests is heard.
+func (r *runner) applyAttest(ctx context.Context, st *planner.Step, byKey map[string]*item, m protocol.Message) error {
+	if m.Key == nil {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST with no key\n", st.ID)
+		return nil
+	}
+	if !attesting(st) {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST from %s, which does not declare attests (SPEC §6)\n", st.ID, st.Use)
+		return nil
+	}
+	it, ok := byKey[m.Key.String()]
+	if !ok {
+		fmt.Fprintf(r.stderr, "%s: ignoring an ATTEST for an unknown key %s\n", st.ID, m.Key)
+		return nil
+	}
+	if it.attested || it.failed || it.advanced {
+		return nil
+	}
+	it.attested = true
+	switch m.Status {
+	case protocol.AttestConfirmed:
+		if err := r.advance(ctx, st, it, map[string]any{"attested": m.Status, "reason": m.Reason}, nil); err != nil {
+			return err
+		}
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryConfirmed); err != nil {
+			return err
+		}
+		r.bump(st, func(s *StepStat) { s.Attests = true; s.Confirmed++ })
+		return nil
+	case protocol.AttestContradicted:
+		reason := "contradicted by the target's re-read"
+		if m.Reason != "" {
+			reason += ": " + m.Reason
+		}
+		// The record exists at the target: keep the row so idempotency holds,
+		// marked for what it is, and fail the record.
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
+			return err
+		}
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryContradicted); err != nil {
+			return err
+		}
+		r.bump(st, func(s *StepStat) { s.Attests = true; s.Contradicted++ })
+		return r.failItem(ctx, st, it, reason)
+	default:
+		reason := m.Reason
+		if m.Status != protocol.AttestInconclusive {
+			reason = fmt.Sprintf("unrecognised attestation status %q", m.Status)
+		}
+		return r.attestInconclusive(ctx, st, it, reason)
+	}
+}
+
+// attestInconclusive advances a delivery that could not be confirmed: it
+// stays accepted, and the receipt warns (SPEC §8) — failing it would be the
+// more dangerous direction to be wrong in (ADR-036).
+func (r *runner) attestInconclusive(ctx context.Context, st *planner.Step, it *item, reason string) error {
+	it.attested = true
+	if err := r.advance(ctx, st, it, map[string]any{"attested": protocol.AttestInconclusive, "reason": reason}, nil); err != nil {
+		return err
+	}
+	fmt.Fprintf(r.stderr, "%s [warn]: %s delivered (accepted) but not confirmed — %s\n", st.ID, it.key.IdentityKey, reason)
+	r.bump(st, func(s *StepStat) {
+		s.Attests = true
+		s.Inconclusive = append(s.Inconclusive, Attestation{IdentityKey: it.key.IdentityKey, Reason: reason})
+	})
 	return nil
 }
 
@@ -715,6 +807,12 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 	// stored like any output, pass or fail — but only its VERDICT advances.
 	if st.Role == adapters.RoleFilter {
 		r.emit(it.key, m.Fields)
+		return nil
+	}
+	// An attesting deliver adapter's acknowledgement waits for its ATTEST
+	// (SPEC §5, ADR-036); a silent adapter is settled inconclusive at the
+	// end of the session.
+	if attesting(st) {
 		return nil
 	}
 	return r.advance(ctx, st, it, map[string]any{"fields": n}, m.Fields)
