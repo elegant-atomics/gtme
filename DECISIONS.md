@@ -814,6 +814,269 @@ example and schema rules; `spec/schemas/pipeline.schema.json` (top-level
 `deliver` removed, role-gated key descriptions); §11 milestone M13;
 ROADMAP.md gains the run-lifecycle notification hook entry.
 
+### ADR-032: The handoff to the next stage is a delivery — `group/deliver`, group-source `limit:`
+**Status:** Accepted (2026-08-28 — design session 2026-08-26..28; human-approved 2026-08-28)
+**Context:** A campaign that runs over days needs to move records between
+stages under human and budget control: review a batch before committing
+it, hold what is not ready, work only N today. The apparent answer is a
+lifecycle layer inside the runner — per-stage holds with a release verb,
+leases, attempt counters with backoff, ranked serve order — which is the
+workflow engine §0's closed grammar refuses and ROADMAP.md's "Groups,
+option C" parks by name. The pressure was put to the test against a real
+multi-stage system built independently of gtme whose operational layer
+is exactly those primitives. Refusing the engine left the need unmet.
+The terminus (`group:`, ADR-021) is already ~70% of the answer — it is
+idempotent, rehearsed under `--dry-run`, and conditional (filter-failed
+records do not join) — but a pipeline can route to exactly one group,
+unconditionally beyond completion, and `source: {group: …}` takes every
+member with no cap.
+**Decision:** Model the stage handoff as a delivery. Committing a record
+to the next stage authorises downstream spend, which makes it destructive
+in exactly the way sending is, so it inherits the apparatus already built
+for that edge with no new concepts: the `--dry-run` receipt as the review
+artifact, arming as approval, `deliveries` idempotency against
+double-enqueue, `suppress:` windows, `on_missing` completeness, `record:`
+touch history, `require:`/`exclude:` gates. Two spec changes. (1)
+**`group/deliver`** — a runner-owned deliver step (no adapter, no
+network, in the manner of the SQL steps) whose target is a group named in
+`with: {group: …}`, created on demand; subject to every deliver-step key
+including `variables:`, so the receipt renders the fields a reviewer
+needs (a brief, a verdict) rather than a list of keys. A pipeline may
+carry several, so `now → stage-2` and `later → held` route in one run. A
+hold is then a group with no consumer pipeline; release is `gtme groups
+add` (by key, `--from-segment`, or `--query`); review is `gtme groups
+show`. `gtme groups remove` gains `--note` so a rejection carries its
+reason in the event's `detail`. (2) **`limit: N`** on a group source —
+members served in `group_events` insertion order, oldest first; the
+budget for "work thirty today." Ranked serve order is declined: `limit:`
+plus insertion order plus an upstream `sql/filter` covers the real cases,
+and an `order_by` reintroduces the scheduler. A handoff is a *write*, not
+a trigger: gtme has no daemon; a group is shared state one pipeline
+writes and another pulls on its own schedule, and re-running the consumer
+at any time is safe because cache-skip, `exclude:` judgment memory,
+terminus idempotency, and delivery idempotency together make a re-run do
+only the new work. Deriving readiness from state rather than enqueueing
+is the property that makes multi-day campaigns safe; gtme has it
+structurally.
+**Consequences:** Holds, releases, leases, attempt counters, hand-back,
+and ranked serve order will not be built — this ADR is the reason, and
+it is a tested position, not an instinct (see ROADMAP.md, Groups option
+C). One rule follows from ADR-031's all-or-nothing arming and MUST be
+documented and surfaced by `gtme plan`: **one commit point per pipeline**
+— a handoff-deliver and a network-side deliver never share a pipeline,
+or approving the handoff approves the send; plan warns when both appear.
+`when:` supports only `<step>.passed`; routing the failures elsewhere
+uses a second `sql/filter` over the verdict already in the ledger (free)
+until a `.failed` form is justified. ~250 LOC, no migration, no adapter
+touched.
+**Spec impact:** AMEND (proposed diff queued) — §8 deliver semantics gain
+`group/deliver`; §8 groups section gains `limit:` on the group source and
+`--note` on `groups remove`; §9 grammar; §7 plan output (one-commit-point
+warning); `spec/schemas/pipeline.schema.json`.
+
+### ADR-033: AI steps declare their output fields
+**Status:** Accepted (2026-08-28 — design session 2026-08-26..28; human-approved 2026-08-28)
+**Context:** `ai/filter` returns `{pass, reason}` and `ai/compose` returns
+`{first_line, ps_line}`, both hardcoded in the adapter (the prompt shape
+string, `validateItem`, and `emit` each pin the field names). Any
+judgment that is not a boolean and any writing task that is not two lines
+is inexpressible — not because the model cannot do it but because the
+adapter cannot say so. A qualification returning a state from a declared
+vocabulary plus an orthogonal timing disposition plus reasoning; a
+multi-step message with its own subject and bodies; a company-level brief
+— none can be declared. Separately, both AI manifests are pinned
+`entity_type: person`, so an AI step inside a company pipeline plans as
+person and validates `uses:` against the wrong registry (it works today
+only when every field is dual-registry or namespaced). And a declared
+output written to `field_values` is global to the identity, so two
+campaigns' judgments about the same company collide: `disposition: now`
+for one overwrites `later` for another.
+**Decision:** An AI step MAY declare `provides:` in config, exactly as
+`sql/enrich` (now `sql/transform`, ADR-037) already does: its effective
+provides derive from config (ADR-024 dynamic provides, applied to the one
+role left out), the planner adds the names to the available-field set,
+and the runtime validates the model's output against the derived schema
+with the existing one-retry loop. A declared schema MAY carry `enum`; a
+value outside the domain is a validation failure, never stored. The
+prompt's required output shape is generated from the declared schema, not
+a literal string. `ai/filter` keeps emitting a VERDICT; a filter declaring
+provides emits a VERDICT *and* RECORD fields, so reasoning becomes
+queryable without a second call — §5 states this. AI manifests become
+entity-agnostic: the step's entity type is the pipeline's. Declared
+outputs land namespaced by pipeline — `<pipeline>.<field>` — unless the
+config maps a name to a canonical field (§4a: facts stay global,
+judgments stay per-campaign, no new table). A step declaring nothing keeps
+today's shape; no existing pipeline changes behavior.
+**Consequences:** Two hardcoded shapes become one general rule; the
+AI-step special case — the only role whose outputs cannot be declared —
+is deleted, so surface goes down while expressivity goes up. Every
+mechanism it needs already exists (config-declared provides, the SCHEMA
+wire message `aisteps` already emits at OPEN, registry validation, the
+retry loop). Unlocks structured judgment on every campaign shape,
+account-based or not, before any cardinality work. ~250 LOC, no
+migration, no adapter touched beyond `aisteps`.
+**Spec impact:** AMEND (proposed diff queued) — §5 (VERDICT + RECORD from a
+filter); §6/§7 dynamic provides for AI roles; §9 `provides:` valid on AI
+steps; §10 items 3 and 5; §4a namespace-by-pipeline default for AI
+outputs.
+
+### ADR-035: Prompt assembly is specified — compact encoding, wrapping, a stated order
+**Status:** Accepted (2026-08-28 — design session; scoped down before approval; human-approved 2026-08-28)
+**Context:** How an AI step arranges its prompt is an unstated
+implementation detail. `userPrompt` writes the operator's instruction
+first and the record batch second; the batch is pretty-printed
+(`json.MarshalIndent`), spending tokens on indentation that carries
+nothing; long values are emitted as single lines, which the `claude-code`
+engine's file-reading path truncates silently into a broken head
+fragment. None of this is a bug against the spec, because the spec is
+silent — and an unstated choice cannot be reviewed, cannot be A/B'd
+against its inverse, and drifts whenever the function is touched.
+Externally-fetched text (`http/enrich` pages, provider bios and
+summaries) reaches the prompt as raw prose in the same shape as the
+operator's criteria; ordinary marketing copy is imperative-mood text full
+of criteria vocabulary, and a delimiter plus one sentence helps the model
+treat it as evidence rather than task.
+**Decision:** Three mechanical rules and one stated default. (1) Records
+are encoded compactly, never pretty-printed. (2) Long values are wrapped
+at structural commas outside strings — never between a backslash and its
+escaped character, never inside a surrogate pair — so no single line
+exceeds what the engine's tooling reads intact. (3) Fields whose
+provenance is an external fetch are wrapped in a delimiter and labelled
+in-band as data supplied by the subject; the delimiter string is
+neutralised inside the body *before* wrapping, and wrapping happens
+*after* neutralising — encode → neutralise → wrap, in that order, or the
+fence is decorative. This is default-on with a per-step opt-out in the AI
+adapter's config (`with: {fence: false}`) — adapter config, not pipeline
+grammar — and the spec states the properties, not the delimiter bytes.
+The operator has no hook to do any of this themselves: the records are
+marshaled after the prompt in code they do not control, and bindings
+cannot execute code at all. (4) Assembly order is a **stated default**
+(operator prompt first, then records), and the shared/payload split
+stays exposed so a cache breakpoint can sit between them and so the
+default is trivially A/B-able against its inverse on any campaign's own
+ledger. No order is recommended: the one measurement suggesting
+criteria-last (a recency effect on a long payload) came from a single
+campaign, prompt, and model, and belongs in `VALIDATION.md` as a
+per-campaign question, not in the spec.
+**Consequences:** Token reduction from (1) is immediate. (2) fixes a real
+truncation path. (3) is judgment hygiene, not a security control — the
+judge holds no tools, so the worst case was and remains a wrong verdict
+the human gate sees before anything sends; it should be stated in the
+spec that AI steps hold no tools rather than left as an accident of the
+adapter set. ~150 LOC inside prompt assembly, no migration.
+**Spec impact:** AMEND (proposed diff queued) — §10 items 3/5 gain the
+assembly rules and the `fence` config key; §0 or §10a states that AI
+steps hold no tools.
+
+### ADR-036: A 2xx is not a delivery — `accepted`, attestation, and a three-way verdict
+**Status:** Accepted (2026-08-28 — design session; human-approved 2026-08-28)
+**Context:** A successful adapter RECORD/END writes the `deliveries` row
+and the record counts as delivered. That conflates three facts: the
+provider accepted the request; the provider stored what was sent; the
+provider acted on it. They come apart in practice — a create can return
+200 while the content silently fails to persist, leaving a lead that
+exists and will be mailed blank; and acceptance is never evidence of
+sending, since a queued lead and a mailed one are indistinguishable from
+the create response.
+**Decision:** (1) A delivery is stamped **`accepted`**, never `sent`,
+until something attests otherwise; `sent` means a provider attested it,
+and absent attestation `sent_at` stays empty by design. `deliveries`
+gains `status` and `sent_at`. (2) Where an adapter can re-read what it
+just wrote, it verifies and reports a **three-way** verdict, not
+pass/fail: `confirmed` (every non-blank field sent is present in what is
+stored), `contradicted` (a readable value says it did not persist — hard
+fail), `inconclusive` (the re-read failed or the shape was unrecognised
+— reported **ok, with a warning**). The three-way split is load-bearing:
+the record already exists at the target and will be acted on regardless,
+so marking it failed is the more dangerous direction to be wrong in — an
+operator seeing `failed` re-sends by hand into a duplicate. Attestation
+is a per-adapter capability declared in the manifest, with `inconclusive`
+the honest default when absent. Promotion from `accepted` to `sent`
+requires reading execution evidence back from the provider, which is the
+`listen` verb's territory (ROADMAP.md); this ADR deliberately stops short
+of it — (1) is worth doing alone, because a `sent` that overclaims is
+worse than an `accepted` that underclaims. When promotion arrives it MUST
+be compare-and-swap on the observed `(status, sent_at)` pair so a racing
+writer's fresher value is never overwritten by a stale one.
+**Consequences:** The receipt and `gtme show` distinguish accepted from
+attested from sent. One migration (two columns). ~250–400 LOC. The
+Instantly adapter is the first to declare attestation.
+**Spec impact:** AMEND (proposed diff queued) — §3 `deliveries` schema
+(`status`, `sent_at`) and `spec/ledger.sql`; §6 manifest `attests`
+capability; §8 deliver idempotency wording; migration `0007`.
+
+### ADR-037: SQL is the transform floor — `sql/enrich` → `sql/transform`; `{query:}`/`{segment:}` config values
+**Status:** Accepted (2026-08-28 — design session; human-approved 2026-08-28; `sql/filter` explicitly retained)
+**Context:** A runnable test built the account-based campaign shape —
+company fans into people, a subset is selected, the set collapses into
+one account-level fact, the company is judged — from shipped atoms only,
+offline, with fixtures. Three of the four cardinality moves ran today,
+and the SQL steps carried them: the cross-type gate ("people whose
+company is in group G, via `works_at`") as a `sql/filter` over
+`relations` and `group_members`; the fan-in as a `sql/enrich` aggregate
+on a company-entity run, with provenance. The fourth — a company fanning
+into its people — is blocked by nothing deeper than sources taking static
+config lists. SQL is therefore the expressive power tool: one key behind
+one contained door, read-only, deterministic, offline under `--simulate`,
+provenance-hashed. Three things about how it is presented are wrong, and
+one thing it cannot do. `sql/enrich` is misnamed — "enrich" in GTM means
+"look this record up at a provider," which neither a per-record
+derivation nor a cross-record aggregate is; ADR-027 itself titles the
+feature the transform floor. Two facts are true and unstated: a SQL
+step's query may read any identity (only *results* are run-scoped), and
+SQL steps never cache-skip — `runStep` diverts them before the cache path
+— which is exactly what makes a cross-record aggregate safe, since it
+cannot go stale when related records change. User queries currently know
+table internals (`json_extract(value,'$')`, the `groups`↔`group_members`
+join), which is coupling to schema rather than to vocabulary; `gtme plan`
+validates only that the statement is a SELECT.
+**Decision:** (1) Rename `sql/enrich` → **`sql/transform`**. `sql/filter`
+stays: it is explicit, "transform" does not suggest a verdict, and a
+reviewer should see the role in the id (an earlier draft collapsed both
+into one id with the role derived from `provides:`; rejected as less
+legible for no gain). (2) State normatively that a transform's query MAY
+read any identity and that SQL steps always recompute. `gtme plan`
+annotates a SQL step whose query references `relations` or
+`group_members` as *cross-record*. (3) Invest in the floor, zero new
+grammar: two more spec'd views in `spec/ledger.sql` — one that pre-unwraps
+values, one that joins membership by group name — so queries read as
+vocabulary; `EXPLAIN QUERY PLAN` at plan time against the local ledger
+($0, no network), failing on unknown tables or columns; the ledger schema
+and the canonical query shapes in `help --agent`. (4) **Any config value
+MAY be `{query: SQL}` or `{segment: NAME}`** (a segment is a saved SELECT
+from `gtme query --save`), resolved read-only at plan time and again at
+run time, with the resolved rows printed in plan output and recorded in
+`runs.config_json`. Zero rows is a plan **error** — an empty list handed
+to a vendor search is the shape that searches everything. Because
+segments re-evaluate, the list may drift between plan and arm; when
+stability matters the operator snapshots into a group first
+(`groups add --from-segment`) and queries the group — ADR-021's pattern,
+and the group is where the human gate lives. Read a segment when the list
+is a live computed fact that should drift; read a group when it is a
+decision that should not.
+**Consequences:** `expand` (ADR-008) is retired by composition: fan-out
+happens at the pipeline boundary via a config query, where run
+membership is fresh by construction, so its open run-membership question
+is never raised; fan-in is a cross-record transform. Single-file
+ergonomics would *remove* a review gate (ADR-031 arms every deliver at
+once), so `expand` is not a safety improvement and stays on ROADMAP.md
+only as a convenience. The two typed atoms considered instead — a
+per-adapter `from_group:` source key and a relation-hop `require:` — are
+rejected as special cases of what SQL does generally; mint a typed atom
+for a relation shape only when receipts show it recurring (the
+floor→ceiling rule ROADMAP.md states for `http/*`). (4) delivers the safe
+half of ROADMAP.md's "SQL segments as pipeline sources": a segment feeding
+a source's *parameters* touches neither run membership nor identity
+minting; segments as the run's records themselves still needs that
+design pass and stays parked. The rename is breaking and cheap only
+pre-launch; after launch it is a deprecation. ~40 LOC rename; ~150 for
+views, EXPLAIN, help; ~150 for config resolution in the planner; the
+views are a migration.
+**Spec impact:** AMEND (proposed diff queued) — §3/`spec/ledger.sql` two
+views; §7 config-value resolution and EXPLAIN; §8 `help --agent` schema
+section; §9 `{query:}`/`{segment:}` config form; §10a rename and the
+two stated semantics; ROADMAP.md `expand`, Groups option C, SQL segments.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
