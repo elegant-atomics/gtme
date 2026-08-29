@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/elegant-atomics/gtme/internal/ulid"
 )
@@ -196,6 +197,44 @@ func (l *Ledger) InFlight(ctx context.Context, runID string) (int, error) {
 		n += len(tokens)
 	}
 	return n, nil
+}
+
+// Judgment is a cached AI answer (SPEC §7, ADR-039): the newest `done`
+// event for an identity whose detail carries the same signature and input.
+type Judgment struct {
+	Pass   *bool
+	Reason string
+	RunID  string
+}
+
+// LastJudgment finds a reusable judgment for an identity, any run, newer
+// than since (zero = unbounded).
+func (l *Ledger) LastJudgment(ctx context.Context, identityID, signature, input string, since time.Time) (Judgment, bool, error) {
+	q := `SELECT run_id, detail FROM step_events
+	      WHERE identity_id = ? AND event = 'done'
+	        AND json_extract(detail, '$.signature') = ? AND json_extract(detail, '$.input') = ?`
+	args := []any{identityID, signature, input}
+	if !since.IsZero() {
+		q += ` AND created_at >= ?`
+		args = append(args, l.stamp(since))
+	}
+	q += ` ORDER BY created_at DESC, id DESC LIMIT 1`
+	var j Judgment
+	var detail sql.NullString
+	err := l.db.QueryRowContext(ctx, q, args...).Scan(&j.RunID, &detail)
+	if err == sql.ErrNoRows {
+		return Judgment{}, false, nil
+	}
+	if err != nil {
+		return Judgment{}, false, fmt.Errorf("ledger: reading judgments: %w", err)
+	}
+	var d struct {
+		Pass   *bool  `json:"pass"`
+		Reason string `json:"reason"`
+	}
+	_ = json.Unmarshal([]byte(detail.String), &d)
+	j.Pass, j.Reason = d.Pass, d.Reason
+	return j, true, nil
 }
 
 func (l *Ledger) FinishRun(ctx context.Context, runID, status string) error {

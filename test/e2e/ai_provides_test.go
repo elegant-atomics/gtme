@@ -104,7 +104,7 @@ func TestAIDeclaredProvidesStoreNamespacedAndRejectEnum(t *testing.T) {
 	// VERDICT and RECORD from one call (SPEC §5): every judged record — the
 	// failing one included — carries the namespaced judgment with ai/filter
 	// provenance, and the verdicts still gate advancement.
-	states := h.queryStrings(`SELECT value FROM field_values WHERE field = 'qualify.state' AND source = 'ai/filter @ fixture' ORDER BY value`)
+	states := h.queryStrings(`SELECT value FROM field_values WHERE field = 'qualify.state' AND source LIKE 'ai/filter @ fixture#%' ORDER BY value`)
 	if strings.Join(states, ",") != `"later","later","now"` {
 		t.Errorf("qualify.state values = %v", states)
 	}
@@ -118,7 +118,7 @@ func TestAIDeclaredProvidesStoreNamespacedAndRejectEnum(t *testing.T) {
 		AND run_id = (SELECT id FROM runs WHERE status = 'done' ORDER BY rowid DESC LIMIT 1)`); n != 1 {
 		t.Errorf("frozen records = %d, want 1 (the fail verdict stops advancement)", n)
 	}
-	subjects := h.queryStrings(`SELECT value FROM field_values WHERE field = 'qualify.subject' AND source = 'ai/compose @ fixture' ORDER BY value`)
+	subjects := h.queryStrings(`SELECT value FROM field_values WHERE field = 'qualify.subject' AND source LIKE 'ai/compose @ fixture#%' ORDER BY value`)
 	if len(subjects) != 2 || !strings.Contains(subjects[0], "Fixture subject for") {
 		t.Errorf("qualify.subject values = %v", subjects)
 	}
@@ -243,7 +243,7 @@ steps:
 	if res.code != 0 {
 		t.Fatalf("exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'first_line' AND source = 'ai/compose @ fixture'`); n != 3 {
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'first_line' AND source LIKE 'ai/compose @ fixture#%'`); n != 3 {
 		t.Errorf("canonical first_line rows = %d, want 3", n)
 	}
 	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field IN ('outreach.first_line', 'ps_line')`); n != 0 {

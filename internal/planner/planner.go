@@ -388,24 +388,15 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 		if st.IsSource || st.Respend || st.Manifest == nil {
 			continue
 		}
-		switch {
-		case st.Manifest.IsAI():
-			remembered := false
-			for _, g := range st.Exclude {
-				if writes[g] {
-					remembered = true
-				}
-			}
-			if !remembered {
-				st.Warnings = append(st.Warnings,
-					"respend: this AI step re-judges every record on each run and nothing remembers the answer — add exclude: naming a group this pipeline writes (judgment memory, ADR-021), or say respend: true (SPEC §7, ADR-038)")
-			}
-		case (st.Role == adapters.RoleEnrich || st.Role == adapters.RoleVerify) && st.Cache <= 0 &&
-			(len(st.Manifest.Credentials) > 0 || (st.CostEstimate != nil && *st.CostEstimate > 0)):
+		// AI steps remember by default — the judgment cache (ADR-039); the
+		// warning is for paid fetches with no window.
+		if (st.Role == adapters.RoleEnrich || st.Role == adapters.RoleVerify) && !st.Manifest.IsAI() && st.Cache <= 0 &&
+			(len(st.Manifest.Credentials) > 0 || (st.CostEstimate != nil && *st.CostEstimate > 0)) {
 			st.Warnings = append(st.Warnings,
 				"respend: this paid step has no freshness window, so every run pays for every record again — set cache: Nd, or say respend: true (SPEC §7, ADR-038)")
 		}
 	}
+	_ = writes
 
 	plan.Available = keys(available)
 
@@ -859,6 +850,11 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	}
 
 	ps.Respend = s.Respend
+	// cache: 0d on an AI step is the judgment cache switched off (SPEC §7,
+	// ADR-039) — the same thing respend: true says.
+	if isAI && strings.TrimSpace(s.Cache) == "0d" {
+		ps.Respend = true
+	}
 	// Deferred (ADR-038): adapter config on an AI step; the last-step rule
 	// is checked by Build, which knows the position.
 	if v, ok := ps.Config["deferred"].(bool); ok && v && isAI {

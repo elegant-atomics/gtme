@@ -43,7 +43,7 @@ func TestDeferredStepEndsTheRunPendingAndRunCollects(t *testing.T) {
 	plan := h.mustRun("plan", "judge.yaml")
 	contains(t, plan.stderr, "deferred:  the run ends in flight here; the next `gtme run` of this pipeline collects", "plan output")
 	if strings.Contains(plan.stderr, "respend:") {
-		t.Errorf("exclude: names the terminus, so nothing to warn about:\n%s", plan.stderr)
+		t.Errorf("AI steps do not warn about respend (ADR-039):\n%s", plan.stderr)
 	}
 
 	// 1. Submit: the run ends pending — zero verdicts, zero cost, the token
@@ -192,25 +192,10 @@ steps:
 `)
 	plan := h.mustRun("plan", "cc.yaml")
 	contains(t, plan.stderr, "warning:   deferred: true has no effect on engine claude-code", "plan warning")
-	contains(t, plan.stderr, "warning:   respend: this AI step re-judges every record on each run", "respend warning")
-
-	// respend: true silences the AI warning; exclude: naming the terminus
-	// silences it too (judgment memory).
-	h.write("ok.yaml", `name: ok
-source:
-  use: csv/source
-  with:
-    path: people.csv
-steps:
-  - id: judge
-    use: ai/filter
-    respend: true
-    with:
-      prompt: Judge.
-`)
-	plan = h.mustRun("plan", "ok.yaml")
+	// AI steps no longer warn about respend: the judgment cache remembers
+	// by default (ADR-039).
 	if strings.Contains(plan.stderr, "respend:") {
-		t.Errorf("respend: true must silence the warning:\n%s", plan.stderr)
+		t.Errorf("an AI step must not warn about respend:\n%s", plan.stderr)
 	}
 	env := h.fixtureScript("ai.json", "$auto")
 	dry := h.runWithEnv(env, "", "run", "cc.yaml", "--dry-run")

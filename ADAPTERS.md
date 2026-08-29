@@ -272,6 +272,17 @@ AI steps are entity-agnostic (`"entity_type": "*"` in the manifest — any
 adapter may declare it): inside a company pipeline they plan and validate
 against the company registry.
 
+**Never judged twice by accident (ADR-039).** Every AI step caches: a
+record whose *question* (adapter, model, prompt, output shape, `uses:`)
+and *facts* (the fields the judgment reads — the `uses:` fields, or the
+projection minus the step's own outputs) match a stored judgment is
+skipped (`skipped_cache`, reason `same_judgment`); a filter's verdict is
+re-applied, a compose's fields are already current. No clock by default:
+a changed prompt, model, or input re-judges on its own; `cache: Nd`
+bounds reuse for a prompt that reads the clock; `respend: true` (or
+`cache: 0d`) asks again. Provenance names the question:
+`ai/compose @ <model>#<signature>`.
+
 **Deferred, at half price (ADR-038).** `with: {deferred: true}` on an AI
 step sends its batch to the Message Batches API (one request per record,
 `custom_id` = identity key, the shared prompt cached across them) and

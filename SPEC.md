@@ -1818,8 +1818,8 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Queued
-  2026-08-29.** Signature and input hash computed in the runner's prepare
+- **M16 — the judgment cache (ADR-039; §3, §7, §10a). Built 2026-08-29
+  (changelog v0.20).** Signature and input hash computed in the runner's prepare
   from the step config, the adapter's shape and the projection; lookup
   over `done` events; verdict re-application for filters; the provenance
   suffix; the AI respend warning retired; receipt wording.
@@ -1997,6 +1997,18 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.20 — 2026-08-29 (M16 build: the judgment cache, built)
+**Changed:** §11 M16 marked built; no normative text changed — v0.19's
+contract is shipped behaviour, covered by M16's acceptance. Behavioural
+notes from the build: the runner computes both keys (the signature from
+the step's config, resolved model and provides schema; the input hash
+from the projection), so the adapter is untouched; the signature's model
+is the one the armed run would use, never the simulate override, so a
+rehearsal skips what an armed run skips; a cached filter fail counts as
+both cached and filtered on the receipt; `cache: 0d` on an AI step is
+`respend: true`; collected (ADR-038) records carry the keys too, so a
+re-run after a collection submits only what changed.
 
 ### v0.19 — 2026-08-29 (ADR-039 reconciliation: the judgment cache; build queued as M16)
 **Added:** §7 judgment cache for AI roles (signature + input
