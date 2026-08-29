@@ -184,55 +184,52 @@ func (a *Adapter) attest(ctx context.Context, cfg config, apiKey string, sent le
 }
 
 // compareLead is the pure half of attest: sent vs stored, field by field.
+// A field the response does not carry is unreadable — inconclusive, never
+// contradicted by absence; a field it carries with a different value is
+// contradicted.
 func compareLead(sent leadRequest, stored storedLead) (string, string) {
-	type check struct{ name, want, got string }
+	type check struct{ name, want string }
 	checks := []check{
-		{"email", strings.ToLower(sent.Email), strings.ToLower(strings.TrimSpace(stored.Email))},
-		{"first_name", sent.FirstName, stored.FirstName},
-		{"last_name", sent.LastName, stored.LastName},
-		{"company_name", sent.CompanyName, stored.CompanyName},
-		{"personalization", sent.Personalization, stored.Personalization},
+		{"email", strings.ToLower(sent.Email)},
+		{"first_name", sent.FirstName},
+		{"last_name", sent.LastName},
+		{"company_name", sent.CompanyName},
+		{"personalization", sent.Personalization},
 	}
 	var unreadable []string
 	for _, c := range checks {
 		if c.want == "" {
 			continue
 		}
-		if strings.TrimSpace(c.got) != strings.TrimSpace(c.want) {
-			return protocol.AttestContradicted, fmt.Sprintf("%s: sent %q, stored %q", c.name, c.want, c.got)
+		got, ok := stored.field(c.name)
+		if !ok {
+			unreadable = append(unreadable, c.name)
+			continue
+		}
+		if c.name == "email" {
+			got = strings.ToLower(got)
+		}
+		if strings.TrimSpace(got) != strings.TrimSpace(c.want) {
+			return protocol.AttestContradicted, fmt.Sprintf("%s: sent %q, stored %q", c.name, c.want, got)
 		}
 	}
-	if len(sent.CustomVariables) > 0 {
-		names := make([]string, 0, len(sent.CustomVariables))
-		for name := range sent.CustomVariables {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			want := sent.CustomVariables[name]
-			got, ok := storedVariable(stored, name)
-			switch {
-			case !ok:
-				unreadable = append(unreadable, name)
-			case strings.TrimSpace(got) != strings.TrimSpace(want):
-				return protocol.AttestContradicted, fmt.Sprintf("custom variable %s: sent %q, stored %q", name, want, got)
-			}
+	names := make([]string, 0, len(sent.CustomVariables))
+	for name := range sent.CustomVariables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		want := sent.CustomVariables[name]
+		got, ok := stored.variable(name)
+		switch {
+		case !ok:
+			unreadable = append(unreadable, "custom variable "+name)
+		case strings.TrimSpace(got) != strings.TrimSpace(want):
+			return protocol.AttestContradicted, fmt.Sprintf("custom variable %s: sent %q, stored %q", name, want, got)
 		}
 	}
 	if len(unreadable) > 0 {
-		return protocol.AttestInconclusive, "the re-read carried no readable value for custom variable(s) " + strings.Join(unreadable, ", ")
+		return protocol.AttestInconclusive, "the re-read carried no readable value for " + strings.Join(unreadable, ", ")
 	}
 	return protocol.AttestConfirmed, "every field sent is present in the stored lead"
-}
-
-// storedVariable finds a custom variable in a re-read lead, under either
-// name the API uses for them.
-func storedVariable(stored storedLead, name string) (string, bool) {
-	if v, ok := stored.Payload[name]; ok {
-		return str(v), true
-	}
-	if v, ok := stored.CustomVariables[name]; ok {
-		return v, true
-	}
-	return "", false
 }

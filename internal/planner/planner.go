@@ -1272,7 +1272,9 @@ const maxShownRows = 10
 func resolveConfigValues(scope Scope, path string, v any) (any, []string, []string) {
 	switch t := v.(type) {
 	case map[string]any:
-		if kind, text, ok := configQuery(t); ok {
+		if kind, text, ok, malformed := configQuery(t); malformed {
+			return v, nil, []string{fmt.Sprintf("%s: {%s: …} must carry a non-empty string (SPEC §9)", path, kind)}
+		} else if ok {
 			value, note, err := resolveConfigQuery(scope, path, kind, text)
 			if err != nil {
 				return v, nil, []string{err.Error()}
@@ -1316,18 +1318,23 @@ func resolveConfigMap(scope Scope, path string, m map[string]any) (map[string]an
 }
 
 // configQuery recognises the two ledger-value forms: a map whose only key is
-// query or segment, with a string value.
-func configQuery(m map[string]any) (kind, text string, ok bool) {
+// query or segment. ok means a well-formed value; malformed means the key is
+// there but its value is not a non-empty string — a plan error, never a
+// literal handed to the adapter.
+func configQuery(m map[string]any) (kind, text string, ok, malformed bool) {
 	if len(m) != 1 {
-		return "", "", false
+		return "", "", false, false
 	}
 	for _, k := range []string{"query", "segment"} {
 		if v, present := m[k]; present {
 			s, isString := v.(string)
-			return k, strings.TrimSpace(s), isString && strings.TrimSpace(s) != ""
+			if !isString || strings.TrimSpace(s) == "" {
+				return k, "", false, true
+			}
+			return k, strings.TrimSpace(s), true, false
 		}
 	}
-	return "", "", false
+	return "", "", false, false
 }
 
 // resolveConfigQuery runs one config value's SQL read-only and shapes the

@@ -62,19 +62,16 @@ type leadResponse struct {
 // the API answers with. Anything else is left in Rest so an unrecognised
 // shape is detectable rather than silently "confirmed".
 type storedLead struct {
-	ID              string            `json:"id"`
-	Email           string            `json:"email"`
-	FirstName       string            `json:"first_name"`
-	LastName        string            `json:"last_name"`
-	CompanyName     string            `json:"company_name"`
-	Personalization string            `json:"personalization"`
-	Payload         map[string]any    `json:"payload"`
-	CustomVariables map[string]string `json:"custom_variables"`
+	// Fields is the response as decoded: presence is the point — a field
+	// the response does not carry at all is unreadable (inconclusive), not
+	// empty (contradicted). Custom variables sit under payload or
+	// custom_variables.
+	Fields map[string]any
 }
 
 // getLead re-reads one lead by id, for attestation.
 func (a *Adapter) getLead(ctx context.Context, cfg config, apiKey, id string) (storedLead, error) {
-	var out storedLead
+	var out map[string]any
 	err := httpx.JSON(ctx, a.HTTP, httpx.Request{
 		Method:   "GET",
 		URL:      strings.TrimRight(cfg.BaseURL, "/") + leadsPath + "/" + id,
@@ -82,7 +79,29 @@ func (a *Adapter) getLead(ctx context.Context, cfg config, apiKey, id string) (s
 		Headers:  map[string]string{"Authorization": "Bearer " + apiKey},
 		Attempts: 1,
 	}, &out)
-	return out, err
+	return storedLead{Fields: out}, err
+}
+
+// field reads a first-class lead field: its string value, and whether the
+// response carried it at all.
+func (l storedLead) field(name string) (string, bool) {
+	v, ok := l.Fields[name]
+	if !ok || v == nil {
+		return "", false
+	}
+	return str(v), true
+}
+
+// variable reads a custom variable under either name the API uses.
+func (l storedLead) variable(name string) (string, bool) {
+	for _, bucket := range []string{"payload", "custom_variables"} {
+		if m, ok := l.Fields[bucket].(map[string]any); ok {
+			if v, ok := m[name]; ok && v != nil {
+				return str(v), true
+			}
+		}
+	}
+	return "", false
 }
 
 // campaignIDs caches resolved name → id for the life of the process, so one

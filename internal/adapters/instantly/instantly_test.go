@@ -370,8 +370,22 @@ func TestAttestsThreeWays(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	got = attests(msgs)
-	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "custom variable(s) ps_line, title") {
+	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "custom variable ps_line, custom variable title") {
 		t.Errorf("attest = %+v, want inconclusive naming the unreadable variables", got)
+	}
+
+	// Inconclusive, not contradicted: a first-class field the response omits
+	// entirely is unreadable — absence is not disagreement (ADR-036).
+	r = routes(t)
+	r["GET /api/v2/leads/"+leadID] = adaptertest.Response{Body: strings.Replace(
+		adaptertest.Fixture(t, "lead-read.json"), `"personalization": "Saw your post on killing three channels.",`, "", 1)}
+	msgs, err = adaptertest.Run(t, &Adapter{HTTP: &adaptertest.Stub{Routes: r}}, input())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got = attests(msgs)
+	if len(got) != 1 || got[0].Status != protocol.AttestInconclusive || !strings.Contains(got[0].Reason, "no readable value for personalization") {
+		t.Errorf("attest = %+v, want inconclusive for an omitted field", got)
 	}
 }
 

@@ -114,6 +114,20 @@ source:
 `)
 	res = h.run("plan", "twocols.yaml")
 	contains(t, res.stderr, "must yield exactly one column (got id, identity_key)", "stderr")
+
+	// A malformed value form is a plan error, never a literal map handed to
+	// the adapter.
+	h.write("badform.yaml", `name: badform
+source:
+  use: csv/source
+  with:
+    path: {query: ""}
+`)
+	res = h.run("plan", "badform.yaml")
+	if res.code != 2 {
+		t.Fatalf("malformed form: exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "with.path: {query: …} must carry a non-empty string", "stderr")
 }
 
 func TestSQLAtPlanExplainsAndAnnotates(t *testing.T) {
