@@ -1899,8 +1899,8 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Queued
-  2026-08-29.** PREFLIGHT and OPEN `preflight` in `internal/protocol` and
+- **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Built 2026-08-29
+  (changelog v0.22).** PREFLIGHT and OPEN `preflight` in `internal/protocol` and
   the schemas; `preflights` in the manifest; the preflight session in the
   runner ahead of a deliver step's record sessions at `--dry-run` and arm;
   receipt wording; Instantly's four checks in its HTTP file; a fixture
@@ -2056,6 +2056,18 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.22 — 2026-08-29 (M17 build: deliver preflight, built)
+**Changed:** §11 M17 marked built; no normative text changed — v0.21's
+contract is shipped behaviour, covered by M17's acceptance. Behavioural
+notes from the build: the preflight session runs in `runStep` before the
+step's records are even prepared, so a blocked armed run leaves them at
+the previous state with no `claimed` events; the outcome is recorded as a
+step-level `preflight` event (detail: status, reason, checks); a dry run
+reports `blocked` and continues (nothing sends anyway); Instantly's
+first-class targets (`first_name`, `last_name`, `company_name`,
+`personalization`) map into the lead body and are not checked against
+the template, only merge variables are.
 
 ### v0.21 — 2026-08-29 (ADR-040 reconciliation: deliver preflight; build queued as M17)
 **Added:** §5 PREFLIGHT and OPEN `preflight`; §6 `preflights`

@@ -101,6 +101,33 @@ func PrintReceipt(w io.Writer, res *Result) {
 			fmt.Fprintf(w, "%s: %d record(s) handed off to group %q\n", s.ID, s.GroupAdded, s.TargetGroup)
 		}
 	}
+	// Preflight (SPEC §8, ADR-040): the target's side of the story, before
+	// anything was sent.
+	for _, s := range res.Steps {
+		if s.Preflight == "" {
+			continue
+		}
+		names := make([]string, 0, len(s.PreflightChecks))
+		for _, c := range s.PreflightChecks {
+			mark := "✓"
+			if !c.OK {
+				mark = "✗"
+			}
+			names = append(names, mark+" "+c.Name)
+		}
+		switch s.Preflight {
+		case "ok":
+			fmt.Fprintf(w, "%s: preflight ok — %d check(s)", s.ID, len(s.PreflightChecks))
+		case "blocked":
+			fmt.Fprintf(w, "%s: preflight BLOCKED — %s", s.ID, s.PreflightReason)
+		default:
+			fmt.Fprintf(w, "%s: preflight inconclusive — %s (proceeded)", s.ID, s.PreflightReason)
+		}
+		if len(names) > 0 {
+			fmt.Fprintf(w, " (%s)", strings.Join(names, ", "))
+		}
+		fmt.Fprintln(w)
+	}
 	// In flight (SPEC §8, ADR-038): what a deferred step left with the
 	// provider, and how to collect it.
 	for _, s := range res.Steps {

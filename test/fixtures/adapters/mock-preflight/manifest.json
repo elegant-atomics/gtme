@@ -1,0 +1,30 @@
+{
+  "id": "mock/preflight",
+  "version": 1,
+  "role": "deliver",
+  "entity_type": "person",
+  "needs": {
+    "dynamic": true,
+    "type": "object",
+    "required": ["email"],
+    "properties": {
+      "email": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "campaign": {"type": "string"},
+      "preflight": {"type": "boolean"},
+      "variables": {
+        "type": "object",
+        "additionalProperties": {"type": "string", "minLength": 1},
+        "description": "Egress mapping, injected by the runner from the step-level variables: key (ADR-018)."
+      }
+    }
+  },
+  "credentials_optional": ["MOCK_PREFLIGHT", "MOCK_DELIVER_LOG"],
+  "preflights": true,
+  "cost_estimate_usd": 0
+}

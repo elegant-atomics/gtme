@@ -53,6 +53,8 @@ func schemaFor(dir, msgType string) (string, error) {
 			return "msg-attest.schema.json", nil
 		case protocol.TypePending:
 			return "msg-pending.schema.json", nil
+		case protocol.TypePreflight:
+			return "msg-preflight.schema.json", nil
 		case protocol.TypeCost:
 			return "msg-cost.schema.json", nil
 		case protocol.TypeState:

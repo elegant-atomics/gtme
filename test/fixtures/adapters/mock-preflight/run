@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""mock/preflight — a fixture delivery target that preflights (ADR-040).
+
+Like mock/deliver, but the manifest declares `preflights`: in a preflight
+session (OPEN with preflight: true) it answers PREFLIGHT with whatever
+$MOCK_PREFLIGHT says — ok (default), blocked, inconclusive, or `silent` to
+answer nothing — and sends nothing. In a record session it delivers,
+appending each record to $MOCK_DELIVER_LOG.
+"""
+
+import json
+import os
+import sys
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    mode = os.environ.get("MOCK_PREFLIGHT", "ok")
+    log_path = os.environ.get("MOCK_DELIVER_LOG")
+    delivered = 0
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        kind = msg.get("type")
+        if kind == "OPEN":
+            send({"type": "SCHEMA", "provides": {"type": "object", "properties": {}}})
+            if msg.get("preflight"):
+                checks = [{"name": "campaign active", "ok": mode != "blocked"},
+                          {"name": "template references variables", "ok": mode != "blocked",
+                           "detail": "fixture"}]
+                if mode == "blocked":
+                    send({"type": "PREFLIGHT", "status": "blocked",
+                          "reason": "fixture: template step 2 does not reference {{body_step_2}}",
+                          "checks": checks})
+                elif mode == "inconclusive":
+                    send({"type": "PREFLIGHT", "status": "inconclusive",
+                          "reason": "fixture: campaign could not be read", "checks": []})
+                elif mode == "silent":
+                    pass
+                else:
+                    send({"type": "PREFLIGHT", "status": "ok", "checks": checks})
+                send({"type": "END"})
+                return 0
+            continue
+        if kind == "RECORD":
+            key = msg.get("key") or {}
+            if log_path:
+                with open(log_path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"identity_key": key.get("identity_key")}) + "\n")
+            send({"type": "RECORD", "key": key, "fields": {}})
+            delivered += 1
+            continue
+        if kind == "END":
+            break
+    send({"type": "LOG", "level": "info", "msg": f"delivered {delivered} records"})
+    send({"type": "END"})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

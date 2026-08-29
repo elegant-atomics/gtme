@@ -70,6 +70,14 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	}
 
 	stub := r.stubbed(st)
+	// Deliver preflight (SPEC §8, ADR-040): before any record moves, ask a
+	// preflighting adapter whether the live target is fit to send to. A
+	// dry run reports; an armed run stops the step on blocked.
+	if st.IsDeliver && st.Manifest != nil && st.Manifest.Preflights && !stub {
+		if err := r.preflight(ctx, st); err != nil {
+			return err
+		}
+	}
 	// Records left in flight by an earlier session of this run (ADR-038)
 	// are collected under their token rather than dispatched again.
 	tokens, err := r.l.PendingTokens(ctx, r.runID, st.ID)
@@ -163,6 +171,79 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		return nil
 	}
 	return r.dispatch(ctx, st, work)
+}
+
+// preflight runs the preflight session (SPEC §5): OPEN with preflight:
+// true, END, and reads the adapter's PREFLIGHT. blocked fails the step
+// before a single record is dispatched, unless the run is dry — a
+// rehearsal reports and moves on; inconclusive warns; an adapter that
+// answers nothing is inconclusive.
+func (r *runner) preflight(ctx context.Context, st *planner.Step) error {
+	if skip, ok := st.Config["preflight"].(bool); ok && !skip {
+		return nil
+	}
+	sess, err := r.openSession(ctx, st)
+	if err != nil {
+		return err
+	}
+	open := r.openMessage(st, nil)
+	open.Preflight = true
+	sendErr := sess.SendStream([]protocol.Message{open, protocol.End()})
+
+	status, reason := protocol.PreflightInconclusive, "the adapter reported no preflight"
+	var checks []protocol.Check
+	for {
+		m, err := sess.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			if werr := sess.Wait(); werr != nil {
+				err = werr
+			}
+			r.logStepFailure(ctx, st, err)
+			return fmt.Errorf("runner: %s: preflight: %w", st.ID, err)
+		}
+		switch m.Type {
+		case protocol.TypePreflight:
+			status, reason, checks = m.Status, m.Reason, m.Checks
+		case protocol.TypeLog:
+			r.forwardLog(st, m)
+		case protocol.TypeRecord, protocol.TypeVerdict, protocol.TypeAttest:
+			return fmt.Errorf("runner: %s: preflight: the adapter sent a %s in a preflight session — it must send nothing (SPEC §5)", st.ID, m.Type)
+		}
+	}
+	if err := sess.Wait(); err != nil {
+		r.logStepFailure(ctx, st, err)
+		return fmt.Errorf("runner: %s: preflight: %w", st.ID, err)
+	}
+	if err := <-sendErr; err != nil && !isBrokenPipe(err) {
+		return fmt.Errorf("runner: %s: preflight: %w", st.ID, err)
+	}
+	switch status {
+	case protocol.PreflightOK, protocol.PreflightBlocked, protocol.PreflightInconclusive:
+	default:
+		reason = fmt.Sprintf("unrecognised preflight status %q", status)
+		status = protocol.PreflightInconclusive
+	}
+	r.bump(st, func(s *StepStat) { s.Preflight, s.PreflightReason, s.PreflightChecks = status, reason, checks })
+	detail := map[string]any{"status": status, "reason": reason, "checks": checks}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "preflight", detail); err != nil {
+		return err
+	}
+	switch status {
+	case protocol.PreflightInconclusive:
+		fmt.Fprintf(r.stderr, "%s [warn]: preflight inconclusive — %s; proceeding\n", st.ID, reason)
+	case protocol.PreflightBlocked:
+		fmt.Fprintf(r.stderr, "%s: preflight BLOCKED — %s\n", st.ID, reason)
+		if r.dry {
+			return nil
+		}
+		return fmt.Errorf("runner: %s: preflight blocked — %s (nothing was sent; fix the target and run again, or --resume)", st.ID, reason)
+	default:
+		fmt.Fprintf(r.stderr, "%s: preflight ok — %d check(s)\n", st.ID, len(checks))
+	}
+	return nil
 }
 
 // membershipGate loads the step's require/exclude membership sets once and

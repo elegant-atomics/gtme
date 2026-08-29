@@ -18,13 +18,22 @@ const (
 	TypeRecord = "RECORD"
 	TypeEnd    = "END"
 
-	TypeSchema  = "SCHEMA"
-	TypeVerdict = "VERDICT"
-	TypeAttest  = "ATTEST"
-	TypePending = "PENDING"
-	TypeCost    = "COST"
-	TypeState   = "STATE"
-	TypeLog     = "LOG"
+	TypeSchema    = "SCHEMA"
+	TypeVerdict   = "VERDICT"
+	TypeAttest    = "ATTEST"
+	TypePending   = "PENDING"
+	TypePreflight = "PREFLIGHT"
+	TypeCost      = "COST"
+	TypeState     = "STATE"
+	TypeLog       = "LOG"
+)
+
+// Preflight statuses (SPEC §5, ADR-040): a deliver adapter's answer on
+// whether the live target is fit to send to.
+const (
+	PreflightOK           = "ok"
+	PreflightBlocked      = "blocked"
+	PreflightInconclusive = "inconclusive"
 )
 
 // Attestation statuses (SPEC §5, ADR-036): a deliver adapter's three-way
@@ -59,6 +68,12 @@ type Message struct {
 	RunID   string         `json:"run_id,omitempty"`
 	Config  map[string]any `json:"config,omitempty"`
 	Pending *PendingRef    `json:"pending,omitempty"`
+	// Preflight marks a preflight session (SPEC §5, ADR-040): no records
+	// follow; the adapter answers PREFLIGHT then END.
+	Preflight bool `json:"preflight,omitempty"`
+
+	// PREFLIGHT (adapter → runner): Status (shared with ATTEST) and Checks.
+	Checks []Check `json:"checks,omitempty"`
 
 	// PENDING (adapter → runner): the provider-opaque handle for work the
 	// session could not answer yet (SPEC §5, ADR-038). Detail is shared
@@ -96,6 +111,13 @@ type Message struct {
 	// LOG
 	Level string `json:"level,omitempty"`
 	Msg   string `json:"msg,omitempty"`
+}
+
+// Check is one thing a preflight examined (SPEC §5, ADR-040).
+type Check struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // PendingRef names in-flight work on an OPEN (SPEC §5, ADR-038).
@@ -168,6 +190,11 @@ func Verdict(key Key, pass bool, reason string) Message {
 // Attest builds an ATTEST message (SPEC §5, ADR-036).
 func Attest(key Key, status, reason string) Message {
 	return Message{Type: TypeAttest, Key: &key, Status: status, Reason: reason}
+}
+
+// Preflight builds a PREFLIGHT message (SPEC §5, ADR-040).
+func Preflight(status, reason string, checks []Check) Message {
+	return Message{Type: TypePreflight, Status: status, Reason: reason, Checks: checks}
 }
 
 // Pending builds a PENDING message (SPEC §5, ADR-038).

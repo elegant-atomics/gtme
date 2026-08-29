@@ -118,6 +118,15 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 				return err
 			}
 			opened = true
+			if m.Preflight {
+				// A preflight session (SPEC §5, ADR-040): check the live
+				// campaign against what this step sends; send nothing.
+				status, reason, checks := a.preflight(ctx, cfg, apiKey, campaignID)
+				if err := w.Write(protocol.Preflight(status, reason, checks)); err != nil {
+					return err
+				}
+				return w.Write(protocol.End())
+			}
 			if err := w.Write(protocol.Schema([]byte(`{"type":"object","properties":{}}`))); err != nil {
 				return err
 			}
@@ -232,4 +241,125 @@ func compareLead(sent leadRequest, stored storedLead) (string, string) {
 		return protocol.AttestInconclusive, "the re-read carried no readable value for " + strings.Join(unreadable, ", ")
 	}
 	return protocol.AttestConfirmed, "every field sent is present in the stored lead"
+}
+
+// preflight runs the four checks ADR-040 names against the live campaign:
+// it exists and is Active; its sequence has at least the step count the
+// copy assumes (the highest _step_N suffix among the variables: targets);
+// every target appears as {{name}} in some step; no variant lacks one.
+// A readable failure is blocked; a target that cannot be read is
+// inconclusive — never a block on a guess.
+func (a *Adapter) preflight(ctx context.Context, cfg config, apiKey, campaignID string) (string, string, []protocol.Check) {
+	detail, err := a.getCampaign(ctx, cfg, apiKey, campaignID)
+	if err != nil {
+		return protocol.PreflightInconclusive, "campaign could not be read: " + err.Error(), nil
+	}
+	var checks []protocol.Check
+	var blocked []string
+	var unreadable []string
+
+	if active, ok := detail.active(); !ok {
+		unreadable = append(unreadable, "status")
+	} else {
+		checks = append(checks, protocol.Check{Name: "campaign active", OK: active, Detail: fmt.Sprintf("status %v", detail.Fields["status"])})
+		if !active {
+			blocked = append(blocked, "campaign is not Active")
+		}
+	}
+
+	targets := make([]string, 0, len(cfg.Variables))
+	for t := range cfg.Variables {
+		targets = append(targets, t)
+	}
+	sort.Strings(targets)
+	assumed := assumedSteps(targets)
+
+	steps, ok := detail.steps()
+	if !ok {
+		unreadable = append(unreadable, "sequence")
+	} else {
+		if assumed > 0 {
+			okSteps := len(steps) >= assumed
+			checks = append(checks, protocol.Check{Name: "sequence step count", OK: okSteps,
+				Detail: fmt.Sprintf("copy assumes %d step(s), sequence has %d", assumed, len(steps))})
+			if !okSteps {
+				blocked = append(blocked, fmt.Sprintf("the copy assumes %d step(s) but the sequence has %d", assumed, len(steps)))
+			}
+		}
+		for _, t := range targets {
+			if firstClass(t) {
+				continue // lead-body fields, not template merge fields
+			}
+			placeholder := "{{" + t + "}}"
+			referenced := false
+			for _, variants := range steps {
+				for _, body := range variants {
+					if strings.Contains(body, placeholder) {
+						referenced = true
+					}
+				}
+			}
+			checks = append(checks, protocol.Check{Name: "variable " + t + " referenced", OK: referenced})
+			if !referenced {
+				blocked = append(blocked, fmt.Sprintf("no sequence step references %s", placeholder))
+				continue
+			}
+			// A step's own copy (<x>_step_N) must be in every variant of
+			// step N, or one variant sends with a hole where the email was.
+			// Other variables are decoration; a variant may omit them.
+			if n := stepIndex(t); n > 0 && n <= len(steps) && len(steps[n-1]) > 1 {
+				for _, body := range steps[n-1] {
+					if !strings.Contains(body, placeholder) {
+						checks = append(checks, protocol.Check{Name: fmt.Sprintf("every variant of step %d carries %s", n, t), OK: false})
+						blocked = append(blocked, fmt.Sprintf("step %d has a variant without %s", n, placeholder))
+						break
+					}
+				}
+			}
+		}
+	}
+
+	switch {
+	case len(blocked) > 0:
+		return protocol.PreflightBlocked, strings.Join(blocked, "; "), checks
+	case len(unreadable) > 0:
+		return protocol.PreflightInconclusive, "the campaign response carried no readable " + strings.Join(unreadable, ", "), checks
+	default:
+		return protocol.PreflightOK, "", checks
+	}
+}
+
+// stepIndex reads the N of a <x>_step_N target, 0 when it has none.
+func stepIndex(target string) int {
+	i := strings.LastIndex(target, "_step_")
+	if i < 0 {
+		return 0
+	}
+	var n int
+	if _, err := fmt.Sscanf(target[i+len("_step_"):], "%d", &n); err != nil {
+		return 0
+	}
+	return n
+}
+
+// assumedSteps is the highest _step_N suffix among the variable targets —
+// how many sequence steps the copy was written for.
+func assumedSteps(targets []string) int {
+	max := 0
+	for _, t := range targets {
+		if n := stepIndex(t); n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+// firstClass reports a variables: target Instantly maps into the lead body
+// rather than a template merge field (SPEC §10.6).
+func firstClass(target string) bool {
+	switch target {
+	case "first_name", "last_name", "company_name", "personalization":
+		return true
+	}
+	return false
 }

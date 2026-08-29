@@ -52,6 +52,9 @@ type Manifest struct {
 	// an ATTEST per record (SPEC §5/§6, ADR-036). Absent, every delivery
 	// stays accepted and is reported inconclusive.
 	Attests bool `json:"attests,omitempty"`
+	// Preflights marks a deliver adapter that can check the live target
+	// before anything sends (SPEC §5/§6, ADR-040).
+	Preflights bool `json:"preflights,omitempty"`
 
 	needs, provides, config *jsonschema.Schema
 }
