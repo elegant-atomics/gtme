@@ -35,6 +35,10 @@
         "type": "boolean",
         "description": "ADR-035: wrap externally fetched fields in a delimiter labelled as subject-supplied data (default true); false opts out"
       },
+      "deferred": {
+        "type": "boolean",
+        "description": "ADR-038: submit the batch to the engine's batch surface (the Message Batches API, half price) and end the run in flight; the next `gtme run` of the pipeline collects. Valid only on the pipeline's last step."
+      },
       "fetched": {
         "type": "array",
         "items": {"type": "string"},

@@ -501,3 +501,169 @@ func (s *splitRecorder) Complete(ctx context.Context, req ai.Request) (ai.Respon
 	s.reqs = append(s.reqs, req)
 	return s.inner.Complete(ctx, req)
 }
+
+// batchScript is a BatchEngine for tests: Submit stores the requests, Collect
+// answers from a script — "$pending" first means still processing.
+type batchScript struct {
+	scriptEngine
+	submitted [][]ai.BatchRequest
+	collects  []string // per Collect call: "$pending" or "" (answer)
+	collected int
+}
+
+func (b *batchScript) Submit(ctx context.Context, reqs []ai.BatchRequest) (string, error) {
+	b.submitted = append(b.submitted, reqs)
+	return "tok-" + string(rune('a'+len(b.submitted)-1)), nil
+}
+
+func (b *batchScript) Collect(ctx context.Context, token string) (map[string]ai.BatchResult, bool, error) {
+	i := b.collected
+	b.collected++
+	if i < len(b.collects) && b.collects[i] == "$pending" {
+		return nil, false, nil
+	}
+	out := map[string]ai.BatchResult{}
+	for _, reqs := range b.submitted {
+		for _, r := range reqs {
+			res, err := b.scriptEngine.Complete(ctx, r.Request)
+			out[r.CustomID] = ai.BatchResult{Response: res, Err: err}
+		}
+	}
+	return out, true, nil
+}
+
+// TestDeferredSubmitsThenCollects is ADR-038 at the adapter: a deferred
+// session submits one request per record (custom_id = identity key) and ends
+// with PENDING; a session opened with the token collects — still-processing
+// is PENDING again, results are parsed per record, an invalid one is failed
+// by omission, and COST lands at collection.
+func TestDeferredSubmitsThenCollects(t *testing.T) {
+	engine := &batchScript{
+		scriptEngine: scriptEngine{answers: []string{
+			`[{"identity_key":"a@x.com","pass":true,"reason":"fits"}]`,
+			`not json at all`,
+		}},
+		collects: []string{"$pending", ""},
+	}
+	a := &Adapter{Mode: modeFilter, Engine: engine}
+
+	msgs, err := drive(t, a, map[string]any{"prompt": "Judge.", "deferred": true}, "a@x.com", "b@x.com")
+	if err != nil {
+		t.Fatalf("submit session: %v", err)
+	}
+	if len(engine.submitted) != 1 || len(engine.submitted[0]) != 2 || engine.submitted[0][0].CustomID != "a@x.com" {
+		t.Fatalf("submitted = %+v, want one batch of two requests keyed by identity", engine.submitted)
+	}
+	if !strings.Contains(engine.submitted[0][0].Request.Payload, "Records (1):") ||
+		engine.submitted[0][0].Request.Shared != "Judge." {
+		t.Errorf("each request carries one record and the shared prompt: %+v", engine.submitted[0][0].Request)
+	}
+	var pending []protocol.Message
+	for _, m := range msgs {
+		if m.Type == protocol.TypePending {
+			pending = append(pending, m)
+		}
+		if m.Type == protocol.TypeVerdict || m.Type == protocol.TypeCost {
+			t.Errorf("a submitting session must not answer: %+v", m)
+		}
+	}
+	if len(pending) != 1 || pending[0].Token != "tok-a" || pending[0].Detail["records"] != float64(2) {
+		t.Fatalf("PENDING = %+v", pending)
+	}
+
+	// Collecting while still processing: PENDING again under the same token.
+	collect := func() []protocol.Message {
+		t.Helper()
+		inR, inW := io.Pipe()
+		outR, outW := io.Pipe()
+		go func() {
+			w := protocol.NewWriter(inW)
+			w.Write(protocol.Message{Type: protocol.TypeOpen, StepID: "step", RunID: "run1",
+				Config: map[string]any{"prompt": "Judge.", "deferred": true}, Pending: &protocol.PendingRef{Token: "tok-a"}})
+			for _, k := range []string{"a@x.com", "b@x.com"} {
+				w.Write(protocol.Record(protocol.Key{EntityType: "person", IdentityKey: k}, map[string]any{"email": k}, nil))
+			}
+			w.Write(protocol.End())
+			inW.Close()
+		}()
+		go func() {
+			outW.CloseWithError(a.Run(context.Background(), adapters.Ports{In: inR, Out: outW, Log: io.Discard}))
+		}()
+		var out []protocol.Message
+		r := protocol.NewReader(outR)
+		for {
+			m, err := r.Next()
+			if err != nil {
+				break
+			}
+			out = append(out, m)
+		}
+		return out
+	}
+	msgs = collect()
+	pending = nil
+	for _, m := range msgs {
+		if m.Type == protocol.TypePending {
+			pending = append(pending, m)
+		}
+	}
+	if len(pending) != 1 || pending[0].Token != "tok-a" || pending[0].Detail["still_processing"] != true {
+		t.Fatalf("still processing should re-PENDING: %+v", pending)
+	}
+	if len(engine.submitted) != 1 {
+		t.Fatalf("collecting must never re-submit; submitted = %d", len(engine.submitted))
+	}
+
+	// Ready: a's answer is valid, b's is not — a verdict for a, a warning for
+	// b, one COST, no resubmit.
+	msgs = collect()
+	var verdicts, costs, warns int
+	for _, m := range msgs {
+		switch m.Type {
+		case protocol.TypeVerdict:
+			verdicts++
+			if m.Key.IdentityKey != "a@x.com" || !m.Passed() {
+				t.Errorf("verdict = %+v", m)
+			}
+		case protocol.TypeCost:
+			costs++
+		case protocol.TypeLog:
+			if strings.Contains(m.Msg, "b@x.com") && strings.Contains(m.Msg, "no retry against a batch") {
+				warns++
+			}
+		case protocol.TypePending:
+			t.Errorf("a ready collection must not PENDING: %+v", m)
+		}
+	}
+	if verdicts != 1 || costs != 1 || warns != 1 {
+		t.Errorf("verdicts = %d, costs = %d, warns = %d", verdicts, costs, warns)
+	}
+	if len(engine.submitted) != 1 {
+		t.Errorf("submitted = %d, want 1", len(engine.submitted))
+	}
+}
+
+// TestDeferredWithoutBatchSurfaceAnswersSynchronously: an engine that cannot
+// defer answers in the request and says so.
+func TestDeferredWithoutBatchSurfaceAnswersSynchronously(t *testing.T) {
+	engine := &scriptEngine{answers: []string{`[{"identity_key":"a@x.com","pass":true,"reason":"ok"}]`}}
+	a := &Adapter{Mode: modeFilter, Engine: engine}
+	msgs, err := drive(t, a, map[string]any{"prompt": "Judge.", "deferred": true}, "a@x.com")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var verdicts, warned int
+	for _, m := range msgs {
+		switch {
+		case m.Type == protocol.TypeVerdict:
+			verdicts++
+		case m.Type == protocol.TypeLog && strings.Contains(m.Msg, "has no batch surface — answering synchronously"):
+			warned++
+		case m.Type == protocol.TypePending:
+			t.Errorf("no batch surface, no PENDING: %+v", m)
+		}
+	}
+	if verdicts != 1 || warned != 1 {
+		t.Errorf("verdicts = %d, warned = %d", verdicts, warned)
+	}
+}

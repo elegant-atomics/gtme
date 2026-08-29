@@ -98,6 +98,11 @@ type StepStat struct {
 	Confirmed    int
 	Contradicted int
 	Inconclusive []Attestation
+
+	// In flight (SPEC §8, ADR-038): records a PENDING left with the
+	// provider, and the tokens they are pending under.
+	InFlight int
+	Tokens   []string
 }
 
 // Attestation is one inconclusive (or otherwise noteworthy) attestation.
@@ -264,6 +269,10 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 	status := ledger.StatusDone
 	if runErr != nil {
 		status = ledger.StatusFailed
+	} else if r.inFlight() > 0 {
+		// Ended with a step in flight (ADR-038): not done. The next run of
+		// this pipeline collects.
+		status = ledger.StatusPending
 	}
 	if err := r.l.FinishRun(ctx, r.runID, status); err != nil && runErr == nil {
 		runErr = err
@@ -461,6 +470,12 @@ func (r *runner) sessionEnv(st *planner.Step) map[string]string {
 // provenance, since the adapter only ever sees a projection.
 func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 	config := st.Config
+	// Collecting (ADR-038): every item in a collection session shares one
+	// token, which rides on OPEN.
+	var pending *protocol.PendingRef
+	if len(items) > 0 && items[0].token != "" {
+		pending = &protocol.PendingRef{Token: items[0].token}
+	}
 	fetched := fetchedFields(items)
 	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 {
 		config = make(map[string]any, len(st.Config)+3)
@@ -481,11 +496,23 @@ func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 		}
 	}
 	return protocol.Message{
-		Type:   protocol.TypeOpen,
-		StepID: st.ID,
-		RunID:  r.runID,
-		Config: config,
+		Type:    protocol.TypeOpen,
+		StepID:  st.ID,
+		RunID:   r.runID,
+		Config:  config,
+		Pending: pending,
 	}
+}
+
+// inFlight totals the records every step left pending this invocation.
+func (r *runner) inFlight() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, s := range r.stats {
+		n += s.InFlight
+	}
+	return n
 }
 
 // fetchedFields is the sorted union of the batch's fetched fields.

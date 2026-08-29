@@ -75,6 +75,13 @@ type Step struct {
 	// Notes are non-blocking plan observations (namespaced needs, near-miss
 	// column suggestions, a weak identity path) printed with the plan.
 	Notes []string
+	// Warnings are per-step plan warnings (SPEC §7): respend, a deferred
+	// step on an engine with no batch surface.
+	Warnings []string
+	// Deferred marks an AI step that ends the run in flight (ADR-038).
+	Deferred bool
+	// Respend is the step's declared opt-out of the respend warning.
+	Respend bool
 
 	Credentials map[string]string
 	// MissingOptional are declared-optional credentials that did not resolve;
@@ -355,8 +362,49 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 		for _, f := range ps.Provides {
 			available[f] = true
 		}
+		// A deferred step is the pipeline's last step (SPEC §8, ADR-038).
+		if ps.Deferred && i != len(steps)-1 {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: "deferred: true is valid only on the pipeline's last step — land this step's output in a group (group: terminus, or its declared provides:) and let a consumer pipeline pull it (SPEC §8, ADR-038)"})
+		}
 
 		plan.Steps = append(plan.Steps, ps)
+	}
+
+	// Respend (SPEC §7, ADR-038): a paid step that would pay for the same
+	// records again on a re-run, with nothing remembering the answer, is
+	// warned — unless the step says respend: true.
+	writes := map[string]bool{}
+	if g := strings.TrimSpace(p.Group); g != "" {
+		writes[g] = true
+	}
+	for i := range plan.Steps {
+		if plan.Steps[i].IsGroupDeliver {
+			writes[plan.Steps[i].TargetGroup] = true
+		}
+	}
+	for i := range plan.Steps {
+		st := &plan.Steps[i]
+		if st.IsSource || st.Respend || st.Manifest == nil {
+			continue
+		}
+		switch {
+		case st.Manifest.IsAI():
+			remembered := false
+			for _, g := range st.Exclude {
+				if writes[g] {
+					remembered = true
+				}
+			}
+			if !remembered {
+				st.Warnings = append(st.Warnings,
+					"respend: this AI step re-judges every record on each run and nothing remembers the answer — add exclude: naming a group this pipeline writes (judgment memory, ADR-021), or say respend: true (SPEC §7, ADR-038)")
+			}
+		case (st.Role == adapters.RoleEnrich || st.Role == adapters.RoleVerify) && st.Cache <= 0 &&
+			(len(st.Manifest.Credentials) > 0 || (st.CostEstimate != nil && *st.CostEstimate > 0)):
+			st.Warnings = append(st.Warnings,
+				"respend: this paid step has no freshness window, so every run pays for every record again — set cache: Nd, or say respend: true (SPEC §7, ADR-038)")
+		}
 	}
 
 	plan.Available = keys(available)
@@ -807,6 +855,17 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		if ps.BatchSize < 1 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: "batch_size must be >= 1"})
 			ps.BatchSize = DefaultBatchSize
+		}
+	}
+
+	ps.Respend = s.Respend
+	// Deferred (ADR-038): adapter config on an AI step; the last-step rule
+	// is checked by Build, which knows the position.
+	if v, ok := ps.Config["deferred"].(bool); ok && v && isAI {
+		ps.Deferred = true
+		if engine, _ := ps.Config["engine"].(string); engine == "claude-code" {
+			ps.Warnings = append(ps.Warnings,
+				"deferred: true has no effect on engine claude-code — it has no batch surface; the step answers synchronously (ADR-038)")
 		}
 	}
 

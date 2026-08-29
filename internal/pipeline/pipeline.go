@@ -76,6 +76,10 @@ type Step struct {
 	// (ADR-031).
 	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
+	// Respend declares that re-running the pipeline MAY pay for this step's
+	// records again (SPEC §7/§9, ADR-038): it silences the plan's respend
+	// warning and nothing else.
+	Respend bool `yaml:"respend,omitempty" json:"respend,omitempty"`
 	// Group is group-as-source (SPEC §9, ADR-021): valid only on the source
 	// step, mutually exclusive with use:. Members are projected from the
 	// ledger like any record.
@@ -258,6 +262,9 @@ func (p *Pipeline) normalize() error {
 	}
 	if len(p.Source.Require) > 0 || len(p.Source.Exclude) > 0 {
 		return fmt.Errorf("pipeline: %s: require:/exclude: are not valid on the source step (SPEC §9)", p.Source.ID)
+	}
+	if p.Source.Respend {
+		return fmt.Errorf("pipeline: %s: respend: is not valid on the source step — a source's spend is its query (SPEC §7)", p.Source.ID)
 	}
 	// limit: (ADR-032) bounds a group source and nothing else.
 	for _, s := range p.AllSteps() {

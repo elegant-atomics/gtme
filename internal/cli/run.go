@@ -100,6 +100,24 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		l = tmp
 	}
 
+	// Collect first (SPEC §8, ADR-038): when this pipeline's latest run ended
+	// with a step in flight, a plain `gtme run` resumes it rather than
+	// sourcing anew — nothing is submitted twice by habit. --simulate runs
+	// against a throwaway ledger and never defers, so it is exempt.
+	if *resume == "" && !*simulate {
+		if last, err := l.LastRunForPipeline(ctx, p.Name); err == nil && last.Status == ledger.StatusPending {
+			*resume = last.ID
+			fmt.Fprintf(env.Stderr, "collecting run %s — the latest run of %q ended with a step in flight (ADR-038)\n", last.ID, p.Name)
+		}
+	}
+	if *dryRun {
+		for i := range plan.Steps {
+			if plan.Steps[i].Deferred {
+				fmt.Fprintf(env.Stderr, "warning: --dry-run has nothing to hold back here — a deferred pipeline carries no deliver step; the judgment defers as an armed run would (ADR-038)\n")
+				break
+			}
+		}
+	}
 	runID, err := resolveRunID(ctx, l, *resume)
 	if err != nil {
 		return err

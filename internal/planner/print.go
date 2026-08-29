@@ -113,8 +113,14 @@ func Print(w io.Writer, p *Plan) {
 				fmt.Fprintf(w, "     on_missing: %s\n", s.OnMissing)
 			}
 		}
+		if s.Deferred {
+			fmt.Fprintf(w, "     deferred:  the run ends in flight here; the next `gtme run` of this pipeline collects (ADR-038)\n")
+		}
 		for _, note := range s.Notes {
 			fmt.Fprintf(w, "     note:      %s\n", note)
+		}
+		for _, warning := range s.Warnings {
+			fmt.Fprintf(w, "     warning:   %s\n", warning)
 		}
 		if s.Manifest != nil && len(s.Manifest.Credentials) > 0 {
 			fmt.Fprintf(w, "     creds:     %s (resolved)\n", list(s.Manifest.Credentials))

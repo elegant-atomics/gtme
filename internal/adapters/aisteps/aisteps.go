@@ -71,6 +71,9 @@ type config struct {
 	// by the runner from provenance (never authored inside with:).
 	Fence   bool
 	Fetched []string
+	// Deferred routes the batch to the engine's batch surface (ADR-038):
+	// the session ends with PENDING and a later session collects.
+	Deferred bool
 }
 
 func parseConfig(raw map[string]any) (config, error) {
@@ -98,6 +101,7 @@ func parseConfig(raw map[string]any) (config, error) {
 	if v, ok := raw["fence"].(bool); ok {
 		c.Fence = v
 	}
+	c.Deferred, _ = raw["deferred"].(bool)
 	if list, ok := raw[adapters.FetchedConfigKey].([]any); ok {
 		for _, f := range list {
 			if s, ok := f.(string); ok {
@@ -203,6 +207,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		sh      shape
 		opened  bool
 		records []record
+		token   string // collecting (SPEC §5, ADR-038) when set
 	)
 
 	for {
@@ -224,6 +229,9 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 				return err
 			}
 			opened = true
+			if m.Pending != nil {
+				token = m.Pending.Token
+			}
 			if err := w.Write(protocol.Schema(sh.schema)); err != nil {
 				return err
 			}
@@ -255,6 +263,24 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		engine, model = e, resolved
 	}
 
+	// Deferred (ADR-038): submit now, or collect what an earlier session
+	// submitted. An engine with no batch surface answers synchronously and
+	// says so.
+	if cfg.Deferred || token != "" {
+		if ai.Deferrable(engine) {
+			if err := a.deferred(ctx, engine.(ai.BatchEngine), w, cfg, sh, model, records, token); err != nil {
+				return err
+			}
+			return w.Write(protocol.End())
+		}
+		if token != "" {
+			return fmt.Errorf("%s: asked to collect %q but engine %s has no batch surface", a.id(), token, engine.Name())
+		}
+		if err := w.Write(protocol.Log("warn", fmt.Sprintf("%s: deferred: true, but engine %s has no batch surface — answering synchronously", a.id(), engine.Name()))); err != nil {
+			return err
+		}
+	}
+
 	answers, res, err := a.ask(ctx, engine, w, cfg, sh, model, records)
 	if err != nil {
 		return err
@@ -269,6 +295,72 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 		return err
 	}
 	return w.Write(protocol.End())
+}
+
+// deferred is the batch path (SPEC §5/§8, ADR-038). Without a token it
+// submits one request per record — custom_id is the identity key, the
+// shared half of the prompt identical across them — and ends with PENDING.
+// With a token it collects: results are parsed record by record against the
+// same shape; a record whose answer is invalid is failed by omission (there
+// is no retry against a batch), a record the provider errored likewise; if
+// the provider is still processing it emits PENDING again.
+func (a *Adapter) deferred(ctx context.Context, engine ai.BatchEngine, w *protocol.Writer, cfg config, sh shape, model string, records []record, token string) error {
+	if token == "" {
+		reqs := make([]ai.BatchRequest, 0, len(records))
+		for _, rec := range records {
+			one := []record{rec}
+			shared, payload := assemble(cfg, one, "")
+			reqs = append(reqs, ai.BatchRequest{CustomID: rec.key.IdentityKey, Request: ai.Request{
+				System: a.systemPrompt(sh, cfg), Prompt: shared + "\n\n" + payload, Shared: shared, Payload: payload,
+				Model: model, MaxTokens: cfg.MaxTokens, Keys: []string{rec.key.IdentityKey}, Kind: a.Mode, Fields: sh.fields,
+			}})
+		}
+		submitted, err := engine.Submit(ctx, reqs)
+		if err != nil {
+			return fmt.Errorf("%s: %w", a.id(), err)
+		}
+		return w.Write(protocol.Pending(submitted, map[string]any{"provider": engine.Name(), "records": len(records)}))
+	}
+
+	results, ready, err := engine.Collect(ctx, token)
+	if err != nil {
+		return fmt.Errorf("%s: %w", a.id(), err)
+	}
+	if !ready {
+		return w.Write(protocol.Pending(token, map[string]any{"provider": engine.Name(), "records": len(records), "still_processing": true}))
+	}
+	var cost ai.Response
+	answered := map[string]map[string]any{}
+	var order []record
+	for _, rec := range records {
+		res, ok := results[rec.key.IdentityKey]
+		if !ok {
+			_ = w.Write(protocol.Log("warn", fmt.Sprintf("%s: batch %s carried no result for %s", a.id(), token, rec.key.IdentityKey)))
+			continue
+		}
+		if res.Err != nil {
+			_ = w.Write(protocol.Log("warn", fmt.Sprintf("%s: %s: %v", a.id(), rec.key.IdentityKey, res.Err)))
+			continue
+		}
+		cost.CostUSD += res.Response.CostUSD
+		cost.Priced = cost.Priced || res.Response.Priced
+		cost.InputTokens += res.Response.InputTokens
+		cost.OutputTokens += res.Response.OutputTokens
+		cost.Model, cost.Engine = res.Response.Model, res.Response.Engine
+		answers, err := a.parse(res.Response.Text, sh, []record{rec})
+		if err != nil {
+			_ = w.Write(protocol.Log("warn", fmt.Sprintf("%s: %s: invalid model output in batch %s (%v) — no retry against a batch", a.id(), rec.key.IdentityKey, token, err)))
+			continue
+		}
+		answered[rec.key.IdentityKey] = answers[rec.key.IdentityKey]
+		order = append(order, rec)
+	}
+	if cost.CostUSD > 0 || cost.Priced {
+		if err := w.Write(protocol.Cost(nil, "anthropic", cost.CostUSD, cost.Detail())); err != nil {
+			return err
+		}
+	}
+	return a.emit(w, sh, order, answered)
 }
 
 // ask sends the batch, validates the answer, and retries once with the

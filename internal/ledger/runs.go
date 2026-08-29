@@ -10,11 +10,19 @@ import (
 	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
-// Run statuses.
+// Run statuses. Pending (ADR-038) is a run that ended with a step in
+// flight: not done, collected by the next `gtme run` of its pipeline.
 const (
 	StatusRunning = "running"
 	StatusDone    = "done"
 	StatusFailed  = "failed"
+	StatusPending = "pending"
+)
+
+// Step events the in-flight mechanism adds (SPEC §3, ADR-038).
+const (
+	EventPending   = "pending"
+	EventCollected = "collected"
 )
 
 // StateSourced is a record's state before any step has touched it.
@@ -121,6 +129,75 @@ func (l *Ledger) LastRun(ctx context.Context) (Run, error) {
 
 // FinishRun closes a run with a terminal status. A failure is sticky: once a
 // run is marked failed, a later call reporting success must not overwrite it.
+// LastRunForPipeline is the most recent run of a named pipeline.
+func (l *Ledger) LastRunForPipeline(ctx context.Context, pipeline string) (Run, error) {
+	var run Run
+	var finished sql.NullString
+	err := l.db.QueryRowContext(ctx,
+		`SELECT id, pipeline, config_json, started_at, finished_at, status FROM runs
+		 WHERE pipeline = ? ORDER BY started_at DESC, id DESC LIMIT 1`, pipeline).
+		Scan(&run.ID, &run.Pipeline, &run.ConfigJSON, &run.StartedAt, &finished, &run.Status)
+	if err == sql.ErrNoRows {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, fmt.Errorf("ledger: reading runs: %w", err)
+	}
+	run.FinishedAt = finished.String
+	return run, nil
+}
+
+// PendingTokens maps each record still in flight at a step to the token
+// it is pending under (ADR-038): the newest `pending` event per record with
+// no `collected` event after it.
+func (l *Ledger) PendingTokens(ctx context.Context, runID, stepID string) (map[string]string, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT identity_id, event, detail FROM step_events
+		 WHERE run_id = ? AND step_id = ? AND event IN (?, ?) AND identity_id IS NOT NULL
+		 ORDER BY created_at, id`, runID, stepID, EventPending, EventCollected)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: reading pending events: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, event string
+		var detail sql.NullString
+		if err := rows.Scan(&id, &event, &detail); err != nil {
+			return nil, err
+		}
+		if event == EventCollected {
+			delete(out, id)
+			continue
+		}
+		var d struct {
+			Token string `json:"token"`
+		}
+		_ = json.Unmarshal([]byte(detail.String), &d)
+		if d.Token != "" {
+			out[id] = d.Token
+		}
+	}
+	return out, rows.Err()
+}
+
+// InFlight counts a run's records still pending at any step (ADR-038).
+func (l *Ledger) InFlight(ctx context.Context, runID string) (int, error) {
+	steps, err := l.StepIDs(ctx, runID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, step := range steps {
+		tokens, err := l.PendingTokens(ctx, runID, step)
+		if err != nil {
+			return 0, err
+		}
+		n += len(tokens)
+	}
+	return n, nil
+}
+
 func (l *Ledger) FinishRun(ctx context.Context, runID, status string) error {
 	q := `UPDATE runs SET status = ?, finished_at = ? WHERE id = ?`
 	if status != StatusFailed {
