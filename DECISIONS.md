@@ -1196,14 +1196,19 @@ already carries the engine's model identifier (ADR-026).
 record, the runner computes the step's **judgment signature** — a hash
 over the adapter id, the model identifier, the operator prompt and the
 generated output shape (the declared or default provides, the `uses:`
-list) — and the record's **input hash** — a hash over the projected
-fields as the step would see them. If a `done` event for this identity
+list) — and the record's **input hash** — a hash over the fields the
+judgment reads: the `uses:` fields when declared, else the projection
+minus the step's own provides and minus every field namespaced by this
+pipeline (a needs-all step would otherwise see its own last answer as a
+changed input and never cache), as canonical sorted JSON. If a `done`
+event for this identity
 carries the same signature and input hash, the record is skipped
 (`skipped_cache`, reason `same_judgment`): a filter re-applies the stored
 verdict (pass advances, fail freezes — and the declared provides written
 then are still the current values), a compose has nothing to write (its
 fields are current with that provenance). No time window by default —
-same question, same facts, same answer — and `cache: Nd` bounds reuse to
+same question, same facts, same answer — and (for the one case that needs
+a clock, a prompt that reads it: "posted in the last month") `cache: Nd` bounds reuse to
 N days when an operator wants a periodic re-read; `respend: true` (or
 `cache: 0d`) turns it off. (2) **The signature is recorded where the
 judgment is:** the `done` event's detail gains `signature` and `input`,

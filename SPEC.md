@@ -852,14 +852,18 @@ At execution time, per step, per record:
   an AI step the runner MUST compute the step's *judgment signature* — a
   hash over the adapter id, the model identifier, the operator prompt,
   the output shape (declared or default provides) and the `uses:` list —
-  and the record's *input hash* — a hash over the projected fields as the
-  step would see them. If a `done` event for this identity carries the
+  and the record's *input hash* — a hash, as canonical sorted JSON, over
+  the fields the judgment reads: the `uses:` fields when declared, else
+  the projection minus the step's own provides and minus every field
+  namespaced by this pipeline (§4a), so a step never sees its own last
+  answer as a changed input. If a `done` event for this identity carries the
   same signature and input hash (any run), the runner MUST skip the
   record (`skipped_cache`, reason `same_judgment`): a filter re-applies
   the stored verdict (pass advances, fail freezes), a compose writes
   nothing (its fields are current with that provenance). There is no time
   window by default — the same question about the same facts has the same
-  answer; `cache: Nd` bounds reuse to N days; `respend: true` or
+  answer; `cache: Nd` bounds reuse to N days (what a prompt that reads
+  the clock itself needs); `respend: true` or
   `cache: 0d` disables it. A deferred step (ADR-038) cache-checks before
   it submits.
 - **Projection:** the runner MUST build `fields` strictly from `needs`
