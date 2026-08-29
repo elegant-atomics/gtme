@@ -1899,7 +1899,7 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Proposed
+- **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Queued
   2026-08-29.** PREFLIGHT and OPEN `preflight` in `internal/protocol` and
   the schemas; `preflights` in the manifest; the preflight session in the
   runner ahead of a deliver step's record sessions at `--dry-run` and arm;
@@ -2057,14 +2057,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.21 — 2026-08-29 (ADR-040 packet: deliver preflight — PROPOSED, not yet accepted)
-**Added (proposed):** §5 PREFLIGHT and OPEN `preflight`; §6 `preflights`
+### v0.21 — 2026-08-29 (ADR-040 reconciliation: deliver preflight; build queued as M17)
+**Added:** §5 PREFLIGHT and OPEN `preflight`; §6 `preflights`
 capability; §8 deliver preflight (dry-run/arm behaviour, receipt); §10
 item 6 Instantly's checks; §11 milestone M17;
 `spec/schemas/msg-preflight.schema.json`, `msg-open.schema.json`,
 `manifest.schema.json`, the wire README. Editorial: §11's M15/M16 order.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M17 is queued.
 
 ### v0.20 — 2026-08-29 (M16 build: the judgment cache, built)
 **Changed:** §11 M16 marked built; no normative text changed — v0.19's

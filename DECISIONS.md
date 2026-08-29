@@ -1249,8 +1249,8 @@ and the respend warning narrowed; §10a provenance format
 (prose, no DDL); §11 milestone M16.
 
 ### ADR-040: Deliver preflight — the target is checked before anything sends
-**Status:** Proposed (2026-08-29 — drafted from ROADMAP.md's "Deliver
-preflight"; Accepted on merge)
+**Status:** Accepted (2026-08-29 — drafted from ROADMAP.md's "Deliver
+preflight"; human-approved 2026-08-29)
 **Context:** `gtme plan` proves gtme's own contracts — needs, provides,
 credentials, config — with zero network (§7). It knows nothing about the
 *target's* state, and the class of failure that produces is the one
