@@ -1693,7 +1693,8 @@ decided contract, not shipped behavior.
   `variables:` on a non-deliver step fails plan naming step and key; a
   document with a top-level `deliver:` block fails validation.
 - **M14 — the composition pass (ADR-032, ADR-033, ADR-035, ADR-036,
-  ADR-037; §3, §5, §6, §7, §8, §9, §10, §10a). Queued 2026-08-28.**
+  ADR-037; §3, §5, §6, §7, §8, §9, §10, §10a). Built 2026-08-28
+  (changelog v0.16).**
   Build in this order, each step `make check` green: (1) ADR-033 —
   step-level `provides:` on AI roles, schema-generated output shape,
   `enum`, VERDICT+RECORD from filters, entity-agnostic AI manifests,
@@ -1886,8 +1887,8 @@ table, and the `attests` key in `manifest.schema.json`.
 landed (step (4)): `deliveries.status`/`sent_at`, the `current_values`
 and `group_membership` views; §3's queued-deltas note now records them as
 landed. §10a heading typo (`sql/enrich` renamed `sql/transform`).
-**Not changed:** §11 M14 stays queued — all five steps are built; the
-milestone is marked built when its acceptance is confirmed.
+**Changed:** §11 M14 marked built — all five steps and the account-pattern
+capstone run offline in the suite.
 
 ### v0.15 — 2026-08-28 (ADR-032/033/035/036/037 reconciliation; build queued as M14)
 **Added:** §7 declared AI provides, config values from the ledger, SQL at
