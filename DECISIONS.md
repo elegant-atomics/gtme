@@ -2003,3 +2003,48 @@ all four outcomes against stubbed re-reads.
 **Spec impact:** §5 ATTEST (v0.16 changelog) — approved; nothing else
 beyond v0.15.
 
+### 2026-08-29 — M15 internals: asynchronous steps (ADR-038)
+
+**Question:** Where does the batch surface live, how does a collection
+find its records, what does a per-record batch request look like, and how
+does the fixture engine stand in for a provider that holds work across
+processes?
+**Choice:** (1) `ai.BatchEngine` (`Submit`, `Collect`) beside `ai.Engine`,
+with `ai.Deferrable(engine)` as the capability check; the api engine
+implements it over the Message Batches API and prices results at half;
+the fixture engine implements it only when `GTME_AI_FIXTURE_DEFER` is set
+(so `--simulate` stays synchronous), persisting each batch to
+`<script>.batches/<token>.json` and the script cursor to
+`<script>.cursor` — a `$pending` entry is consumed once across processes,
+as a provider's "still processing" would be observed once. (2) A deferred
+submit is one request per record, `custom_id` = identity key, the shared
+half of the prompt as a cached block in every request; collection parses
+each result against its own record through the existing `parse`, so the
+shape, enum and type rules are unchanged; an invalid or errored answer
+fails that record by omission (no retry exists against a batch) with a
+LOG naming it. (3) In the runner, `PENDING` marks every unanswered item
+in the session with a `pending` step event (detail: the token) and the
+run finishes `pending` when any step left work in flight; `runStep` reads
+`PendingTokens` for the step and `dispatch` opens one session per token —
+its OPEN carrying `pending: {token}` — ahead of fresh chunks; an answered
+collection logs `collected` (detail: the token), which is what retires the
+pending event. (4) Collect-first is the CLI's: before resolving a run id,
+`gtme run` looks up the pipeline's latest run and resumes it when
+`pending`; `--simulate` is exempt (throwaway ledger, never defers). (5)
+The last-step rule is checked in `Build` (which knows the position); the
+respend warning is a per-step `Warnings` list printed as `warning:` lines
+— an AI step is "remembered" when an `exclude:` names a group the
+pipeline writes (its terminus or a `group/deliver` target); a paid
+enrich/verify is one that declares credentials or a positive cost
+estimate. `respend:` is parsed in `internal/pipeline` (rejected on the
+source) and read by the planner.
+**Why:** The M15 acceptance runs offline: submit → pending with the token
+on the receipt and in `gtme runs`; a plain `run` collects (still
+processing) and submits nothing new; the next `run` collects — verdicts,
+one COST row under the same run, terminus, `done`; the run after sources
+fresh and judgment memory gates the judged; the last-step rule, the
+claude-code and dry-run warnings, the respend warning and its two
+silencers all fire as specified; the api engine's batch path is
+unit-tested against a stubbed Batches endpoint.
+**Spec impact:** None beyond v0.17 (marked built as v0.18).
+

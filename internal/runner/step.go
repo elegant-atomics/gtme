@@ -35,6 +35,10 @@ type item struct {
 	output   bool // a RECORD arrived
 	failed   bool // this step failed the record; nothing advances it now
 	attested bool // an ATTEST arrived (attesting deliver steps)
+	// token is the in-flight handle this record is being collected under
+	// (ADR-038); pending marks a PENDING that covered it this session.
+	token   string
+	pending bool
 }
 
 // bump mutates a step's stats under the lock.
@@ -62,6 +66,12 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	}
 
 	stub := r.stubbed(st)
+	// Records left in flight by an earlier session of this run (ADR-038)
+	// are collected under their token rather than dispatched again.
+	tokens, err := r.l.PendingTokens(ctx, r.runID, st.ID)
+	if err != nil {
+		return err
+	}
 	var work []*item
 	var sqlWork []string
 	for _, rr := range records {
@@ -116,6 +126,7 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			return err
 		}
 		if it != nil {
+			it.token = tokens[rr.IdentityID]
 			work = append(work, it)
 		}
 	}
@@ -425,7 +436,28 @@ func (r *runner) dispatch(ctx context.Context, st *planner.Step, work []*item) e
 		return nil
 	}
 
-	chunks := chunk(work, chunkSize(st, len(work), r.conc))
+	// Collections first — one session per token, its OPEN carrying the token
+	// — then fresh work in the usual chunks (ADR-038).
+	var chunks [][]*item
+	byToken := map[string][]*item{}
+	var fresh []*item
+	var tokenOrder []string
+	for _, it := range work {
+		if it.token == "" {
+			fresh = append(fresh, it)
+			continue
+		}
+		if _, seen := byToken[it.token]; !seen {
+			tokenOrder = append(tokenOrder, it.token)
+		}
+		byToken[it.token] = append(byToken[it.token], it)
+	}
+	for _, t := range tokenOrder {
+		chunks = append(chunks, byToken[t])
+	}
+	if len(fresh) > 0 {
+		chunks = append(chunks, chunk(fresh, chunkSize(st, len(fresh), r.conc))...)
+	}
 	workers := r.conc
 	if workers > len(chunks) {
 		workers = len(chunks)
@@ -473,6 +505,9 @@ func (r *runner) printStepLine(st *planner.Step) {
 		st.ID, stat.In, stat.Out, stat.CacheSkips, stat.Filtered, stat.Failed)
 	if stat.Gated > 0 {
 		line += fmt.Sprintf(", %d gated", stat.Gated)
+	}
+	if stat.InFlight > 0 {
+		line += fmt.Sprintf(", %d in flight", stat.InFlight)
 	}
 	fmt.Fprintln(r.stderr, line)
 }
@@ -627,6 +662,10 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 			if err := r.applyAttest(ctx, st, byKey, m); err != nil {
 				return err
 			}
+		case protocol.TypePending:
+			if err := r.applyPending(ctx, st, items, m); err != nil {
+				return err
+			}
 		case protocol.TypeCost:
 			id := ""
 			if m.Key != nil {
@@ -653,10 +692,22 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 		return r.chunkFailed(ctx, st, items, err)
 	}
 
-	// Records the adapter said nothing about: a filter that returns no verdict has
-	// failed to judge, anything else simply found nothing and moves on.
+	// A collected record is settled either way (ADR-038): note which token
+	// answered it, so it is not collected twice.
 	for _, it := range items {
-		if it.advanced {
+		if it.token != "" && (it.advanced || it.failed) {
+			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, ledger.EventCollected,
+				map[string]any{"token": it.token}); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Records the adapter said nothing about: a filter that returns no verdict has
+	// failed to judge, anything else simply found nothing and moves on. A record
+	// a PENDING covered is neither — it is in flight.
+	for _, it := range items {
+		if it.advanced || it.pending {
 			continue
 		}
 		if st.Role == adapters.RoleFilter {
@@ -684,6 +735,50 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 		}
 	}
 	return nil
+}
+
+// applyPending marks every record the session did not answer as in flight
+// under the token (SPEC §5, ADR-038): a pending step event each, state
+// untouched, nothing downstream sees them, and the run will finish pending.
+func (r *runner) applyPending(ctx context.Context, st *planner.Step, items []*item, m protocol.Message) error {
+	if strings.TrimSpace(m.Token) == "" {
+		fmt.Fprintf(r.stderr, "%s: ignoring a PENDING with no token\n", st.ID)
+		return nil
+	}
+	n := 0
+	for _, it := range items {
+		if it.advanced || it.failed || it.verdict || it.output || it.pending {
+			continue
+		}
+		it.pending = true
+		detail := map[string]any{"token": m.Token}
+		for k, v := range m.Detail {
+			detail[k] = v
+		}
+		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, ledger.EventPending, detail); err != nil {
+			return err
+		}
+		n++
+	}
+	if n == 0 {
+		return nil
+	}
+	r.bump(st, func(s *StepStat) {
+		s.InFlight += n
+		if !containsString(s.Tokens, m.Token) {
+			s.Tokens = append(s.Tokens, m.Token)
+		}
+	})
+	return nil
+}
+
+func containsString(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 // attesting reports a deliver step whose adapter declares attests (SPEC §6).

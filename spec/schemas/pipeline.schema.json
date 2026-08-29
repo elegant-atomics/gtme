@@ -217,6 +217,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "ADR-032: group source only — at most N current members, oldest-added first."
+        },
+        "respend": {
+          "type": "boolean",
+          "description": "ADR-038: declares that re-running the pipeline MAY pay for this step's records again — silences the plan's respend warning (SPEC.md §7). Not valid on the source."
         }
       }
     }

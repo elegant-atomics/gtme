@@ -19,6 +19,9 @@ func PrintReceipt(w io.Writer, res *Result) {
 	case res.DryRun:
 		title += " (dry run — nothing sent)"
 	}
+	if res.Status == "pending" {
+		title += " — ended with a step in flight; the next `gtme run` of this pipeline collects (ADR-038)"
+	}
 	fmt.Fprintf(w, "\nrun %s — %s\n", res.RunID, title)
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
@@ -97,6 +100,15 @@ func PrintReceipt(w io.Writer, res *Result) {
 		default:
 			fmt.Fprintf(w, "%s: %d record(s) handed off to group %q\n", s.ID, s.GroupAdded, s.TargetGroup)
 		}
+	}
+	// In flight (SPEC §8, ADR-038): what a deferred step left with the
+	// provider, and how to collect it.
+	for _, s := range res.Steps {
+		if s.InFlight == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "%s: %d record(s) in flight (%s); the next `gtme run` of this pipeline collects, or `gtme run --resume %s`\n",
+			s.ID, s.InFlight, strings.Join(s.Tokens, ", "), res.RunID)
 	}
 	// Attestation (SPEC §8, ADR-036): accepted is never sent; an attesting
 	// adapter's confirmed/contradicted refine it, and every inconclusive

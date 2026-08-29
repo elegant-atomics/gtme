@@ -1799,8 +1799,8 @@ decided contract, not shipped behavior.
   receives compact, fenced records and `fence: false` removes the fence.
   The account pattern (four pipelines chained through groups) simulates
   end to end with zero network calls.
-- **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Queued
-  2026-08-29.** PENDING and OPEN `pending` in `internal/protocol` and the
+- **M15 — asynchronous steps (ADR-038; §3, §5, §7, §8, §9, §10). Built
+  2026-08-29 (changelog v0.18).** PENDING and OPEN `pending` in `internal/protocol` and the
   schemas; the `pending`/`collected` step events and the `pending` run
   status; the last-step rule and the respend warning in the planner;
   collect-first `gtme run` and collection in the runner's dispatch; the
@@ -1962,6 +1962,17 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.18 — 2026-08-29 (M15 build: asynchronous steps, built)
+**Changed:** §11 M15 marked built; no normative text changed — v0.17's
+contract is shipped behaviour, covered by M15's acceptance. Behavioural
+notes from the build: the fixture engine's batch surface persists its
+batches and script cursor beside the script (`GTME_AI_FIXTURE_DEFER`),
+since a provider holds a batch across processes; a deferred submit sends
+one request per record with the shared prompt as a cached block; a
+collection with an invalid answer for a record fails that record by
+omission (there is no retry against a batch); `gtme runs` shows an
+in-flight count for `pending` runs.
 
 ### v0.17 — 2026-08-29 (ADR-038 reconciliation: asynchronous steps; build queued as M15)
 **Added:** §5 PENDING message and OPEN `pending`, with the

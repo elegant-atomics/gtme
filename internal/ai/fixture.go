@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -26,10 +27,24 @@ type fixtureEngine struct {
 	// the engine was actually shown (SPEC §11 M14: "the AI fixture engine
 	// receives compact, fenced records").
 	logPath string
+	// deferrable says whether Submit/Collect are on (FixtureDeferEnv). A
+	// real provider holds a batch across processes and so must this one:
+	// submitted requests live in <script>.batches/<token>.json and the
+	// script cursor in <script>.cursor, both only in deferred mode.
+	deferrable bool
+	path       string
 }
 
 // FixtureAuto is the sentinel that makes the fixture engine answer correctly.
 const FixtureAuto = "$auto"
+
+// FixturePending is the sentinel a scripted Collect consumes to say "still
+// processing" (ADR-038 tests): the run stays pending until the next entry.
+const FixturePending = "$pending"
+
+// FixtureDeferEnv enables the fixture engine's batch surface (tests only).
+// Without it a deferred step answers synchronously — what --simulate wants.
+const FixtureDeferEnv = "GTME_AI_FIXTURE_DEFER"
 
 // fixtures caches one engine per script path, so every AI step in a process
 // draws from the same script in order — a run is one script, not one per step.
@@ -61,7 +76,13 @@ func newFixtureEngine(getenv func(string) string) (Engine, error) {
 	if err := json.Unmarshal(raw, &responses); err != nil {
 		return nil, fmt.Errorf("ai: fixture %s must be a JSON array of strings: %w", path, err)
 	}
-	e := &fixtureEngine{responses: responses, logPath: envOverride(getenv, "GTME_AI_FIXTURE_LOG")}
+	e := &fixtureEngine{responses: responses, logPath: envOverride(getenv, "GTME_AI_FIXTURE_LOG"),
+		deferrable: envOverride(getenv, FixtureDeferEnv) != "", path: path}
+	if e.deferrable {
+		if raw, err := os.ReadFile(path + ".cursor"); err == nil {
+			fmt.Sscanf(string(raw), "%d", &e.next)
+		}
+	}
 	fixtures[path] = e
 	return e, nil
 }
@@ -101,6 +122,7 @@ func (e *fixtureEngine) Complete(ctx context.Context, req Request) (Response, er
 		i = len(e.responses) - 1
 	}
 	e.next++
+	e.saveCursor()
 	text := e.responses[i]
 	e.mu.Unlock()
 
@@ -161,4 +183,75 @@ func fixtureValue(f FieldShape, key string) any {
 		bare := f.Name[strings.LastIndex(f.Name, ".")+1:]
 		return "Fixture " + strings.ReplaceAll(bare, "_", " ") + " for " + key
 	}
+}
+
+// Deferrable reports whether the batch surface is switched on.
+func (e *fixtureEngine) Deferrable() bool { return e.deferrable }
+
+// saveCursor persists the script position in deferred mode (caller holds
+// the lock), so the next process continues the script where this one left
+// it — a "$pending" is consumed once, not once per process.
+func (e *fixtureEngine) saveCursor() {
+	if !e.deferrable {
+		return
+	}
+	_ = os.WriteFile(e.path+".cursor", []byte(fmt.Sprint(e.next)), 0o644)
+}
+
+func (e *fixtureEngine) batchFile(token string) string {
+	return filepath.Join(e.path+".batches", token+".json")
+}
+
+// Submit stores the batch on disk under a synthetic token; it consumes no
+// script entries — the answers are consumed at Collect, like a real provider.
+func (e *fixtureEngine) Submit(ctx context.Context, reqs []BatchRequest) (string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	dir := e.path + ".batches"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	entries, _ := os.ReadDir(dir)
+	token := fmt.Sprintf("fixture-batch-%d", len(entries)+1)
+	raw, err := json.Marshal(reqs)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(e.batchFile(token), raw, 0o644); err != nil {
+		return "", err
+	}
+	for _, r := range reqs {
+		e.logRequest(r.Request)
+	}
+	return token, nil
+}
+
+// Collect answers a stored batch from the script: a "$pending" entry means
+// still processing (consumed, so the next Collect proceeds); otherwise one
+// entry per request, "$auto" synthesizing per record. An answered batch is
+// removed, as a collected batch would be.
+func (e *fixtureEngine) Collect(ctx context.Context, token string) (map[string]BatchResult, bool, error) {
+	raw, err := os.ReadFile(e.batchFile(token))
+	if err != nil {
+		return nil, false, fmt.Errorf("ai: fixture knows no batch %q", token)
+	}
+	var reqs []BatchRequest
+	if err := json.Unmarshal(raw, &reqs); err != nil {
+		return nil, false, fmt.Errorf("ai: fixture batch %q: %w", token, err)
+	}
+	e.mu.Lock()
+	if e.next < len(e.responses) && strings.TrimSpace(e.responses[e.next]) == FixturePending {
+		e.next++
+		e.saveCursor()
+		e.mu.Unlock()
+		return nil, false, nil
+	}
+	e.mu.Unlock()
+	out := make(map[string]BatchResult, len(reqs))
+	for _, r := range reqs {
+		res, err := e.Complete(ctx, r.Request)
+		out[r.CustomID] = BatchResult{Response: res, Err: err}
+	}
+	_ = os.Remove(e.batchFile(token))
+	return out, true, nil
 }

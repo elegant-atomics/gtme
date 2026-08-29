@@ -161,3 +161,43 @@ func ProvenanceModel(engine, model string, getenv func(string) string) string {
 	}
 	return model
 }
+
+// BatchEngine is an engine that can take a batch of requests now and answer
+// later under a token (SPEC §5/§8, ADR-038): the Message Batches API for the
+// api engine, a scripted stand-in for the fixture engine. Engines without a
+// batch surface (claude-code) do not implement it, and a deferred step on
+// them answers synchronously.
+type BatchEngine interface {
+	Engine
+	// Submit dispatches every request, keyed by its CustomID, and returns the
+	// provider's handle.
+	Submit(ctx context.Context, reqs []BatchRequest) (token string, err error)
+	// Collect fetches results for a token. ready=false means the provider is
+	// still processing; results is keyed by CustomID, and a request the
+	// provider answered with an error carries that error.
+	Collect(ctx context.Context, token string) (results map[string]BatchResult, ready bool, err error)
+}
+
+// BatchRequest is one request inside a batch.
+type BatchRequest struct {
+	CustomID string
+	Request  Request
+}
+
+// BatchResult is one request's outcome.
+type BatchResult struct {
+	Response Response
+	Err      error
+}
+
+// Deferrable reports whether an engine can defer a batch right now.
+func Deferrable(e Engine) bool {
+	be, ok := e.(BatchEngine)
+	if !ok {
+		return false
+	}
+	if d, ok := be.(interface{ Deferrable() bool }); ok {
+		return d.Deferrable()
+	}
+	return true
+}

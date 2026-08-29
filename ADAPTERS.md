@@ -272,6 +272,18 @@ AI steps are entity-agnostic (`"entity_type": "*"` in the manifest — any
 adapter may declare it): inside a company pipeline they plan and validate
 against the company registry.
 
+**Deferred, at half price (ADR-038).** `with: {deferred: true}` on an AI
+step sends its batch to the Message Batches API (one request per record,
+`custom_id` = identity key, the shared prompt cached across them) and
+ends the run **`pending`** — the step must be the pipeline's last, so its
+judgment lands in the `group:` terminus and a consumer pipeline pulls it.
+The next `gtme run` of the pipeline collects (still processing → still
+pending; run again later, from cron or by hand — nothing waits). Under
+`--simulate`, or on `engine: claude-code` (no batch surface), the step
+answers synchronously and says so. `gtme plan` warns when a judgment step
+has nothing remembering its answers (add `exclude:` naming a group the
+pipeline writes, or say `respend: true`).
+
 **Prompt assembly (ADR-035).** The operator's prompt goes first, then the
 batch — one compact JSON line per record, long lines wrapped at
 structural breaks. Fields the pipeline *fetched* from the outside world

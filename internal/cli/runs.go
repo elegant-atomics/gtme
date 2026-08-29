@@ -41,13 +41,21 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 			return nil
 		}
 		tw := tabwriter.NewWriter(env.Stderr, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "run\tpipeline\tstatus\tstarted\trecords")
+		fmt.Fprintln(tw, "run\tpipeline\tstatus\tstarted\trecords\tin flight")
 		for _, run := range runs {
 			records, err := l.RunRecords(ctx, run.ID)
 			if err != nil {
 				return fail(ExitOther, "%v", err)
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", run.ID, run.Pipeline, run.Status, run.StartedAt, len(records))
+			inFlight := "-"
+			if run.Status == ledger.StatusPending {
+				n, err := l.InFlight(ctx, run.ID)
+				if err != nil {
+					return fail(ExitOther, "%v", err)
+				}
+				inFlight = fmt.Sprint(n)
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", run.ID, run.Pipeline, run.Status, run.StartedAt, len(records), inFlight)
 		}
 		tw.Flush()
 		return nil

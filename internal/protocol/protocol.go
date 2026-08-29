@@ -21,6 +21,7 @@ const (
 	TypeSchema  = "SCHEMA"
 	TypeVerdict = "VERDICT"
 	TypeAttest  = "ATTEST"
+	TypePending = "PENDING"
 	TypeCost    = "COST"
 	TypeState   = "STATE"
 	TypeLog     = "LOG"
@@ -52,10 +53,17 @@ func (k Key) Zero() bool { return k.EntityType == "" && k.IdentityKey == "" }
 type Message struct {
 	Type string `json:"type"`
 
-	// OPEN
-	StepID string         `json:"step_id,omitempty"`
-	RunID  string         `json:"run_id,omitempty"`
-	Config map[string]any `json:"config,omitempty"`
+	// OPEN. Pending is present only when the runner is collecting work a
+	// previous session left in flight (SPEC §5, ADR-038).
+	StepID  string         `json:"step_id,omitempty"`
+	RunID   string         `json:"run_id,omitempty"`
+	Config  map[string]any `json:"config,omitempty"`
+	Pending *PendingRef    `json:"pending,omitempty"`
+
+	// PENDING (adapter → runner): the provider-opaque handle for work the
+	// session could not answer yet (SPEC §5, ADR-038). Detail is shared
+	// with COST.
+	Token string `json:"token,omitempty"`
 
 	// RECORD, VERDICT, COST
 	Key        *Key               `json:"key,omitempty"`
@@ -88,6 +96,11 @@ type Message struct {
 	// LOG
 	Level string `json:"level,omitempty"`
 	Msg   string `json:"msg,omitempty"`
+}
+
+// PendingRef names in-flight work on an OPEN (SPEC §5, ADR-038).
+type PendingRef struct {
+	Token string `json:"token"`
 }
 
 // Payload is a RECORD's raw-response attachment (SPEC §5, ADR-030).
@@ -155,6 +168,11 @@ func Verdict(key Key, pass bool, reason string) Message {
 // Attest builds an ATTEST message (SPEC §5, ADR-036).
 func Attest(key Key, status, reason string) Message {
 	return Message{Type: TypeAttest, Key: &key, Status: status, Reason: reason}
+}
+
+// Pending builds a PENDING message (SPEC §5, ADR-038).
+func Pending(token string, detail map[string]any) Message {
+	return Message{Type: TypePending, Token: token, Detail: detail}
 }
 
 // Cost builds a COST message. key may be nil for step-level costs.
