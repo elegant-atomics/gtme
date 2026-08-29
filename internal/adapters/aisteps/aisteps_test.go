@@ -400,7 +400,7 @@ func TestSystemPromptShapeIsGeneratedFromSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys := a.systemPrompt(sh)
+	sys := a.systemPrompt(sh, cfg)
 	for _, want := range []string{
 		`"identity_key": "<copied exactly from the input>"`,
 		`"pass": true or false`,
@@ -425,7 +425,7 @@ func TestSystemPromptShapeIsGeneratedFromSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys = c.systemPrompt(sh)
+	sys = c.systemPrompt(sh, config{})
 	if !strings.Contains(sys, `"first_line": "<string>", "ps_line": "<string>"`) || strings.Contains(sys, `"pass"`) {
 		t.Errorf("default compose shape:\n%s", sys)
 	}
@@ -488,4 +488,16 @@ func TestDeclaredValidationMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+// splitRecorder keeps every ai.Request an engine was handed.
+type splitRecorder struct {
+	inner ai.Engine
+	reqs  []ai.Request
+}
+
+func (s *splitRecorder) Name() string { return s.inner.Name() }
+func (s *splitRecorder) Complete(ctx context.Context, req ai.Request) (ai.Response, error) {
+	s.reqs = append(s.reqs, req)
+	return s.inner.Complete(ctx, req)
 }

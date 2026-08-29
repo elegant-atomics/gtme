@@ -271,6 +271,17 @@ AI steps are entity-agnostic (`"entity_type": "*"` in the manifest — any
 adapter may declare it): inside a company pipeline they plan and validate
 against the company registry.
 
+**Prompt assembly (ADR-035).** The operator's prompt goes first, then the
+batch — one compact JSON line per record, long lines wrapped at
+structural breaks. Fields the pipeline *fetched* from the outside world
+(`http/enrich` pages, provider bios; the runner knows from provenance)
+leave the JSON line and arrive as a delimited block labelled in-band as
+subject-supplied data, with any delimiter inside the page neutralised
+first — so a homepage that says "ignore your instructions" reads as
+evidence, not task. Default on; `with: {fence: false}` opts out. The
+prompt/records split is exposed to the engine so a cache breakpoint sits
+between them (the API engine caches the shared half).
+
 ### `sql/filter`
 
 Same mechanism as `sql/enrich`, producing verdicts: return a `pass`

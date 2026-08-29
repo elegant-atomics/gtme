@@ -21,6 +21,11 @@ type fixtureEngine struct {
 	mu        sync.Mutex
 	responses []string
 	next      int
+	// logPath, when set (GTME_AI_FIXTURE_LOG), receives one JSON line per
+	// request — system, shared, payload, prompt — so a test can assert what
+	// the engine was actually shown (SPEC §11 M14: "the AI fixture engine
+	// receives compact, fenced records").
+	logPath string
 }
 
 // FixtureAuto is the sentinel that makes the fixture engine answer correctly.
@@ -56,9 +61,28 @@ func newFixtureEngine(getenv func(string) string) (Engine, error) {
 	if err := json.Unmarshal(raw, &responses); err != nil {
 		return nil, fmt.Errorf("ai: fixture %s must be a JSON array of strings: %w", path, err)
 	}
-	e := &fixtureEngine{responses: responses}
+	e := &fixtureEngine{responses: responses, logPath: envOverride(getenv, "GTME_AI_FIXTURE_LOG")}
 	fixtures[path] = e
 	return e, nil
+}
+
+// logRequest appends the request to the fixture log, best-effort.
+func (e *fixtureEngine) logRequest(req Request) {
+	if e.logPath == "" {
+		return
+	}
+	line, err := json.Marshal(map[string]string{
+		"system": req.System, "shared": req.Shared, "payload": req.Payload, "prompt": req.Prompt,
+	})
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(e.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(line, '\n'))
 }
 
 func (e *fixtureEngine) Name() string { return EngineFixture }
@@ -67,6 +91,7 @@ func (e *fixtureEngine) Name() string { return EngineFixture }
 // script runs out.
 func (e *fixtureEngine) Complete(ctx context.Context, req Request) (Response, error) {
 	e.mu.Lock()
+	e.logRequest(req)
 	if len(e.responses) == 0 {
 		e.mu.Unlock()
 		return Response{}, fmt.Errorf("ai: fixture script is empty")

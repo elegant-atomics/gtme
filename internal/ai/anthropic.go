@@ -43,7 +43,7 @@ func (e *apiEngine) Complete(ctx context.Context, req Request) (Response, error)
 		Model:     anthropic.Model(model),
 		MaxTokens: int64(maxTokens),
 		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(req.Prompt)),
+			anthropic.NewUserMessage(userBlocks(req)...),
 		},
 	}
 	if req.System != "" {
@@ -80,4 +80,17 @@ func (e *apiEngine) Complete(ctx context.Context, req Request) (Response, error)
 		return res, fmt.Errorf("ai: response hit max_tokens (%d) before finishing; raise max_tokens or lower batch_size", maxTokens)
 	}
 	return res, nil
+}
+
+// userBlocks renders the user turn. When the adapter exposed the
+// shared/payload split (ADR-035) the two halves go as separate text blocks
+// with a cache breakpoint on the shared one — every batch of a step then
+// re-reads the operator's prompt from cache and pays only for its records.
+func userBlocks(req Request) []anthropic.ContentBlockParamUnion {
+	if req.Shared == "" || req.Payload == "" {
+		return []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(req.Prompt)}
+	}
+	shared := anthropic.NewTextBlock(req.Shared)
+	shared.OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	return []anthropic.ContentBlockParamUnion{shared, anthropic.NewTextBlock(req.Payload)}
 }

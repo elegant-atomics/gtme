@@ -27,8 +27,17 @@ const DefaultMaxTokens = 8192
 
 // Request is one completion.
 type Request struct {
-	System    string
-	Prompt    string
+	System string
+	// Prompt is the whole user turn — Shared then Payload in the stated
+	// order (SPEC §10.3, ADR-035) — for engines that take one string.
+	Prompt string
+	// Shared and Payload are the two halves of Prompt, exposed so an engine
+	// can place a cache breakpoint between them and so the order is A/B-able
+	// without touching assembly: Shared is what every batch of a step sends
+	// alike (the operator's prompt), Payload is this batch's records. Either
+	// may be empty, in which case Prompt is authoritative.
+	Shared    string
+	Payload   string
 	Model     string
 	MaxTokens int
 	// Keys are the identity keys of the records in this batch. Engines use them

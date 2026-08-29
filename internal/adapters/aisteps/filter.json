@@ -22,6 +22,15 @@
       "provides": {
         "type": "object",
         "description": "The step's derived provides schema (ADR-033). Injected by the runner from the step-level provides: key — never authored inside with:."
+      },
+      "fence": {
+        "type": "boolean",
+        "description": "ADR-035: wrap externally fetched fields in a delimiter labelled as subject-supplied data (default true); false opts out"
+      },
+      "fetched": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "The batch's externally fetched fields (ADR-035). Injected by the runner from provenance — never authored inside with:."
       }
     }
   },

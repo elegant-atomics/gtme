@@ -64,6 +64,12 @@ const AIPrefix = "ai/"
 // second instance: never authored inside with:.
 const ProvidesConfigKey = "provides"
 
+// FetchedConfigKey is the OPEN config key the runner injects the names of
+// externally fetched fields under (SPEC §10.3, ADR-035), computed from the
+// batch's provenance so the AI adapter can fence them. Never authored
+// inside with:.
+const FetchedConfigKey = "fetched"
+
 // IsAI reports an AI step (ADR-026): the adapters that derive their provides
 // from a step-level declaration (SPEC §7, ADR-033).
 func (m *Manifest) IsAI() bool { return strings.HasPrefix(m.ID, AIPrefix) }

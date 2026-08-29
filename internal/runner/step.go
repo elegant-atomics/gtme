@@ -25,7 +25,10 @@ type item struct {
 	identityID string
 	key        protocol.Key
 	fields     map[string]any
-	idem       string // deliver steps
+	// fetched names the projected fields whose provenance is an external
+	// fetch (SPEC §10.3, ADR-035) — what an AI step fences.
+	fetched []string
+	idem    string // deliver steps
 
 	advanced bool // state moved to this step
 	verdict  bool // a VERDICT arrived (filter steps)
@@ -201,6 +204,13 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID strin
 		identityID: identityID,
 		key:        protocol.Key{EntityType: rec.Identity.EntityType, IdentityKey: rec.Identity.IdentityKey},
 		fields:     fields,
+	}
+	if isAIStep(st) {
+		for name, v := range rec.Values {
+			if r.fetchedSource(v.Source) {
+				it.fetched = append(it.fetched, name)
+			}
+		}
 	}
 
 	skipped, err := r.cacheSkip(ctx, st, it)
@@ -546,7 +556,7 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 	}
 
 	msgs := make([]protocol.Message, 0, len(items)+2)
-	msgs = append(msgs, r.openMessage(st))
+	msgs = append(msgs, r.openMessage(st, items))
 	for _, it := range items {
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
 			return err
