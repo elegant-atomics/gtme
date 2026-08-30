@@ -217,3 +217,29 @@ a probed CSV header are all covered by existing DECISIONS.md entries that
 judge them spec-invisible under ADR-010's litmus, and `test/conformance`'s
 schema check allowlists them explicitly with that reasoning inline —
 re-confirmed here, not re-litigated.
+
+## (b) Spec gap queued from Campaign 1 (2026-08-30) — proposed, not applied
+
+4. **Apollo's people search no longer serves API callers the §10.2 shape.**
+   Observed live (VALIDATION.md, 2026-08-30): the endpoint the reference
+   binding calls, `POST /api/v1/mixed_people/search`, returns HTTP 422
+   `SEARCH.ROUTING.LEGACY_PEOPLE_SEARCH_DEPRECATED`; the designated
+   replacement, `mixed_people/api_search`, returns obfuscated rows —
+   `last_name_obfuscated`, `has_email`/`has_direct_phone` booleans in
+   place of values, organization `name` + `has_*` only, no `pagination`
+   object — and reveal moved to Apollo's per-credit match/enrichment
+   surface. The shipped `apollo-search` binding's provides (email,
+   last_name, linkedin_url, city/state/country, company fields) cannot be
+   satisfied by the search call alone. The code is faithful to §10.2;
+   the vendor changed the contract underneath it.
+   **Proposed direction:** split the capability along the vendor's own
+   line — `apollo/search` becomes an honest masked *source* (apollo.id,
+   first_name, title, company_name, the `has_*` signals; $0, new
+   pagination shape), and a new `apollo/enrich` binding wraps the match
+   endpoint (needs apollo.id or name+company, provides the revealed
+   fields, per-credit cost declared) — which is the composition the spec
+   already prefers (fetch once, judge many; pay only past the filter).
+   Spec impact: §10.2, the `apollo-search` reference binding + fixtures
+   (re-recorded from the new shape), cost table. Queued for a session
+   packet; not applied, per SPEC §12(a) — Campaign 1 stays blocked on
+   this decision.
