@@ -1,56 +1,59 @@
 {
+  "config": {"query": "vp marketing"},
   "responses": [
     {
-      "match": "POST /api/v1/mixed_people/search",
+      "match": "POST /api/v1/mixed_people/api_search",
       "status": 200,
       "body": {
+        "total_entries": 2,
         "people": [
           {
             "id": "5f3b0c1a2d",
             "first_name": "Jane",
-            "last_name": "Doe",
-            "name": "Jane Doe",
+            "last_name_obfuscated": "D.",
             "title": "VP Marketing",
-            "seniority": "vp",
-            "email": "jane.doe@acme.com",
-            "email_status": "verified",
-            "linkedin_url": "http://www.linkedin.com/in/jane-doe",
-            "city": "Austin",
-            "state": "Texas",
-            "country": "United States",
+            "has_email": true,
+            "has_direct_phone": false,
+            "has_city": true,
+            "has_state": true,
+            "has_country": true,
+            "last_refreshed_at": "2026-08-01T00:00:00Z",
             "organization": {
-              "id": "org_1",
               "name": "Acme Inc",
-              "website_url": "http://www.acme.com",
-              "primary_domain": "acme.com",
-              "linkedin_url": "http://www.linkedin.com/company/acme",
-              "industry": "software",
-              "estimated_num_employees": 120
+              "has_industry": true,
+              "has_phone": false,
+              "has_city": true,
+              "has_state": true,
+              "has_country": true,
+              "has_zip_code": true,
+              "has_revenue": true,
+              "has_employee_count": true
             }
           },
           {
             "id": "6a4c1d2b3e",
             "first_name": "Bob",
-            "last_name": "Stone",
-            "name": "Bob Stone",
+            "last_name_obfuscated": "S.",
             "title": "Head of Growth",
-            "email": "email_not_unlocked@domain.com",
-            "email_status": "locked",
-            "linkedin_url": "http://www.linkedin.com/in/bob-stone",
+            "has_email": false,
+            "has_direct_phone": false,
+            "has_city": false,
+            "has_state": false,
+            "has_country": true,
+            "last_refreshed_at": "2026-07-15T00:00:00Z",
             "organization": {
-              "name": "Globex",
-              "website_url": "https://www.globex.io",
-              "primary_domain": "globex.io",
-              "estimated_num_employees": 80
+              "name": "Grove Labs",
+              "has_industry": true,
+              "has_phone": false,
+              "has_city": false,
+              "has_state": false,
+              "has_country": true,
+              "has_zip_code": false,
+              "has_revenue": false,
+              "has_employee_count": false
             }
           }
-        ],
-        "pagination": {
-          "page": 1,
-          "per_page": 2,
-          "total_entries": 2,
-          "total_pages": 1
-        }
+        ]
       }
     }
   ]

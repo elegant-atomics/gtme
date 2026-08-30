@@ -1,0 +1,120 @@
+# apollo/enrich — the paid half of the Apollo split (ADR-043): reveal one
+# masked person via People Match. apollo/search (masked, $0) provides
+# `apollo.id`; this binding spends one credit per record to return the
+# revealed surface the old search used to carry — email, real last name,
+# linkedin, location, and the organization's value fields. The canonical
+# composition gates it `when: <filter>.passed`, so credits are spent only
+# on records that survived judgment.
+#
+# A matched person can still legitimately lack an email (the vendor knows
+# the person but holds no address) — extraction treats a missing value as
+# absent, never a failure; a downstream deliver's `on_missing` decides.
+#
+# Endpoint: POST https://api.apollo.io/api/v1/people/match
+# Auth:     X-Api-Key header
+# Docs:     https://docs.apollo.io/reference/people-enrichment
+
+id: apollo/enrich
+version: 1
+role: enrich
+entity_type: person
+
+needs:
+  type: object
+  required: [apollo.id]
+  properties:
+    apollo.id: { type: string }
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    email: { type: string }
+    email_status: { type: string }
+    first_name: { type: string }
+    last_name: { type: string }
+    full_name: { type: string }
+    title: { type: string }
+    seniority: { type: string }
+    linkedin_url: { type: string }
+    city: { type: string }
+    state: { type: string }
+    country: { type: string }
+    company_name: { type: string }
+    company_domain: { type: string }
+    company_website: { type: string }
+    company_linkedin_url: { type: string }
+    company_industry: { type: string }
+    company_employees: { type: integer }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    reveal_personal_emails:
+      type: boolean
+      description: Ask Apollo to include personal emails (their flag; off by default)
+    base_url:
+      type: string
+      default: "https://api.apollo.io"
+      description: Override the API host (testing)
+
+credentials: [APOLLO_API_KEY]
+freshness_days: 30
+cost_estimate_usd: 0.01
+keep_payloads: true
+payload_ttl_days: 30
+
+auth:
+  type: header
+  name: X-Api-Key
+  env: APOLLO_API_KEY
+
+request:
+  method: POST
+  url: "{{config.base_url}}/api/v1/people/match"
+  headers:
+    Cache-Control: no-cache
+  body:
+    id: "{{record.apollo.id}}"
+    reveal_personal_emails: "{{config.reveal_personal_emails}}"
+
+extract:
+  records: person
+  fields:
+    first_name: first_name
+    last_name: last_name
+    full_name: name
+    title: title
+    seniority: { path: seniority, transform: lower }
+    email:
+      path: email
+      transform: email
+      absent: ["email_not_unlocked@domain.com"]
+    email_status: { path: email_status, transform: lower }
+    linkedin_url: { path: linkedin_url, transform: linkedin }
+    city: city
+    state: state
+    country: country
+    company_name: organization.name
+    company_website: organization.website_url
+    company_linkedin_url: { path: organization.linkedin_url, transform: linkedin_url }
+    company_industry: organization.industry
+    company_domain:
+      paths: [organization.primary_domain, organization.website_url]
+      transform: domain
+    company_employees:
+      path: organization.estimated_num_employees
+      absent: [0]
+
+errors:
+  "429": { verdict: retry, reason: "Apollo rate limit" }
+  "5xx": { verdict: retry, reason: "Apollo transient error" }
+
+retry:
+  max_attempts: 4
+  backoff_seconds: 2
+
+cost:
+  per: record
+  amount_usd: 0.01

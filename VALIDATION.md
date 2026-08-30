@@ -131,11 +131,16 @@ source:
 steps:
   - id: icp-filter
     use: ai/filter
-    uses: [full_name, title, company_domain]
+    uses: [first_name, title, company_name]   # masked fields only (ADR-043)
     with:
       prompt: >
         Keep only contacts likely to own outbound tooling decisions.
       batch_size: 25
+
+  - id: reveal
+    use: apollo/enrich
+    when: icp-filter.passed
+    cache: 30d
 
   - id: linkedin
     use: harvest/profile
