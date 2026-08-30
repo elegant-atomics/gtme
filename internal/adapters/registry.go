@@ -153,7 +153,10 @@ func Resolve(id string) (*Resolved, error) {
 				if res, berr := resolveBindingDir(root, id); berr != nil || res != nil {
 					return res, berr
 				}
-				tried = append(tried, manifestPath)
+				// Name both shapes the loader accepts: an agent read this line
+				// as "manifest.json only" and had to dig the binding contract
+				// out of the binary (VALIDATION.md, 2026-08-29).
+				tried = append(tried, filepath.Join(dir, "{manifest.json + run, or binding.yaml}"))
 				continue
 			}
 			m, err := ParseManifest(raw)
@@ -182,6 +185,9 @@ func Resolve(id string) (*Resolved, error) {
 	}
 	for _, t := range tried {
 		fmt.Fprintf(msg, "\n  looked for: %s", t)
+	}
+	if len(tried) > 0 {
+		msg.WriteString("\n  an external adapter is a directory named after its id (slashes → dashes) holding manifest.json + run, or a binding.yaml (see `gtme help --bindings`)")
 	}
 	return nil, errNotFound{msg.String()}
 }
