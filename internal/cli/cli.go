@@ -85,6 +85,8 @@ func Run(ctx context.Context, env Env) int {
 	case "help", "--help", "-h":
 		if len(rest) == 1 && rest[0] == "--agent" {
 			err = cmdHelpAgent(env)
+		} else if len(rest) == 1 && rest[0] == "--bindings" {
+			err = cmdHelpBindings(env)
 		} else {
 			usage(env.Stderr)
 		}
@@ -148,6 +150,7 @@ Usage:
   gtme groups remove NAME KEY...
   gtme vacuum                        evict expired payloads (nothing else)
   gtme help --agent                  machine-readable CLI + adapter surface
+  gtme help --bindings               the binding contract: schema, discovery path, a reference binding
   gtme version
 
 This is the entire v0 verb set (SPEC.md §8, ADR-005). uses:, cache:, when:

@@ -32,7 +32,10 @@ binding YAML, so don't ask for one — graduate instead.
 [`spec/bindings/apollo-search/`](spec/bindings/apollo-search/) is the
 fullest example (auth, body templating, pagination, sentinel values,
 LinkedIn shape-routing) — and validate against
-[`spec/binding-schema.json`](spec/binding-schema.json). Layout:
+[`spec/binding-schema.json`](spec/binding-schema.json). `gtme help
+--bindings` prints that schema, the discovery path and the smallest
+shipped binding as one document — the same contract, for an agent
+authoring one. Layout:
 
 ```
 spec/bindings/<vendor>-<operation>/

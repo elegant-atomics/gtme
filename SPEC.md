@@ -1946,7 +1946,8 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M18 — `help --bindings` (ADR-041; §8). Queued 2026-08-29.** The
+- **M18 — `help --bindings` (ADR-041; §8). Built 2026-08-30
+  (changelog v0.24).** The
   second agent surface in `internal/cli`, regenerated from the embedded
   schema and bindings; `help --agent` gains its pointer.
   ✅ E2E, offline: `gtme help --bindings` is JSON whose `schema` equals
@@ -2130,6 +2131,17 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.24 — 2026-08-30 (M18 build: `help --bindings`, built)
+**Changed:** §11 M18 marked built; no normative text changed — v0.23's
+§8 contract is shipped behaviour, covered by M18's acceptance.
+Behavioural notes from the build: the document is one JSON object with
+the schema spliced in verbatim as its last member (an encoder would
+compact it); the reference binding is whichever shipped binding is
+smallest by bytes, with its fixtures file beside it; the discovery
+section prints the live search path; ADR-042's `adapters` verbs appear
+under a `registry` member flagged as queued until M19 ships them, so
+the document never names a verb this binary lacks.
 
 ### v0.23 — 2026-08-29 (ADR-041/042 reconciliation: the adapter surface; builds queued as M18 and M19)
 **Added:** §8 `gtme help --bindings` (the second agent surface,

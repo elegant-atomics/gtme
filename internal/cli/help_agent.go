@@ -23,6 +23,7 @@ func cmdHelpAgent(env Env) error {
 		Adapters: agentAdapters(),
 		Examples: agentExamples,
 		Ledger:   agentLedger(),
+		Bindings: agentBindingsPointer,
 	}
 	enc := json.NewEncoder(env.Stdout)
 	if err := enc.Encode(doc); err != nil {
@@ -39,6 +40,21 @@ type agentDoc struct {
 	// shapes (ADR-037), so an agent can write a sql/* step or a {query:}
 	// value without reading spec/ledger.sql.
 	Ledger agentLedgerDoc `json:"ledger"`
+	// Bindings is the one pointer SPEC §8 allows this document to carry about
+	// the binding contract (ADR-041): the contract itself lives in
+	// `gtme help --bindings`, so the pipeline document stays short.
+	Bindings agentPointer `json:"bindings"`
+}
+
+// agentPointer names another surface and what it is for.
+type agentPointer struct {
+	See  string `json:"see"`
+	Does string `json:"does"`
+}
+
+var agentBindingsPointer = agentPointer{
+	See:  "gtme help --bindings",
+	Does: "when the adapters listed here do not cover an API you need: the binding contract — the schema a binding.yaml validates against, the discovery path (~/.gtme/adapters/<id, slashes → dashes>/binding.yaml), one reference binding verbatim, and the fixtures expectation. A binding is declarative YAML the engine interprets; `gtme plan` resolves it like a built-in. This document carries none of that contract.",
 }
 
 type agentVerb struct {
@@ -62,6 +78,7 @@ var agentVerbs = []agentVerb{
 	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
 	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
 	{"gtme help --agent", "print this document"},
+	{"gtme help --bindings", "print the binding contract — schema, discovery path, a reference binding, the fixtures expectation — for authoring an adapter this binary does not ship (see `bindings` below)"},
 }
 
 type agentAdapter struct {

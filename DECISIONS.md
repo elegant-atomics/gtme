@@ -2359,3 +2359,39 @@ active, paused, too few steps, an unreferenced variable, an unfilled
 variant, an unreadable shape and an unreadable target.
 **Spec impact:** None beyond v0.21 (marked built as v0.22).
 
+
+### 2026-08-30 — M18 internals: `help --bindings` (ADR-041)
+
+**Question:** How does the document carry the schema byte for byte, which
+shipped binding is "the reference", and what does it say about registry
+verbs that ADR-042 accepted but M19 has not built?
+**Choice:** (1) The document is assembled as a struct and encoded with
+HTML escaping off, then `spec/binding-schema.json` is spliced in as the
+last member from the embedded bytes — `encoding/json` compacts a
+`RawMessage`, and §11 M18 wants the artifact identical. The e2e test
+decodes that member back into a `RawMessage` (which preserves the bytes)
+and compares it to the file. (2) The reference is chosen at run time as
+the smallest `binding.yaml` under the embedded `spec/bindings/` (today
+`attio/assert`, a deliver binding), printed verbatim with its
+`fixtures/conformance.json`, plus its id, role, credentials and the
+directory name it installs under; nothing is hand-copied, so the example
+can never drift from what the binary validates. (3) The verbs that touch
+a binding today (`plan`, `run --simulate`, `run --dry-run`, `freeze
+--bundle`, `help --bindings`) are the `verbs` member; ADR-042's
+`adapters` verbs are a separate `registry` member whose `status` says
+they are queued for M19 — an agent given this document must not be
+told to call a verb the binary lacks. M19 moves them into `verbs` and
+drops the flag. (4) `discovery` prints the rule (id with slashes → dashes,
+nested also accepted, the id inside must match), the two environment
+variables that alter the path, and the live `adapters.SearchPath()`. (5)
+`help --agent` gains a `bindings: {see, does}` member and the verb, and
+nothing else; the e2e test asserts it does not carry the schema.
+**Why:** The acceptance is the round-trip: the test validates the printed
+reference against the printed schema in-process, installs it on the
+printed path under a shifted vendor prefix (so the built-in cannot be
+what resolves), and `gtme plan` accepts a pipeline that uses it, with
+only the credentials the document names set. ~170 LOC, not ADR-041's
+estimated ~80 — the difference is the discovery, fixtures and verbs
+sections, without which the round-trip criterion is not met by the
+schema alone.
+**Spec impact:** None beyond v0.23 (marked built as v0.24).
