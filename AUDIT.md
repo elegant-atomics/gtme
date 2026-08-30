@@ -173,6 +173,22 @@ takes the conservative reading and the question is queued here.
    manifests declare it, and the planner keys on the declaration rather
    than the id prefix — so external adapters can opt in.
 
+## (b) Spec gap queued from the agent round-trip (2026-08-29) — proposed, not applied
+
+3. **§8's `help --agent` contents omit the binding surface.** The doc
+   MUST contain verbs, manifests, three examples, and the ledger read
+   surface — nothing about bindings: that they exist, the
+   `~/.gtme/adapters/<name>/binding.yaml` discovery path, or the
+   `spec/binding-schema.json` contract. A capable agent (VALIDATION.md,
+   2026-08-29) reached for `strings` on the binary to find it. The code is
+   faithful to §8; §8 is short.
+   **Proposed diff:** §8 gains a second agent surface, `gtme help
+   --bindings` — the binding schema, the discovery path, and one reference
+   binding as a worked example — kept separate from `help --agent` so the
+   common pipeline doc does not carry a contract only adapter authors need;
+   `help --agent` gains one sentence pointing at it. The verb table in §8
+   lists both.
+
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 
 SPEC §10 (item 8, added by Phase 2's ADR-009 reconciliation) documents a

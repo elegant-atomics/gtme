@@ -390,3 +390,57 @@ simulate → plan → dry → arm → re-run.
   an `exclude:` gate is the pattern when even that re-spend matters.
 
 Zero divergences. Total spend for proving five milestones live: $0.016.
+
+### 2026-08-29 — Agent round-trip: a CRM list → filter → AI summary → CSV, from the CLI alone
+
+The §8 round-trip criterion tested for real rather than with the doc's own
+examples: a fresh agent session in a sealed directory — the `gtme` binary
+(main `34685b1`, M17), an initialised ledger, two secrets stored by the
+human beforehand (a CRM private-app token and a model key), no repo, no
+README, no SPEC — given a task in campaign terms: read every contact in a
+named CRM list, keep those with an engagement score above 20, write an AI
+summary of each one's profile and product usage, deliver email + summary
+to a CSV. Real API, real model, no send surface (`csv/deliver` only).
+
+Outcome, from the ledger: 16 runs, ~10 minutes. Fourteen were probes —
+the agent used gtme itself as its exploration harness (`probe-properties`,
+`probe-list`, `probe-search`×3 failed on the vendor's own 400s,
+`probe-search-wide`) before the real source. It **authored a source
+binding** for the CRM's search API (33 mapped properties, cursor
+pagination, retry rules, payloads retained), reproduced the list's own
+membership predicate server-side and checked the count against the list's
+reported size (561), snapshotted the >20 cut into a group by SQL
+(`groups add --query`) so the summarised set was a frozen decision,
+declared `provides: {summary: {}}` on `ai/compose` (landed namespaced),
+dry-ran, reviewed, edited the prompt, armed. 558 identities (three
+duplicate emails across contact records, noted by the agent), 7 above the
+cut, 7 rows delivered, $0.47 — all of it compose, every CRM read free.
+
+Findings:
+
+- **`help --agent` is silent on bindings** — the one route to an API gtme
+  has no adapter for. The agent found the contract by pulling the embedded
+  `spec/binding-schema.json` out of the binary with `strings` and wrote a
+  working binding from it blind. Not a code bug: §8 does not list the
+  binding surface among the doc's required contents. **Spec gap → AUDIT.md
+  (b)**, queued: §8 names a second surface, `gtme help --bindings` (the
+  schema, the discovery path, one reference binding), and `help --agent`
+  points at it.
+- **The unknown-adapter error named only `manifest.json`** though the
+  loader accepts `binding.yaml` in the same directory; the agent said that
+  line taught it the load path, and it pointed the wrong way. Code, fixed
+  in this commit: the message names both shapes and points at
+  `help --bindings`.
+- **Dry run → prompt edit → arm paid the judgments twice** ($0.24 + $0.23).
+  By design (ADR-039: a changed prompt is a different question) and worth
+  stating in the dry-run guidance: review the *judgments* on the dry run,
+  and expect a prompt edit to re-buy them.
+- The vendor-side facts an agent had to discover by probing (the
+  memberships endpoint returns only ids; search cannot filter on list
+  membership) are the argument for a shipped reference binding and for
+  the OpenAPI→binding codegen skill (ROADMAP); the binding the agent wrote
+  is the seed for the first.
+
+Zero divergences against a DECIDED section. The rest of the score sheet
+lives outside this repo.
+
