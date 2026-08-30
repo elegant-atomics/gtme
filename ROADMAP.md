@@ -184,7 +184,7 @@ bindings are reviewable, diffable data — which is what makes hosting
 third-party adapters safe at all. Recorded here so the marketplace
 conversation starts from that framing rather than rediscovering it.
 
-**Promoted as a registry (2026-08-29, ADR-042 — proposed).** Not a
+**Promoted as a registry (2026-08-29, ADR-042 — accepted 2026-08-30; build queued as M19).** Not a
 marketplace: an index file and a fetch verb. Bindings are URL-addressed
 and hash-pinned (`gtme adapters add github.com/…@ref`), nothing installs
 unverified (`adapters verify` runs the fixtures offline first), the

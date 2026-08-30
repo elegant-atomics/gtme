@@ -1307,8 +1307,8 @@ checks); §11 milestone M17; `spec/schemas/msg-preflight.schema.json`,
 `msg-open.schema.json`, `manifest.schema.json`.
 
 ### ADR-041: A second agent surface — `gtme help --bindings`
-**Status:** Proposed (2026-08-29 — from the agent round-trip finding,
-VALIDATION.md 2026-08-29 and AUDIT.md (b) item 3; Accepted on merge)
+**Status:** Accepted (2026-08-29 — from the agent round-trip finding,
+VALIDATION.md 2026-08-29 and AUDIT.md (b) item 3; human-approved 2026-08-30)
 **Context:** `gtme help --agent` is the document an agent is meant to work
 from alone (§8), and it says nothing about bindings — the one route to an
 API gtme has no adapter for. The first real round-trip proved both halves:
@@ -1340,8 +1340,8 @@ plan` resolves. ~80 LOC in `internal/cli`, no spec beyond §8.
 AUDIT.md (b) item 3 applied by it.
 
 ### ADR-042: Bindings live in a registry, not in the binary
-**Status:** Proposed (2026-08-29 — design conversation 2026-08-29;
-Accepted on merge)
+**Status:** Accepted (2026-08-29 — design conversation 2026-08-29;
+human-approved 2026-08-30)
 **Context:** The binary carries the floor — `csv/*`, `http/*`, `sql/*`,
 `ai/*`, `group/*` — plus four reference bindings that twin the Go vendor
 adapters. Every further vendor is a binding: a directory of YAML and
