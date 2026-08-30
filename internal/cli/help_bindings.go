@@ -19,7 +19,7 @@ import (
 // example, the fixtures expectation, and the verbs that touch bindings.
 // Regenerated from the embedded artifacts, never hand-maintained: the schema
 // is spliced in byte for byte, the reference is whichever shipped binding is
-// smallest, the search path is the live one.
+// fullest, the search path is the live one.
 //
 // Acceptance (SPEC §8): an agent given only this document must be able to
 // author a binding that `gtme plan` resolves — so everything an author needs
@@ -147,9 +147,13 @@ func bindingsSurface() (bindingsDoc, error) {
 	}, nil
 }
 
-// referenceBinding picks the smallest shipped binding (ADR-041: "the smallest
-// shipped one, verbatim") so the worked example is the least an author needs
-// to read, and it never drifts from what the binary actually validates.
+// referenceBinding picks the fullest shipped binding (ADR-041 as amended
+// 2026-08-30: "the fullest shipped one, verbatim") so the worked example
+// exercises the most of the schema — extraction, pagination, error verdicts —
+// and it never drifts from what the binary actually validates. (First built
+// as "smallest", which picked the deliver binding: the one role with no
+// extract surface, teaching least where the round-trip evidence says authors
+// write sources.)
 func referenceBinding() (bindingsReference, error) {
 	var (
 		bestName string
@@ -165,7 +169,7 @@ func referenceBinding() (bindingsReference, error) {
 		if err != nil {
 			return bindingsReference{}, fmt.Errorf("embedded %s: %w", name, err)
 		}
-		if bestRaw != nil && len(raw) >= len(bestRaw) {
+		if bestRaw != nil && len(raw) <= len(bestRaw) {
 			continue
 		}
 		bestName, bestRaw = name, raw
@@ -187,7 +191,7 @@ func referenceBinding() (bindingsReference, error) {
 		Role:        m.Role,
 		Directory:   strings.ReplaceAll(m.ID, "/", "-"),
 		Credentials: m.Credentials,
-		Does:        fmt.Sprintf("the smallest binding this binary ships, verbatim — a %s binding; its fixtures file follows. Installed on discovery.path under `%s/`, it resolves exactly as the embedded copy does.", m.Role, strings.ReplaceAll(m.ID, "/", "-")),
+		Does:        fmt.Sprintf("the fullest binding this binary ships, verbatim — a %s binding; its fixtures file follows. Installed on discovery.path under `%s/`, it resolves exactly as the embedded copy does.", m.Role, strings.ReplaceAll(m.ID, "/", "-")),
 		BindingYAML: string(bestRaw),
 		Conformance: string(bestFix),
 	}, nil

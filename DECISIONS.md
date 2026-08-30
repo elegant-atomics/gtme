@@ -1324,7 +1324,10 @@ pointing at the second surface. **`gtme help --bindings`** prints, as one
 JSON document: the binding schema (`spec/binding-schema.json`, embedded,
 byte-identical), the discovery path (`~/.gtme/adapters/<name>/binding.yaml`,
 `$GTME_ADAPTER_PATH`, id → directory naming), one reference binding as a
-worked example (the smallest shipped one, verbatim), the conformance
+worked example (the fullest shipped one, verbatim; amended 2026-08-30 —
+first written "smallest", which picked the deliver binding: the one role
+with no extract surface, so the worked example taught least exactly
+where the round-trip evidence says authors write sources), the conformance
 expectation (fixtures beside the binding; `gtme run --simulate` serves
 them), and — once ADR-042 lands — the `adapters add / search / verify`
 verbs. Regenerated from embedded artifacts, never hand-maintained, like
@@ -2371,8 +2374,12 @@ last member from the embedded bytes — `encoding/json` compacts a
 `RawMessage`, and §11 M18 wants the artifact identical. The e2e test
 decodes that member back into a `RawMessage` (which preserves the bytes)
 and compares it to the file. (2) The reference is chosen at run time as
-the smallest `binding.yaml` under the embedded `spec/bindings/` (today
-`attio/assert`, a deliver binding), printed verbatim with its
+the fullest `binding.yaml` under the embedded `spec/bindings/` (today
+`apollo/search`, a source binding; amended 2026-08-30 — first built as
+ADR-041's "smallest", which picked `attio/assert`: deliver is the one
+role exempt from extract.records/fields, so the example omitted
+extraction, pagination and error verdicts, the parts the round-trip's
+source-authoring agent actually needed), printed verbatim with its
 `fixtures/conformance.json`, plus its id, role, credentials and the
 directory name it installs under; nothing is hand-copied, so the example
 can never drift from what the binary validates. (3) The verbs that touch
