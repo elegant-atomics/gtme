@@ -168,6 +168,15 @@ enrichment while it's fresh. Raw vendor responses are retained (bounded,
 TTL'd, evictable) so improving an extraction back-fills from payloads
 you already paid for — at zero vendor spend.
 
+## Install
+
+Prebuilt binaries for macOS and Linux are on the
+[releases page](https://github.com/elegant-atomics/gtme/releases) — verify
+against `checksums.txt`, untar, put `gtme` on your PATH, `gtme init`.
+Building from source is `git clone` + `./install.sh` (Go 1.24+), which
+also installs the repo's example external adapters so the README
+quickstart works offline.
+
 ## The adapters
 
 What ships today — see **[ADAPTERS.md](ADAPTERS.md)** for each one's
