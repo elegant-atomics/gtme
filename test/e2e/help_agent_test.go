@@ -35,6 +35,11 @@ func TestHelpAgentSurface(t *testing.T) {
 		t.Fatalf("help --agent output must be JSON: %v\n%s", err, res.stdout)
 	}
 
+	// The runner-owned sql steps are first-class in the doc (deferred (a)
+	// item, 2026-08-30): plan resolves them, so the doc lists them.
+	contains(t, res.stdout, "sql/filter", "help --agent sql_steps")
+	contains(t, res.stdout, "sql/transform", "help --agent sql_steps")
+
 	if len(doc.Examples) != 3 {
 		t.Errorf("examples = %d, want exactly 3", len(doc.Examples))
 	}

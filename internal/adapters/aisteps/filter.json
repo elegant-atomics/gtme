@@ -6,22 +6,43 @@
   "needs": "dynamic",
   "config_schema": {
     "type": "object",
-    "required": ["prompt"],
+    "required": [
+      "prompt"
+    ],
     "additionalProperties": false,
     "properties": {
-      "prompt": {"type": "string", "description": "What to keep, in the operator's words"},
-      "batch_size": {"type": "integer", "minimum": 1},
-      "engine": {"type": "string", "enum": ["api", "claude-code"]},
-      "model": {"type": "string"},
-      "max_tokens": {"type": "integer", "minimum": 256},
+      "prompt": {
+        "type": "string",
+        "description": "What to keep, in the operator's words"
+      },
+      "batch_size": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "engine": {
+        "type": "string",
+        "enum": [
+          "api",
+          "claude-code"
+        ]
+      },
+      "model": {
+        "type": "string"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 256
+      },
       "fields": {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {
+          "type": "string"
+        },
         "description": "Restrict what the model sees to these fields (default: everything known)"
       },
       "provides": {
         "type": "object",
-        "description": "The step's derived provides schema (ADR-033). Injected by the runner from the step-level provides: key — never authored inside with:."
+        "description": "The step's derived provides schema (ADR-033). Injected by the runner from the step-level provides: key \u2014 never authored inside with:."
       },
       "fence": {
         "type": "boolean",
@@ -33,11 +54,16 @@
       },
       "fetched": {
         "type": "array",
-        "items": {"type": "string"},
-        "description": "The batch's externally fetched fields (ADR-035). Injected by the runner from provenance — never authored inside with:."
+        "items": {
+          "type": "string"
+        },
+        "description": "The batch's externally fetched fields (ADR-035). Injected by the runner from provenance \u2014 never authored inside with:."
       }
     }
   },
   "batch": true,
-  "credentials_optional": ["ANTHROPIC_API_KEY"]
+  "credentials_optional": [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_WORKSPACE_ID"
+  ]
 }
