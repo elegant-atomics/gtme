@@ -2165,14 +2165,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.26 — 2026-08-30 (ADR-043 packet: the Apollo split — PROPOSED, not yet accepted)
-**Changed (proposed):** §10 item 2 rewritten (apollo/search masked, per
+### v0.26 — 2026-08-30 (ADR-043 reconciliation: the Apollo split; build queued as M20)
+**Changed:** §10 item 2 rewritten (apollo/search masked, per
 the vendor's 2026-08-30 withdrawal) and item 2a added (apollo/enrich,
 `people/match`, per-credit reveal); §9's canonical example gains the
 reveal step — filter on free fields, pay past the filter; §11 milestone
 M20. AUDIT.md (b) item 4 is applied by this diff.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M20 is queued.
 
 ### v0.25 — 2026-08-30 (M19 build: the bindings registry, built)
 **Changed:** §11 M19 marked built; no normative text changed — v0.23's

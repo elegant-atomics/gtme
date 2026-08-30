@@ -218,7 +218,7 @@ judge them spec-invisible under ADR-010's litmus, and `test/conformance`'s
 schema check allowlists them explicitly with that reasoning inline —
 re-confirmed here, not re-litigated.
 
-## (b) Spec gap queued from Campaign 1 (2026-08-30) — proposed, not applied
+## (b) Spec gap queued from Campaign 1 (2026-08-30) — approved and applied (ADR-043, SPEC v0.26)
 
 4. **Apollo's people search no longer serves API callers the §10.2 shape.**
    Observed live (VALIDATION.md, 2026-08-30): the endpoint the reference

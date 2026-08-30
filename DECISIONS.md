@@ -2450,9 +2450,8 @@ source and pin, and a frozen bundle carries `.source.json`.
 **Spec impact:** None beyond v0.23 (marked built as v0.25).
 
 ### ADR-043: Apollo splits along the vendor's own line — masked search, paid reveal
-**Status:** Proposed (2026-08-30 — from Campaign 1's stop, VALIDATION.md
-2026-08-30 and AUDIT.md (b) item 4; human approved the direction in
-session; Accepted on merge)
+**Status:** Accepted (2026-08-30 — from Campaign 1's stop, VALIDATION.md
+2026-08-30 and AUDIT.md (b) item 4; human-approved 2026-08-30)
 **Context:** Apollo withdrew the value-bearing search response from API
 callers: `POST /api/v1/mixed_people/search` returns HTTP 422
 (`LEGACY_PEOPLE_SEARCH_DEPRECATED`); its designated replacement
