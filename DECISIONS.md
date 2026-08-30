@@ -1306,6 +1306,107 @@ JSON" — one file, one fixture, the exposure the adapter already carries.
 checks); §11 milestone M17; `spec/schemas/msg-preflight.schema.json`,
 `msg-open.schema.json`, `manifest.schema.json`.
 
+### ADR-041: A second agent surface — `gtme help --bindings`
+**Status:** Proposed (2026-08-29 — from the agent round-trip finding,
+VALIDATION.md 2026-08-29 and AUDIT.md (b) item 3; Accepted on merge)
+**Context:** `gtme help --agent` is the document an agent is meant to work
+from alone (§8), and it says nothing about bindings — the one route to an
+API gtme has no adapter for. The first real round-trip proved both halves:
+the agent assembled two pipelines from the doc without help, and then had
+to pull `spec/binding-schema.json` out of the binary with `strings` to
+write the adapter it needed. The contract is large (templating,
+pagination, extraction, error verdicts, fixtures) and needed by one agent
+in ten; folding it into the pipeline doc would make the common case worse
+to serve the rare one.
+**Decision:** Two surfaces, one pointer. `gtme help --agent` stays the
+pipeline/operator document and gains one sentence and a `bindings` field
+pointing at the second surface. **`gtme help --bindings`** prints, as one
+JSON document: the binding schema (`spec/binding-schema.json`, embedded,
+byte-identical), the discovery path (`~/.gtme/adapters/<name>/binding.yaml`,
+`$GTME_ADAPTER_PATH`, id → directory naming), one reference binding as a
+worked example (the smallest shipped one, verbatim), the conformance
+expectation (fixtures beside the binding; `gtme run --simulate` serves
+them), and — once ADR-042 lands — the `adapters add / search / verify`
+verbs. Regenerated from embedded artifacts, never hand-maintained, like
+`help --agent`. The unknown-adapter error already points at it.
+**Consequences:** An agent that needs an adapter finds the contract in one
+command instead of in the binary's string table; the pipeline doc stays
+short. Acceptance mirrors §8's round-trip: the printed schema equals the
+spec artifact, the printed reference binding validates against it, and
+an agent given only `help --bindings` can author a binding that `gtme
+plan` resolves. ~80 LOC in `internal/cli`, no spec beyond §8.
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§8 verb table and the `help --agent` section; §11 milestone M18;
+AUDIT.md (b) item 3 applied by it.
+
+### ADR-042: Bindings live in a registry, not in the binary
+**Status:** Proposed (2026-08-29 — design conversation 2026-08-29;
+Accepted on merge)
+**Context:** The binary carries the floor — `csv/*`, `http/*`, `sql/*`,
+`ai/*`, `group/*` — plus four reference bindings that twin the Go vendor
+adapters. Every further vendor is a binding: a directory of YAML and
+fixtures, data the engine interprets, unable to execute code, its blast
+radius bounded by what the engine permits (ADR-022). Compiling vendors
+into the binary would grow it without bound and put a release between an
+operator and an adapter; leaving them only on local disks makes every
+operator rediscover the same API shapes (the round-trip's fourteen probe
+runs). §13 parks an "adapter marketplace" as a non-goal — correctly, if
+marketplace means accounts, payments and hosting. An index and a fetch
+verb are neither. The first real evidence of the supply side arrived
+before the registry did: an agent authored a working CRM source binding
+in minutes from the schema alone.
+**Decision:** (1) **Bindings are URL-addressed.** `gtme adapters add
+<ref>` takes `github.com/<owner>/<repo>/<path>[@<tag|sha>]`, fetches the
+repository over HTTPS as a tarball at that ref (no `git` dependency;
+private repositories via a `GITHUB_TOKEN` stored with `gtme secret`),
+copies the binding directory — `binding.yaml` and its `fixtures/` — into
+`~/.gtme/adapters/<id, slashes → dashes>/`, and writes `.source.json`
+beside it: the ref as given, the commit it resolved to, the content's
+sha256, the install time. Pinned by construction; `gtme adapters update
+<id>` re-fetches at a newer ref only when asked, never implicitly. (2)
+**Nothing installs unverified.** `gtme adapters verify <id>` — run by
+`add` before it completes, and any time after — validates the binding
+against the schema, runs its conformance fixtures offline, and prints the
+reviewable surface: the hosts its requests will call, the credentials it
+will demand, its needs/provides. Fixtures are mandatory; a binding that
+ships none, or whose fixtures fail, does not install. (3) **The registry
+is an index, not a monorepo.** A public repository, `gtme-bindings`, holds
+`index.json` (`spec/schemas/registry-index.schema.json`: id, description,
+vendor, role, entity type, needs/provides summary, credentials, source
+`{url, path, ref, sha}`, content sha256, tier) and the *verified* set —
+bindings maintained there, whose fixtures the registry's CI runs. A
+*community* entry points at its author's own repository, listed by pull
+request, fixtures required. `gtme adapters search <text>` fetches the
+index (`GTME_REGISTRY` overrides the URL) and matches id, vendor,
+description and role; `gtme adapters` lists what is installed with its
+source and pin. (4) **The binary carries the floor and the reference
+twins, nothing else.** New vendor bindings — the CRM source the round-trip
+produced first among them — are registry entries; the reference twins in
+`spec/bindings/` stay because they are the conformance kit for the Go
+adapters, not a distribution channel. (5) §13's non-goal narrows to what
+it meant: a *hosted* marketplace — accounts, payments, a service — stays
+out of v0. Bundles (ADR-029) already carry bindings with a hash manifest;
+an installed binding's `.source.json` is what a bundle records for it.
+**Consequences:** Agents and humans search the same index, and an agent
+that finds nothing writes a binding (ADR-041) and can publish it by pull
+request — the supply side the round-trip demonstrated becomes a loop.
+Verification is the registry's product, not authorship. Any web surface
+over the index (a page per entry, generated from the YAML and its
+fixtures) is a registry-side concern outside this spec; the spec's
+contribution is that such a page cannot lie, because an entry whose
+fixtures stop passing stops being listed. ~350 LOC: tarball fetch and
+extract in `internal/adapters`, `.source.json`, the three verbs in
+`internal/cli` (verify reuses the binding conformance runner
+`--simulate` already has), the index schema, `help --bindings` gaining
+the verbs. The registry repository is seeded with the CRM binding, its
+fixtures minted from the payloads its run retained (ADR-030's minting
+verb, built as part of this).
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§6 discovery (URL-addressed bindings, `.source.json`); §8 verbs
+`adapters add / search / verify / update`; §10a registry tier; §13
+non-goal narrowed; `spec/schemas/registry-index.schema.json`; §11
+milestone M19. ROADMAP.md "Adapter marketplace" promoted.
+
 ## Implementation Decisions
 
 Predates the ADR log above; recorded per SPEC.md §12. Newest last.
