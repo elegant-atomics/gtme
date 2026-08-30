@@ -2534,3 +2534,25 @@ continued).
 the §11 M20 offline acceptance holds, and the live smoke closes the
 loop against the real vendor.
 **Spec impact:** The one-line §10.2 provides amend, recorded in v0.27.
+
+### 2026-08-30 — Readiness fixes: workspace-scoped Anthropic keys; sql/* in the agent doc
+
+**Question:** How does an identity-linked Anthropic key reach the `api`
+engine's headers, and how does `help --agent` list steps that have no
+manifest?
+**Choice:** (1) `ANTHROPIC_WORKSPACE_ID` becomes an optional credential
+on both AI manifests — it rides the existing secrets/injection path
+(`gtme secret set`, runner-injected session env), and the engine adds
+the `anthropic-workspace-id` header whenever it is present. No new
+config surface; a credential-shaped fact travels as a credential. (2)
+The doc gains a `sql_steps` member — hand-shaped usage + semantics for
+`sql/filter` and `sql/transform` — rather than synthetic entries in
+`adapters`: they have no manifest, no version, and no resolvable
+needs/provides, so pretending otherwise would teach agents to expect
+fields that don't exist. §8's MUST-list is a floor; this adds to it.
+**Why:** Both were found by the round-2 agent (VALIDATION 2026-08-30):
+it lost a run to the missing header and found the sql steps only via
+the ledger notes. Unit test asserts the header on a stub; the e2e
+surface test asserts the doc names both steps.
+**Spec impact:** None (§8 floor unchanged; optional credentials are §6
+manifest surface already).

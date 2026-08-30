@@ -25,6 +25,13 @@ func newAPIEngine(getenv func(string) string) (Engine, error) {
 		return nil, fmt.Errorf("ai: ANTHROPIC_API_KEY is not set (run `gtme secret set ANTHROPIC_API_KEY`)")
 	}
 	opts := []option.RequestOption{option.WithAPIKey(key)}
+	// An identity-linked (workspace-scoped) key is refused by the Messages
+	// API without its workspace header; the round-trip agent hit this live
+	// (VALIDATION.md 2026-08-30). Optional credential, declared by the AI
+	// manifests, injected by the runner like any other.
+	if ws := getenv("ANTHROPIC_WORKSPACE_ID"); ws != "" {
+		opts = append(opts, option.WithHeader("anthropic-workspace-id", ws))
+	}
 	// GTME_ANTHROPIC_BASE_URL points the engine at a stub (tests only).
 	if base := getenv("GTME_ANTHROPIC_BASE_URL"); base != "" {
 		opts = append(opts, option.WithBaseURL(base))

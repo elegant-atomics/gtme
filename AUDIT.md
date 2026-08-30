@@ -244,17 +244,21 @@ re-confirmed here, not re-litigated.
    packet; not applied, per SPEC §12(a) — Campaign 1 stays blocked on
    this decision.
 
-## Deferred (a) items — flagged 2026-08-30 (agent round-trip, round 2), not executed
+## Deferred (a) items — flagged 2026-08-30 (agent round-trip, round 2) — both executed 2026-08-30
 
-- **`help --agent` omits the `sql/*` step adapters.** `gtme plan`
-  resolves `sql/filter` and `sql/transform`, but the doc's adapter list
-  (from `adapters.Installed()`) carries no `sql/` ids — §8 requires every
-  resolvable adapter's manifest. Root cause not yet chased (they are
-  likely registered outside the builtin registry the doc reads).
-- **`internal/ai`'s `api` engine fails identity-linked Anthropic keys**:
-  the Messages API demands an `anthropic-workspace-id` header for them
-  and the engine never sends one. Recovery exists (`engine:
-  claude-code`), so deferred; the fix is a config/env passthrough.
+- **`help --agent` omits the `sql/*` step adapters.** Root cause: they
+  are runner-owned steps (ADR-027), not adapters — no manifest exists for
+  `Installed()` to list, so §8's adapter clause was technically
+  satisfied while the doc stayed silent about steps `plan` resolves.
+  **Fixed:** the doc gains a `sql_steps` member (usage + semantics for
+  `sql/filter` and `sql/transform`, hand-shaped since no manifest
+  exists), asserted by the e2e surface test.
+- **`internal/ai`'s `api` engine fails identity-linked Anthropic keys**.
+  **Fixed:** the engine sends `anthropic-workspace-id` when the optional
+  credential `ANTHROPIC_WORKSPACE_ID` is set (declared
+  `credentials_optional` on both AI manifests, injected by the runner,
+  stored with `gtme secret set` like any credential); unit-tested against
+  a header-asserting stub.
 
 ## (b) Spec question queued from Campaign 1 story 5 (2026-08-30) — proposed, not applied
 

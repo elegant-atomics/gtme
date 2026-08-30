@@ -21,6 +21,7 @@ func cmdHelpAgent(env Env) error {
 	doc := agentDoc{
 		Verbs:    agentVerbs,
 		Adapters: agentAdapters(),
+		SQLSteps: agentSQLSteps,
 		Examples: agentExamples,
 		Ledger:   agentLedger(),
 		Bindings: agentBindingsPointer,
@@ -35,6 +36,11 @@ func cmdHelpAgent(env Env) error {
 type agentDoc struct {
 	Verbs    []agentVerb    `json:"verbs"`
 	Adapters []agentAdapter `json:"adapters"`
+	// SQLSteps are the runner-owned steps (SPEC §10a) `gtme plan` resolves
+	// beside the adapters above; they carry no manifest, so the listing is
+	// hand-shaped here (the round-trip agent found them only through the
+	// ledger notes; both surfaces now name them).
+	SQLSteps []agentVerb    `json:"sql_steps"`
 	Examples []agentExample `json:"examples"`
 	// Ledger is the public read surface (SPEC §3) and the canonical query
 	// shapes (ADR-037), so an agent can write a sql/* step or a {query:}
@@ -84,6 +90,16 @@ var agentVerbs = []agentVerb{
 	{"gtme adapters update ID [@ref]", "re-fetch at a newer ref — the only thing that moves a pin"},
 	{"gtme help --agent", "print this document"},
 	{"gtme help --bindings", "print the binding contract — schema, discovery path, a reference binding, the fixtures expectation — for authoring an adapter this binary does not ship (see `bindings` below)"},
+}
+
+// agentSQLSteps describe the deterministic transform floor (ADR-027): no
+// adapter, no wire protocol — one read-only, timeboxed SELECT per step,
+// scoped to the run's eligible records, its output registry-checked and
+// provenance-stamped like adapter output. The query shapes below (ledger
+// section) are written for these.
+var agentSQLSteps = []agentVerb{
+	{"use: sql/filter — with: {query: \"SELECT identity_id, pass[, reason] FROM ...\"}", "runner-owned filter: rows decide pass/fail per eligible record (a missing row, or pass=0, fails it with the reason recorded); read-only against the §3 surface, $0"},
+	{"use: sql/transform — with: {query: \"SELECT identity_id, <expr> AS \\\"ns.field\\\" ...\"}", "runner-owned derivation: result columns append like adapter output (registry-checked, provenance `sql/transform @ <query-hash>`); declare provides: [ns.field]; cross-record aggregates and fan-in live here"},
 }
 
 type agentAdapter struct {
