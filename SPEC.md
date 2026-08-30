@@ -1290,11 +1290,16 @@ source:
 steps:
   - id: icp-filter
     use: ai/filter
-    uses: [full_name, title, company_domain]   # ADR-004: AI step's dynamic needs
+    uses: [first_name, title, company_name]   # ADR-004; masked fields only — free (ADR-043)
     with:
       prompt: >
         Keep only contacts likely to own outbound tooling decisions.
       batch_size: 25
+
+  - id: reveal                # ADR-043: pay Apollo's per-credit match only past the filter
+    use: apollo/enrich
+    when: icp-filter.passed
+    cache: 30d
 
   - id: linkedin
     use: harvest/profile
@@ -1443,14 +1448,29 @@ contract, pure YAML.
    and the record then fails only if what remains cannot satisfy identity
    derivation or a downstream need.
 2. **`apollo/search`** (source, person) — POST
-   `api.apollo.io/api/v1/mixed_people/search` with `X-Api-Key`
-   (`APOLLO_API_KEY`); config: `query`, `limit`; paginate; map
-   name/title/email/linkedin/org fields; also emit the company as a related
-   identity: create `works_at` relation when org domain present. **Ships as
-   the registered built-in binding** `spec/bindings/apollo-search/` since
-   v0.11 — the M8 receipt diff proved full field parity and the Go
-   scaffolding was retired (works_at emission was always runner-owned and
-   is unaffected).
+   `api.apollo.io/api/v1/mixed_people/api_search` with `X-Api-Key`
+   (`APOLLO_API_KEY`); config: `query`, `limit`, `per_page`. **Masked by
+   the vendor** (ADR-043; Apollo withdrew value fields from API search
+   2026-08-30): provides `apollo.id`, `first_name`, `title`,
+   `company_name`, and `apollo.has_email` (the pay-signal — a filter can
+   prefer reachable contacts before anything is spent). Pages by `page`;
+   termination on empty/short pages (the response carries `total_entries`
+   and no pagination object). -e per record. The revealed person is
+   `apollo/enrich`'s job, and `works_at` emission (runner-owned, keyed on
+   org domain) fires after it — search alone carries no domain. **Ships
+   as the registered built-in binding** `spec/bindings/apollo-search/`
+   since v0.11 (rewritten against the masked shape in M20).
+2a. **`apollo/enrich`** (enrich, person) — POST
+   `api.apollo.io/api/v1/people/match` with `X-Api-Key`
+   (`APOLLO_API_KEY`); `needs.required: [apollo.id]`; provides the
+   revealed surface: `email` (+`email_status`), `last_name`, `full_name`,
+   `linkedin_url`, `city`/`state`/`country`, `company_name`,
+   `company_website`, `company_linkedin_url`, `company_industry`,
+   `company_domain`, `company_employees`. Declares its per-credit cost;
+   retains payloads (ADR-030). The canonical composition (§9): filter on
+   the masked fields first, reveal `when: <filter>.passed` — credits are
+   spent only past judgment. Ships as the built-in binding
+   `spec/bindings/apollo-enrich/` (M20).
 3. **`ai/filter`** (filter) — batch records into the prompt with a strict
    JSON-array output schema `[{identity_key, pass, reason}]`; emit VERDICTs;
    config supports `uses:` (§9, ADR-004); MAY declare `provides:` (ADR-033),
@@ -1946,6 +1966,19 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M20 — the Apollo split (ADR-043; §9, §10). Queued 2026-08-30.**
+  `spec/bindings/apollo-search/` rewritten against `mixed_people/api_search`
+  (masked provides, `page` pagination, empty/short-page termination); new
+  `spec/bindings/apollo-enrich/` against `people/match` (needs `apollo.id`,
+  revealed provides, per-credit cost, payloads retained); fixtures
+  re-recorded from live probes, sanitized; §9's and `help --agent`'s
+  examples move to filter-then-reveal.
+  ✅ Offline: the conformance kit passes both bindings' new fixtures; the
+  §9 example and every `help --agent` example pass `gtme plan`
+  (`TestHelpAgentExamplesPassPlan`); a pipeline needing `email` off
+  `apollo/search` alone fails plan naming `apollo/enrich`. Live
+  (human-gated, §12): Campaign 1 story 2 sources masked and reveals only
+  past the filter, credits visible per step in the receipt.
 - **M18 — `help --bindings` (ADR-041; §8). Built 2026-08-30
   (changelog v0.24).** The
   second agent surface in `internal/cli`, regenerated from the embedded
@@ -2131,6 +2164,15 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.26 — 2026-08-30 (ADR-043 packet: the Apollo split — PROPOSED, not yet accepted)
+**Changed (proposed):** §10 item 2 rewritten (apollo/search masked, per
+the vendor's 2026-08-30 withdrawal) and item 2a added (apollo/enrich,
+`people/match`, per-credit reveal); §9's canonical example gains the
+reveal step — filter on free fields, pay past the filter; §11 milestone
+M20. AUDIT.md (b) item 4 is applied by this diff.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.25 — 2026-08-30 (M19 build: the bindings registry, built)
 **Changed:** §11 M19 marked built; no normative text changed — v0.23's
