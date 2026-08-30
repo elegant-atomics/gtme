@@ -18,6 +18,12 @@ var Fields embed.FS
 //go:embed binding-schema.json
 var BindingSchema []byte
 
+// RegistryIndexSchema validates a bindings registry index (SPEC §8,
+// ADR-042): `gtme adapters search` refuses an index that does not conform.
+//
+//go:embed schemas/registry-index.schema.json
+var RegistryIndexSchema []byte
+
 // Bindings holds the shipped binding documents and their conformance fixtures
 // (SPEC §10a): the reference ports of the Go vendor adapters, and the
 // built-in attio/assert binding.

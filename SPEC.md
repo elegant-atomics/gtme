@@ -1956,8 +1956,8 @@ decided contract, not shipped behavior.
   installed on the discovery path it names, and whose text names the
   path and the fixtures expectation; `help --agent` carries the pointer;
   the unknown-adapter error names `binding.yaml` and the verb.
-- **M19 — the bindings registry (ADR-042; §6, §8, §10a, §13). Queued
-  2026-08-29.** Tarball fetch and extract, `.source.json`, `adapters
+- **M19 — the bindings registry (ADR-042; §6, §8, §10a, §13). Built 2026-08-30
+  (changelog v0.25).** Tarball fetch and extract, `.source.json`, `adapters
   add / search / verify / update / list` in `internal/cli`, the index
   schema; `verify` reuses the binding conformance runner; fixture minting
   from retained payloads (ADR-030) for the first registry entry; the
@@ -2131,6 +2131,22 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.25 — 2026-08-30 (M19 build: the bindings registry, built)
+**Changed:** §11 M19 marked built; no normative text changed — v0.23's
+§6/§8/§10a contract is shipped behaviour, covered by M19's acceptance.
+Behavioural notes from the build: the GitHub API and codeload endpoints
+are env-overridable (GTME_GITHUB_API, GTME_GITHUB_CODELOAD) so the
+offline acceptance drives a local tarball server with the address
+grammar unchanged; the content hash is sha256 over the binding
+directory's files (sorted slash paths, path NUL body NUL, `.source.json`
+excluded); `.source.json` also records the repository url and path,
+which `update` re-fetches from; a fixtures file may carry optional
+`config` and `input` members so `verify` can drive a real engine run;
+the registry index is consulted best-effort at `add` — unreachable
+warns and skips the hash check, a mismatch refuses; ADR-030's fixture
+minting stays ROADMAP-parked (no §8 verb exists for it) — the first
+registry entry's fixtures are minted registry-side.
 
 ### v0.24 — 2026-08-30 (M18 build: `help --bindings`, built)
 **Changed:** §11 M18 marked built; no normative text changed — v0.23's

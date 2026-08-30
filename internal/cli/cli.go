@@ -108,6 +108,8 @@ func Run(ctx context.Context, env Env) int {
 		err = cmdGroups(ctx, env, rest)
 	case "vacuum":
 		err = cmdVacuum(ctx, env, rest)
+	case "adapters":
+		err = cmdAdapters(ctx, env, rest)
 	default:
 		fmt.Fprintf(env.Stderr, "gtme: unknown command %q\n\n", verb)
 		usage(env.Stderr)
@@ -149,6 +151,11 @@ Usage:
   gtme groups add NAME KEY... [--from-segment NAME | --query "SQL"]
   gtme groups remove NAME KEY...
   gtme vacuum                        evict expired payloads (nothing else)
+  gtme adapters                      installed adapters with source and pin
+  gtme adapters search TEXT          search the registry index
+  gtme adapters add REF              install a binding from github.com/<owner>/<repo>/<path>[@ref], verified first
+  gtme adapters verify ID            schema + fixtures offline; prints hosts and credentials it will use
+  gtme adapters update ID [@ref]     re-fetch at a newer ref, explicitly
   gtme help --agent                  machine-readable CLI + adapter surface
   gtme help --bindings               the binding contract: schema, discovery path, a reference binding
   gtme version

@@ -77,6 +77,11 @@ var agentVerbs = []agentVerb{
 	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
 	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
 	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
+	{"gtme adapters", "list installed adapters with their source and pin (.source.json)"},
+	{"gtme adapters search TEXT", "search the bindings registry index by id, vendor, description and role (GTME_REGISTRY overrides the index URL)"},
+	{"gtme adapters add github.com/<owner>/<repo>/<path>[@ref]", "fetch a binding at a pinned ref, verify it (schema + fixtures offline; nothing installs unverified), install it under ~/.gtme/adapters/ with .source.json beside it"},
+	{"gtme adapters verify ID", "validate an installed binding against the schema, run its fixtures offline, print the hosts it will call and the credentials it will demand"},
+	{"gtme adapters update ID [@ref]", "re-fetch at a newer ref — the only thing that moves a pin"},
 	{"gtme help --agent", "print this document"},
 	{"gtme help --bindings", "print the binding contract — schema, discovery path, a reference binding, the fixtures expectation — for authoring an adapter this binary does not ship (see `bindings` below)"},
 }
