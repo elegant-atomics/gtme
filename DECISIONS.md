@@ -2448,3 +2448,57 @@ refuse, index mismatch refuses, the installed binding plans and
 simulates, update moves the pin only when asked, the listing shows
 source and pin, and a frozen bundle carries `.source.json`.
 **Spec impact:** None beyond v0.23 (marked built as v0.25).
+
+### ADR-043: Apollo splits along the vendor's own line — masked search, paid reveal
+**Status:** Proposed (2026-08-30 — from Campaign 1's stop, VALIDATION.md
+2026-08-30 and AUDIT.md (b) item 4; human approved the direction in
+session; Accepted on merge)
+**Context:** Apollo withdrew the value-bearing search response from API
+callers: `POST /api/v1/mixed_people/search` returns HTTP 422
+(`LEGACY_PEOPLE_SEARCH_DEPRECATED`); its designated replacement
+`mixed_people/api_search` returns masked rows — `id`, `first_name`,
+`title`, `last_name_obfuscated`, `has_email`/`has_direct_phone`/`has_*`
+booleans, organization `name` plus `has_*`, no pagination object (top
+level is `total_entries` + `people`). The revealed person now lives
+behind `POST /api/v1/people/match` (per-credit): probed live 2026-08-30,
+it returns the full old surface — `email` (+`email_status`), `last_name`,
+`name`, `linkedin_url`, `city`/`state`/`country`, and a full
+`organization` (name, website_url, linkedin_url, industry,
+primary_domain, estimated_num_employees). The shipped `apollo/search`
+binding's provides can no longer be satisfied by one call, and §10.2's
+description of it is now false against the live vendor.
+**Decision:** Split the capability where the vendor split it. (1)
+**`apollo/search` stays a source and becomes honest about masking**: it
+calls `api_search`, provides `apollo.id`, `first_name`, `title`,
+`company_name`, and `apollo.has_email` (the pay-signal, kept so a filter
+can prefer reachable contacts before anyone pays), pages by `page` with
+termination on empty/short pages (`total_entries` is informational; there
+is no pagination object), and costs $0. (2) A new **`apollo/enrich`**
+binding wraps `people/match`: `needs.required: [apollo.id]`, provides the
+revealed surface (`email`, `email_status`, `last_name`, `full_name`,
+`linkedin_url`, `city`, `state`, `country`, `company_name`,
+`company_website`, `company_linkedin_url`, `company_industry`,
+`company_domain`, `company_employees`), declares its per-credit cost, and
+retains payloads. (3) The `works_at` relation emission (runner-owned,
+keyed on org domain) happens where the domain now first exists — after
+`apollo/enrich`, not after search. (4) The canonical §9 example and
+`help --agent`'s examples move to the shape the economics now force:
+masked source → `ai/filter` on free fields (`first_name`, `title`,
+`company_name`) → `apollo/enrich` gated `when: <filter>.passed` → onward
+— reveal is paid only for records that survived judgment, which is the
+fetch-cheap-judge-then-pay composition the spec already prefers
+(ADR-024/030); Apollo has effectively adopted gtme's own economics, and
+the pipeline shape should teach that. (5) Both bindings stay shipped
+reference twins in `spec/bindings/` (they are the conformance kit);
+fixtures re-record from live, sanitized.
+**Consequences:** Campaign 1 unblocks with a *better* cost story (reveal
+credits spent only past the filter, visible per-step in the receipt); the
+first live vendor withdrawal becomes a worked example of the maintenance
+loop (observed at $0 by the validation gate, fixed as data + fixtures,
+never code). Downstream needs that assumed `full_name`/`email` straight
+from the source now resolve through the enrich step — `gtme plan` narrates
+exactly this. ~0 LOC in the engine; the change is two YAML documents,
+their fixtures, and the examples.
+**Spec impact:** AMEND (proposed diff in this packet's second commit) —
+§10 item 2 rewritten and item 2a added; §9 and §8 example pipelines; §11
+milestone M20; changelog v0.26. AUDIT.md (b) item 4 applied by it.
