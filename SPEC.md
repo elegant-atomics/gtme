@@ -1946,7 +1946,8 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M18 — `help --bindings` (ADR-041; §8). Proposed 2026-08-29.** The
+- **M18 — `help --bindings` (ADR-041; §8). Built 2026-08-30
+  (changelog v0.24).** The
   second agent surface in `internal/cli`, regenerated from the embedded
   schema and bindings; `help --agent` gains its pointer.
   ✅ E2E, offline: `gtme help --bindings` is JSON whose `schema` equals
@@ -1955,7 +1956,7 @@ decided contract, not shipped behavior.
   installed on the discovery path it names, and whose text names the
   path and the fixtures expectation; `help --agent` carries the pointer;
   the unknown-adapter error names `binding.yaml` and the verb.
-- **M19 — the bindings registry (ADR-042; §6, §8, §10a, §13). Proposed
+- **M19 — the bindings registry (ADR-042; §6, §8, §10a, §13). Queued
   2026-08-29.** Tarball fetch and extract, `.source.json`, `adapters
   add / search / verify / update / list` in `internal/cli`, the index
   schema; `verify` reuses the binding conformance runner; fixture minting
@@ -2131,17 +2132,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.23 — 2026-08-29 (ADR-041/042 packet: the adapter surface — PROPOSED, not yet accepted)
-**Added (proposed):** §8 `gtme help --bindings` (the second agent surface,
+### v0.24 — 2026-08-30 (M18 build: `help --bindings`, built)
+**Changed:** §11 M18 marked built; no normative text changed — v0.23's
+§8 contract is shipped behaviour, covered by M18's acceptance.
+Behavioural notes from the build: the document is one JSON object with
+the schema spliced in verbatim as its last member (an encoder would
+compact it); the reference binding is whichever shipped binding is
+smallest by bytes, with its fixtures file beside it; the discovery
+section prints the live search path; ADR-042's `adapters` verbs appear
+under a `registry` member flagged as queued until M19 ships them, so
+the document never names a verb this binary lacks.
+
+### v0.23 — 2026-08-29 (ADR-041/042 reconciliation: the adapter surface; builds queued as M18 and M19)
+**Added:** §8 `gtme help --bindings` (the second agent surface,
 with its own round-trip criterion) and the `gtme adapters` verbs (registry
 search, verified install, pin, update); §6/§10a URL-addressed, pinned
 bindings via `.source.json` and the registry tier; §11 milestones M18 and
-M19; `spec/schemas/registry-index.schema.json`. **Changed (proposed):**
+M19; `spec/schemas/registry-index.schema.json`. **Changed:**
 §13's non-goal narrowed to a *hosted* marketplace — the registry (an
 index and a fetch verb) is in scope. AUDIT.md (b) item 3 is applied by
 this diff.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M18 and M19 are queued.
 
 ### v0.22 — 2026-08-29 (M17 build: deliver preflight, built)
 **Changed:** §11 M17 marked built; no normative text changed — v0.21's

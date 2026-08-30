@@ -130,8 +130,9 @@ The load-bearing choices:
   deliver, rendering exactly what *would* send. Arming is the same command
   without the flag.
 - **Agent-operable by design.** `gtme help --agent` emits the full CLI and
-  adapter surface as one machine-readable document; every error names its
-  fix; every question about state has a deterministic answer path. An
+  adapter surface as one machine-readable document, and `gtme help
+  --bindings` the contract for authoring an adapter it does not ship;
+  every error names its fix; every question about state has a deterministic answer path. An
   agent can author a pipeline and validate its structure *and behavior*
   before a human reviews one artifact and arms it.
 
@@ -284,7 +285,8 @@ gtme groups                                # decisions about sets, with tallies
   adapters, and most adapters are one reviewable YAML file; here's the
   shape and the checklist.
 - `gtme help --agent` — the whole surface, machine-readable, for your
-  agent.
+  agent; `gtme help --bindings` — the binding contract (schema, discovery
+  path, a reference binding) when it needs an adapter that is not here.
 
 ## License
 

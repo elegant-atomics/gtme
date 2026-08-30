@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtme.spec/schemas/registry-index.schema.json",
   "title": "Bindings registry index",
-  "description": "PROPOSED (ADR-042, not yet accepted). The index a bindings registry publishes (default: the gtme-bindings repository's index.json; GTME_REGISTRY overrides). `gtme adapters search` reads it; `gtme adapters add` installs an entry by its source ref. Verified entries are maintained in the registry repository and fixture-tested by its CI; community entries point at their authors' repositories and ship fixtures, which `adapters add` runs before installing.",
+  "description": "The index (ADR-042) a bindings registry publishes (default: the gtme-bindings repository's index.json; GTME_REGISTRY overrides). `gtme adapters search` reads it; `gtme adapters add` installs an entry by its source ref. Verified entries are maintained in the registry repository and fixture-tested by its CI; community entries point at their authors' repositories and ship fixtures, which `adapters add` runs before installing.",
   "type": "object",
   "required": ["version", "bindings"],
   "additionalProperties": false,

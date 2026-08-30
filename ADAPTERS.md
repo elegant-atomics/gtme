@@ -1,9 +1,11 @@
 # Adapters
 
 Every adapter that ships with gtme, what it does, and the config that
-matters. Two always-true companions to this page: `gtme help --agent`
+matters. Three always-true companions to this page: `gtme help --agent`
 regenerates the full surface (every manifest, every flag) from the live
-registry, and each adapter's contract lives in its manifest or binding —
+registry, `gtme help --bindings` prints the contract for authoring a
+binding gtme does not ship, and each adapter's contract lives in its
+manifest or binding —
 this page is the human-readable tour, not a second source of truth.
 
 Three kinds appear below:

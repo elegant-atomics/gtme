@@ -173,7 +173,7 @@ takes the conservative reading and the question is queued here.
    manifests declare it, and the planner keys on the declaration rather
    than the id prefix — so external adapters can opt in.
 
-## (b) Spec gap queued from the agent round-trip (2026-08-29) — proposed, not applied
+## (b) Spec gap queued from the agent round-trip (2026-08-29) — approved and applied
 
 3. **§8's `help --agent` contents omit the binding surface.** The doc
    MUST contain verbs, manifests, three examples, and the ledger read
@@ -188,8 +188,9 @@ takes the conservative reading and the question is queued here.
    common pipeline doc does not carry a contract only adapter authors need;
    `help --agent` gains one sentence pointing at it. The verb table in §8
    lists both.
-   **Packet:** ADR-041 (2026-08-29) carries this diff; applied when it
-   merges.
+   **Applied (approved 2026-08-30, SPEC v0.23):** ADR-041 carries the
+   diff — §8's verb table lists both surfaces and `help --agent` MUST
+   point at `help --bindings`; the build is M18.
 
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 
