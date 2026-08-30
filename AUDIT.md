@@ -188,6 +188,8 @@ takes the conservative reading and the question is queued here.
    common pipeline doc does not carry a contract only adapter authors need;
    `help --agent` gains one sentence pointing at it. The verb table in §8
    lists both.
+   **Packet:** ADR-041 (2026-08-29) carries this diff; applied when it
+   merges.
 
 ## Deferred (a) item — flagged, not executed: `webhook/source`
 

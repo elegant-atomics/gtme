@@ -617,8 +617,11 @@ Rules:
 
 Each adapter has a `manifest.json`. Built-ins embed theirs; external adapters
 ship it next to the executable. Discovery path for external adapters:
-`~/.gtme/adapters/<name>/` containing `manifest.json` + executable named `run`.
-The canonical schema for this file is `spec/schemas/manifest.schema.json`.
+`~/.gtme/adapters/<name>/` containing `manifest.json` + executable named `run`,
+or a `binding.yaml` (§10a) — installed by hand or by `gtme adapters add`
+(§8, ADR-042), which records the binding's source and pin in `.source.json`
+beside it. The canonical schema for this file is
+`spec/schemas/manifest.schema.json`.
 
 ```json
 {
@@ -906,6 +909,12 @@ gtme freeze [RUN_ID|last] [--bundle DIR] # bare: YAML to stdout; --bundle: campa
 gtme groups [show NAME | add NAME ... | remove NAME ...]   # ADR-021, see below
 gtme vacuum                        # evict expired payloads (ADR-030), nothing else
 gtme help --agent                  # machine-readable full CLI + adapter surface
+gtme help --bindings               # the binding contract: schema, discovery path, a reference binding (ADR-041)
+gtme adapters                      # installed adapters with source and pin (ADR-042)
+gtme adapters search TEXT          # search the registry index
+gtme adapters add REF              # install a binding from github.com/<owner>/<repo>/<path>[@ref], verified first
+gtme adapters verify ID            # schema + fixtures offline; prints hosts and credentials it will use
+gtme adapters update ID [@ref]     # re-fetch at a newer ref, explicitly
 ```
 
 This is the entire v0 verb set (ADR-005, extended by ADR-021's `gtme
@@ -958,7 +967,41 @@ include the ledger's public read surface — the tables and views of §3 —
 and the canonical query shapes (a cross-type membership gate, a
 cross-record aggregate, a config-value query), so an agent can write a
 `sql/*` step or a `{query:}` value without reading `spec/ledger.sql`
-(ADR-037).
+(ADR-037). It MUST NOT carry the binding contract; it MUST point at the
+surface that does: **`gtme help --bindings`** (ADR-041) prints, as one
+machine-readable document, the binding schema (`spec/binding-schema.json`,
+byte-identical to the artifact), the discovery path (§6, §10a), one
+reference binding verbatim as a worked example, the conformance
+expectation (fixtures beside the binding, served by `--simulate`), and the
+`adapters` verbs (ADR-042). Its acceptance criterion mirrors the first:
+an agent given only `gtme help --bindings` and no other context MUST be
+able to author a binding that `gtme plan` resolves and `gtme adapters
+verify` passes.
+
+### `gtme adapters` — the bindings registry (ADR-042)
+
+Bindings are URL-addressed and pinned. `gtme adapters add
+github.com/<owner>/<repo>/<path>[@<tag|sha>]` fetches the repository over
+HTTPS at that ref (no `git` dependency; a `GITHUB_TOKEN` stored with `gtme
+secret` for private repositories), copies the binding directory —
+`binding.yaml` and `fixtures/` — into `~/.gtme/adapters/<id, slashes →
+dashes>/`, and writes `.source.json` beside it: the ref as given, the
+resolved commit, the content sha256, the install time. **Nothing installs
+unverified:** `add` runs `gtme adapters verify` first — the binding
+validates against the schema, its conformance fixtures run offline, and
+the reviewable surface is printed (the hosts its requests will call, the
+credentials it will demand, its needs and provides); a binding with no
+fixtures, or failing ones, does not install. `gtme adapters update <id>
+[@ref]` re-fetches only when asked; nothing moves a pin implicitly. `gtme
+adapters search <text>` reads the registry index
+(`spec/schemas/registry-index.schema.json`; `GTME_REGISTRY` overrides the
+URL) and matches id, vendor, description and role; `gtme adapters` lists
+what is installed with its source and pin. The index is published by the
+`gtme-bindings` repository, which holds the *verified* entries (its CI
+runs their fixtures) and points at *community* entries in their authors'
+repositories. The binary carries the floor (`csv/*`, `http/*`, `sql/*`,
+`ai/*`, `group/*`) and the reference twins in `spec/bindings/`; every
+other vendor is a registry entry.
 
 ### Event-driven pipelines: webhook/source + cron (ADR-009)
 
@@ -1506,7 +1549,11 @@ dry-run receipts). A binding declares the same manifest surface as a
 process adapter (`needs`/`provides`/`config_schema`/`freshness_days`, §6)
 so `gtme plan` treats both tiers identically; named external bindings are
 discovered on the §6 path (`~/.gtme/adapters/<name>/` containing
-`binding.yaml` instead of an executable).
+`binding.yaml` instead of an executable), and reach that path by hand or
+from the registry (§8 `gtme adapters`, ADR-042) — the binary ships the
+floor and these reference twins only; vendor bindings are registry
+entries, verified before they install. `gtme help --bindings` (§8,
+ADR-041) is the contract an author works from.
 
 **Tier 2 — process adapters:** the §5/§6 NDJSON contract, unchanged.
 **Graduation rule (hard):** the moment a binding needs logic —
@@ -1899,6 +1946,31 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M18 — `help --bindings` (ADR-041; §8). Proposed 2026-08-29.** The
+  second agent surface in `internal/cli`, regenerated from the embedded
+  schema and bindings; `help --agent` gains its pointer.
+  ✅ E2E, offline: `gtme help --bindings` is JSON whose `schema` equals
+  `spec/binding-schema.json` byte for byte, whose reference binding
+  validates against that schema and resolves through `gtme plan` when
+  installed on the discovery path it names, and whose text names the
+  path and the fixtures expectation; `help --agent` carries the pointer;
+  the unknown-adapter error names `binding.yaml` and the verb.
+- **M19 — the bindings registry (ADR-042; §6, §8, §10a, §13). Proposed
+  2026-08-29.** Tarball fetch and extract, `.source.json`, `adapters
+  add / search / verify / update / list` in `internal/cli`, the index
+  schema; `verify` reuses the binding conformance runner; fixture minting
+  from retained payloads (ADR-030) for the first registry entry; the
+  `gtme-bindings` repository seeded with the round-trip's CRM source
+  binding as the first verified entry.
+  ✅ E2E, offline: against a local tarball server and a local index,
+  `adapters search` finds an entry by vendor; `adapters add` installs it
+  under the dashed id with `.source.json` carrying the resolved commit and
+  content hash, runs its fixtures first and prints the hosts and
+  credentials it will use; an entry with failing fixtures, or none, does
+  not install; a content-hash mismatch against the index refuses; the
+  installed binding resolves through `gtme plan` and serves its fixtures
+  under `--simulate`; `adapters update` moves the pin only when asked;
+  `adapters` lists source and pin; a bundle (ADR-029) records the pin.
 - **M17 — deliver preflight (ADR-040; §5, §6, §8, §10). Built 2026-08-29
   (changelog v0.22).** PREFLIGHT and OPEN `preflight` in `internal/protocol` and
   the schemas; `preflights` in the manifest; the preflight session in the
@@ -1953,7 +2025,9 @@ recipe, §8), dashboards or any UI, DAG/branching beyond
 `when:`, `waterfall:` execution (parse-and-reject only), email waterfall
 providers, company-pipeline fan-out verbs (the relations table exists; no
 verbs over it — see ROADMAP.md's `expand` role for the deferred version),
-teams/auth, MCP server mode (see ROADMAP.md), adapter marketplace,
+teams/auth, MCP server mode (see ROADMAP.md), a *hosted* adapter
+marketplace — accounts, payments, a service (the bindings registry, an
+index and a fetch verb, is in scope: §8, ADR-042),
 migrations of the YAML format, Windows support (build for darwin/linux).
 Pipe syntax is deferred (ADR-005): all v0 pipeline surfaces compile to the
 same pipeline object, authored only as YAML — there is no second, informal
@@ -2056,6 +2130,18 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.23 — 2026-08-29 (ADR-041/042 packet: the adapter surface — PROPOSED, not yet accepted)
+**Added (proposed):** §8 `gtme help --bindings` (the second agent surface,
+with its own round-trip criterion) and the `gtme adapters` verbs (registry
+search, verified install, pin, update); §6/§10a URL-addressed, pinned
+bindings via `.source.json` and the registry tier; §11 milestones M18 and
+M19; `spec/schemas/registry-index.schema.json`. **Changed (proposed):**
+§13's non-goal narrowed to a *hosted* marketplace — the registry (an
+index and a fetch verb) is in scope. AUDIT.md (b) item 3 is applied by
+this diff.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.22 — 2026-08-29 (M17 build: deliver preflight, built)
 **Changed:** §11 M17 marked built; no normative text changed — v0.21's

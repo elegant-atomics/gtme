@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gtme.spec/schemas/registry-index.schema.json",
+  "title": "Bindings registry index",
+  "description": "PROPOSED (ADR-042, not yet accepted). The index a bindings registry publishes (default: the gtme-bindings repository's index.json; GTME_REGISTRY overrides). `gtme adapters search` reads it; `gtme adapters add` installs an entry by its source ref. Verified entries are maintained in the registry repository and fixture-tested by its CI; community entries point at their authors' repositories and ship fixtures, which `adapters add` runs before installing.",
+  "type": "object",
+  "required": ["version", "bindings"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "generated_at": {"type": "string"},
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "role", "entity_type", "source", "sha256", "tier"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "description": "Adapter id, e.g. hubspot/contact-search."},
+          "description": {"type": "string", "minLength": 1},
+          "vendor": {"type": "string"},
+          "role": {"enum": ["source", "filter", "enrich", "verify", "compose", "deliver"]},
+          "entity_type": {"type": "string", "minLength": 1},
+          "needs": {"type": "array", "items": {"type": "string"}},
+          "provides": {"type": "array", "items": {"type": "string"}},
+          "credentials": {"type": "array", "items": {"type": "string"}},
+          "source": {
+            "type": "object",
+            "required": ["url", "path", "ref", "sha"],
+            "additionalProperties": false,
+            "properties": {
+              "url": {"type": "string", "description": "Repository, e.g. github.com/elegant-atomics/gtme-bindings."},
+              "path": {"type": "string", "description": "Directory inside the repository holding binding.yaml and fixtures/."},
+              "ref": {"type": "string", "description": "Tag or branch the entry was published at."},
+              "sha": {"type": "string", "description": "Commit the ref resolved to when the index was generated."}
+            }
+          },
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Content hash of the binding directory; `adapters add` refuses a mismatch."},
+          "tier": {"enum": ["verified", "community"]},
+          "since": {"type": "string"}
+        }
+      }
+    }
+  }
+}

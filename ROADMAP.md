@@ -184,6 +184,15 @@ bindings are reviewable, diffable data — which is what makes hosting
 third-party adapters safe at all. Recorded here so the marketplace
 conversation starts from that framing rather than rediscovering it.
 
+**Promoted as a registry (2026-08-29, ADR-042 — proposed).** Not a
+marketplace: an index file and a fetch verb. Bindings are URL-addressed
+and hash-pinned (`gtme adapters add github.com/…@ref`), nothing installs
+unverified (`adapters verify` runs the fixtures offline first), the
+registry repository holds the index and the verified set, community
+entries point at their authors' repositories. The binary keeps the floor
+and the reference twins only. The hosted marketplace — accounts,
+payments, a service — is what §13 still excludes.
+
 ## Run-lifecycle notification hook
 
 Named in the ADR-031 design conversation, deliberately not a step: a
