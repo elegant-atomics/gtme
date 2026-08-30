@@ -2138,7 +2138,9 @@ pass that produced them.
 Behavioural notes from the build: the document is one JSON object with
 the schema spliced in verbatim as its last member (an encoder would
 compact it); the reference binding is whichever shipped binding is
-smallest by bytes, with its fixtures file beside it; the discovery
+fullest by bytes (amended 2026-08-30 with ADR-041; first built as
+smallest, which picked the extract-less deliver binding), with its
+fixtures file beside it; the discovery
 section prints the live search path; ADR-042's `adapters` verbs appear
 under a `registry` member flagged as queued until M19 ships them, so
 the document never names a verb this binary lacks.

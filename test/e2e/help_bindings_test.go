@@ -140,7 +140,9 @@ func TestHelpBindingsReferenceRoundTrips(t *testing.T) {
 	var pipeline string
 	switch doc.Reference.Role {
 	case "source":
-		pipeline = "name: ref\nsource:\n  use: " + newID + "\nsteps: []\n"
+		// A source's required config is its own (the reference's asks for a
+		// search); plan validates it, so supply the minimum.
+		pipeline = "name: ref\nsource:\n  use: " + newID + "\n  with:\n    query: vp marketing\nsteps: []\n"
 	case "deliver":
 		pipeline = "name: ref\nsource:\n  use: csv/source\n  with:\n    path: people.csv\nsteps:\n  - id: deliver\n    use: " + newID + "\n    variables:\n      name: full_name\n    idempotency: email\n"
 	default:
