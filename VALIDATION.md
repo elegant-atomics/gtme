@@ -444,3 +444,64 @@ Findings:
 Zero divergences against a DECIDED section. The rest of the score sheet
 lives outside this repo.
 
+
+### 2026-08-30 — Increment: campaign zero re-armed on the M19 binary — preflight and attestation, live
+
+Campaign zero's enactment script re-run end to end on main `3aa6005`
+(M14–M19 in the binary), same controlled campaign, ten fresh
+self-owned records (`+cz01..cz10`). Guard: a CSV without the email column
+fails `plan` at exit 2 naming the missing column. Dry run: receipt renders
+resolved variables for review; zero `deliveries` rows written. Arm: 2 new
+deliveries, both **ATTEST confirmed** (M14, first live firing). Re-run:
+10/10 cache-skipped, zero new rows. Instantly's lead list confirms exactly
+the two new addresses.
+
+Findings:
+
+- **M17's preflight fired live for the first time and blocked correctly**:
+  `send: preflight BLOCKED — campaign is not Active (✗ campaign active)`
+  against the real campaign, which is deliberately a draft. The dry run
+  reported the block and continued; an armed run would have failed before
+  any record moved. For a validation target that never sends, the ADR-040
+  opt-out (`preflight: false` in step config, with a comment saying why)
+  is the documented route, and the receipt shows it. Working as specified;
+  recorded because it is the exact class of failure ADR-040 was built for,
+  observed against the real API.
+- **Idempotency is ledger-scoped, deliberately, and now visibly.** Eight
+  of the ten records were skipped as already-delivered from the 08-15
+  enactment — but those leads no longer exist in the remote campaign
+  (only `+s1..s3` remained). `deliveries` UNIQUE(target, idempotency)
+  answers "has gtme ever delivered this record to this scope", not "is it
+  there now". Right default (replays can't duplicate), worth a line here
+  because an operator who deletes leads remotely and re-runs will get
+  nothing re-added until the touch scope changes. A `reconcile` surface,
+  if ever wanted, is a ROADMAP conversation, not a bug.
+
+### 2026-08-30 — Campaign 1: STOPPED at the source — Apollo withdrew the search shape from API callers
+
+Story 1 (Guard) passed: the mistyped `uses:` field failed `plan` at
+exit 2, naming the step, the field, and the nearest canonical name, with
+zero network. Story 2 (Launch) stopped at the source with $0 spent:
+
+- `POST /api/v1/mixed_people/search` → HTTP 422
+  `SEARCH.ROUTING.LEGACY_PEOPLE_SEARCH_DEPRECATED` ("This endpoint is
+  deprecated for API callers. Please use the new mixed_people/api_search
+  endpoint").
+- The replacement `mixed_people/api_search` returns **obfuscated rows**:
+  person keys are `id, first_name, last_name_obfuscated, title,
+  has_email, has_direct_phone, has_city, has_state, has_country,
+  last_refreshed_at, organization`; the organization carries `name` plus
+  `has_*` booleans only. No email, no linkedin_url, no city/state values,
+  and no `pagination` object (top level is `total_entries` + `people`).
+
+This is the "external API's real shape contradicts the spec in a way that
+changes a contract" bucket, verbatim: `apollo/search`'s declared provides
+(email, last_name, linkedin_url, …) cannot be satisfied by search alone
+any more — Apollo moved reveal behind its per-credit match/enrichment
+surface. Stopped without adapting; the observed shape and a proposed
+direction are queued as AUDIT.md (b) item 4 for human approval. Campaign 1
+is blocked on that decision. Two adjacent notes: the run failed clean at
+the source with `$0 spent` on the receipt (the failure mode costs
+nothing), and the registry's CI runs fixtures offline, so a live
+withdrawal like this is invisible to it between fixture re-recordings —
+which is precisely what a maintained tier is for.
