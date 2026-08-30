@@ -1,0 +1,44 @@
+# Release: on a version tag, build the §13 targets and attach them to a
+# GitHub release. Pure Go, no cgo (SPEC §2), so one Linux runner
+# cross-compiles everything. The binaries carry the tag via the same
+# ldflags Makefile `build` uses; checksums published beside them.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: make check
+        run: make check
+      - name: build all targets
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" \
+              go build -trimpath \
+                -ldflags "-X github.com/elegant-atomics/gtme/internal/cli.Version=${VERSION}" \
+                -o "dist/gtme" ./cmd/gtme
+            tar -czf "dist/gtme_${VERSION}_${target%/*}_${target#*/}.tar.gz" -C dist gtme
+            rm dist/gtme
+          done
+          (cd dist && shasum -a 256 *.tar.gz > checksums.txt)
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "gtme ${GITHUB_REF_NAME}" \
+            --notes "Prebuilt binaries for macOS and Linux (arm64/amd64). Verify with checksums.txt, untar, put \`gtme\` on your PATH, run \`gtme init\`. Building from source stays \`git clone && ./install.sh\`. The CLI surface is SPEC.md §8; agents start with \`gtme help --agent\`."
