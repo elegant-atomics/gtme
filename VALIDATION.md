@@ -505,3 +505,48 @@ the source with `$0 spent` on the receipt (the failure mode costs
 nothing), and the registry's CI runs fixtures offline, so a live
 withdrawal like this is invisible to it between fixture re-recordings —
 which is precisely what a maintained tier is for.
+
+### 2026-08-30 — Agent round-trip, round 2: the registry closes the loop the first round exposed
+
+Round 1's box re-run on main `3aa6005` (M18+M19 in the binary): fresh
+agent session, fresh ledger, same TASK.md, same sealed conditions (no
+repo, no README, no SPEC; secrets stored beforehand; the human answered
+nothing — zero help turns). Same correct outcome: 562 list members
+sourced, 7 above the engagement cut, 7 summaries, 7-row CSV. The deltas
+are the story:
+
+- **The `strings` move is gone.** Round 1's agent dug the binding schema
+  out of the binary's string table. Round 2's agent, needing a source
+  gtme doesn't ship, went to the **registry**: found the verified
+  `hubspot/contact-search` entry, read it (its comments carry the
+  reproduce-the-list-via-search pattern — vendor knowledge travelling in
+  a binding), forked it into its own `hubspot/list-contacts` (score +
+  usage properties added), and ran **`gtme adapters verify`** on its own
+  work before using it. AUDIT (b) item 3's fix, observed doing its job
+  end to end, one day after it merged.
+- **6 runs vs 16.** Round 1 burned fourteen probe runs; round 2 used two
+  free `http/enrich` probe pipelines and read the raw responses back out
+  of the ledger's `payloads` table (ADR-030's cache tier as a discovery
+  instrument — an emergent pattern worth naming: the agent probed an
+  unknown API *through* gtme, so the token was injected, never seen).
+- **$0.2254 vs $0.47, paid once.** Round 1 paid its judgments at dry-run
+  and again at arm — the finding that produced ADR-039. Round 2's armed
+  run served all 7 summaries from the judgment cache: dry-run spent,
+  arm cost $0. M16's first live proof, closing round 1's finding #3.
+
+New surface gaps, verified and queued:
+
+- **`help --agent` lists no `sql/*` adapters** (checked against the
+  binary: zero `sql/` ids among the 10 listed) though `gtme plan`
+  resolves `sql/filter`/`sql/transform` in a pipeline; the agent found
+  them only through the ledger notes section. §8 says the doc carries
+  every adapter surface `plan` resolves. → AUDIT, deferred (a).
+- **The `api` AI engine can't use identity-linked Anthropic keys** (400:
+  `anthropic-workspace-id is required when authenticating with an
+  identity-linked API key`); the agent recovered via `engine:
+  claude-code`. → AUDIT, deferred (a): send the workspace header when
+  configured.
+- The per-(adapter, identity) enrich cache silently served a stale probe
+  response until the agent switched seed identities — by design
+  (freshness is the read gate), logged as operator-experience note, not
+  a gap.
