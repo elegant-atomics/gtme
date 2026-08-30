@@ -1,14 +1,27 @@
-# apollo/search — THE apollo/search adapter: a registered built-in binding.
-# Began as the reference port of the Go adapter; the M8 receipt diff proved
-# full field parity and the Go scaffolding was retired (SPEC v0.11), making
-# this the first vendor source shipped as pure YAML.
+# apollo/search — THE apollo/search adapter: a registered built-in binding,
+# rewritten for the masked API surface (ADR-043). Apollo withdrew value
+# fields from API search 2026-08-30: `mixed_people/search` 422s for API
+# callers, and its replacement `mixed_people/api_search` returns masked rows
+# (no email, no linkedin, `has_*` booleans, obfuscated last name). This
+# binding is honest about that: it provides the masked surface at $0, and
+# the revealed person is apollo/enrich's job — the canonical composition
+# filters on these free fields first and reveals only past the filter.
 #
-# Endpoint: POST https://api.apollo.io/api/v1/mixed_people/search
+# Identity (§4): a masked row carries no email, no linkedin and no company
+# domain, so identity derives from the name-hash tier — which needs a first
+# AND last name. `last_name` therefore carries Apollo's own obfuscated form
+# (e.g. "D.") rather than being dropped: it keys the record, `gtme plan`
+# notes the weak tier, and apollo/enrich supersedes it with the real value
+# on reveal. Distinct people who share a first name and an obfuscated
+# initial in one pull would collide on this tier — reveal early if that
+# matters.
+#
+# Endpoint: POST https://api.apollo.io/api/v1/mixed_people/api_search
 # Auth:     X-Api-Key header
-# Docs:     https://docs.apollo.io/ (People Search)
+# Docs:     https://docs.apollo.io/reference/people-api-search
 
 id: apollo/search
-version: 1
+version: 2
 role: source
 entity_type: person
 
@@ -16,26 +29,12 @@ provides:
   type: object
   additionalProperties: false
   properties:
-    email: { type: string }
     first_name: { type: string }
     last_name: { type: string }
-    full_name: { type: string }
     title: { type: string }
-    seniority: { type: string }
-    linkedin_url: { type: string }
-    linkedin_internal_url: { type: string }
-    linkedin_sales_nav_url: { type: string }
-    city: { type: string }
-    state: { type: string }
-    country: { type: string }
     company_name: { type: string }
-    company_domain: { type: string }
-    company_website: { type: string }
-    company_linkedin_url: { type: string }
-    company_employees: { type: integer }
-    company_industry: { type: string }
     apollo.id: { type: string }
-    email_status: { type: string }
+    apollo.has_email: { type: boolean }
 
 config_schema:
   type: object
@@ -94,7 +93,7 @@ auth:
 
 request:
   method: POST
-  url: "{{config.base_url}}/api/v1/mixed_people/search"
+  url: "{{config.base_url}}/api/v1/mixed_people/api_search"
   headers:
     Cache-Control: no-cache
   body:
@@ -114,36 +113,16 @@ pagination:
   termination:
     empty_records: true
     short_page: true
-    total_pages_path: "pagination.total_pages|total_pages"
 
 extract:
-  records: [people, contacts]
+  records: people
   fields:
     apollo.id: id
     first_name: first_name
-    last_name: last_name
-    full_name: name
+    last_name: last_name_obfuscated
     title: title
-    seniority: { path: seniority, transform: lower }
-    email:
-      path: email
-      transform: email
-      absent: ["email_not_unlocked@domain.com"]
-    email_status: { path: email_status, transform: lower }
-    linkedin_url: { path: linkedin_url, transform: linkedin }
-    city: city
-    state: state
-    country: country
     company_name: organization.name
-    company_website: organization.website_url
-    company_linkedin_url: { path: organization.linkedin_url, transform: linkedin_url }
-    company_industry: organization.industry
-    company_domain:
-      paths: [organization.primary_domain, organization.website_url]
-      transform: domain
-    company_employees:
-      path: organization.estimated_num_employees
-      absent: [0]
+    apollo.has_email: has_email
 
 cost:
   per: record

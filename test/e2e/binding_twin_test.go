@@ -173,10 +173,19 @@ source:
 	if res.code != 0 {
 		t.Fatalf("exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
+	// Masked rows (ADR-043) key on the name-hash tier; find Jane by field.
 	fields := ledgerFields(h)
-	jane := fields["person:jane.doe@acme.com"]
-	if jane == nil || jane["seniority"] != `"vp"` || jane["company_domain"] != `"acme.com"` {
-		t.Errorf("jane = %v", jane)
+	var jane map[string]string
+	for _, f := range fields {
+		if f["company_name"] == `"Acme Inc"` {
+			jane = f
+		}
+	}
+	if jane == nil || jane["last_name"] != `"D."` || jane["apollo.has_email"] != "true" {
+		t.Errorf("jane = %v (all: %v)", jane, fields)
+	}
+	if _, has := jane["email"]; has {
+		t.Errorf("masked search must not write an email: %v", jane["email"])
 	}
 	// The engine attached payloads under the default ADR-030 declaration.
 	if n := h.queryInt(`SELECT count(*) FROM payloads WHERE adapter = 'apollo/search'`); n != 2 {

@@ -1452,8 +1452,10 @@ contract, pure YAML.
    (`APOLLO_API_KEY`); config: `query`, `limit`, `per_page`. **Masked by
    the vendor** (ADR-043; Apollo withdrew value fields from API search
    2026-08-30): provides `apollo.id`, `first_name`, `title`,
-   `company_name`, and `apollo.has_email` (the pay-signal — a filter can
-   prefer reachable contacts before anything is spent). Pages by `page`;
+   `company_name`, `last_name` (the vendor's obfuscated form, e.g. "D." —
+   build-found in M20: it keys the §4 name-hash identity tier, and the
+   reveal supersedes it), and `apollo.has_email` (the pay-signal — a
+   filter can prefer reachable contacts before anything is spent). Pages by `page`;
    termination on empty/short pages (the response carries `total_entries`
    and no pagination object). -e per record. The revealed person is
    `apollo/enrich`'s job, and `works_at` emission (runner-owned, keyed on
@@ -1966,7 +1968,8 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M20 — the Apollo split (ADR-043; §9, §10). Queued 2026-08-30.**
+- **M20 — the Apollo split (ADR-043; §9, §10). Built 2026-08-30
+  (changelog v0.27).**
   `spec/bindings/apollo-search/` rewritten against `mixed_people/api_search`
   (masked provides, `page` pagination, empty/short-page termination); new
   `spec/bindings/apollo-enrich/` against `people/match` (needs `apollo.id`,
@@ -2164,6 +2167,19 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.27 — 2026-08-30 (M20 build: the Apollo split, built)
+**Changed:** §11 M20 marked built; one normative amend found by the build —
+§10 item 2's masked provides gains `last_name` (the vendor's obfuscated
+form): a masked row carries no email, linkedin or domain, so §4's
+name-hash tier is its only identity path and that tier requires a first
+AND last name; the reveal supersedes the obfuscated value. Behavioural
+notes: `apollo/search` is version 2; `apollo/enrich` joins the embedded
+built-ins; pagination termination is empty/short page (the masked
+response has no pagination object); a missing-need plan error now names
+installed adapters that provide the field ("email ← apollo/enrich");
+live smoke 2026-08-30: 3 masked rows $0, 3 reveals $0.03, one contact
+legitimately email-less (absent-tolerance held).
 
 ### v0.26 — 2026-08-30 (ADR-043 reconciliation: the Apollo split; build queued as M20)
 **Changed:** §10 item 2 rewritten (apollo/search masked, per

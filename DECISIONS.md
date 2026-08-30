@@ -2501,3 +2501,36 @@ their fixtures, and the examples.
 **Spec impact:** AMEND (proposed diff in this packet's second commit) —
 §10 item 2 rewritten and item 2a added; §9 and §8 example pipelines; §11
 milestone M20; changelog v0.26. AUDIT.md (b) item 4 applied by it.
+
+### 2026-08-30 — M20 internals: the Apollo split (ADR-043)
+
+**Question:** How does a masked row get an identity, what happens to the
+obfuscated last name in the ledger, and how do the bundle/twin/example
+tests survive losing the value-bearing search?
+**Choice:** (1) Build-found and folded into §10 item 2 (v0.27): the
+masked provides gains `last_name`, carrying Apollo's own obfuscated form
+("D.") — §4's name-hash tier is the only derivable identity path for a
+masked row and requires first AND last; `gtme plan` notes the weak tier;
+the reveal writes the true value, which supersedes at read time
+(`current_values` prefers the newer row at equal confidence). People
+sharing a first name and an obfuscated initial in one pull collide on
+this tier — the binding's header says so and says to reveal early when
+it matters. (2) `apollo/search` bumps to version 2; `apollo/enrich`
+(needs `apollo.id`, per-credit `people/match`, payloads retained) joins
+`builtinBindings`. (3) The plan-time missing-need error gains a provider
+hint — "installed adapters provide it: email ← apollo/enrich" — because
+both round-trip agents read error text as documentation, and "needs
+email" is only half a message when the answer is one step away. (4) The
+bundle acceptance now freezes two external bindings (masked source +
+reveal) feeding the built-in attio/assert; the builtin twin test finds
+Jane by field rather than by email key (masked rows key on the name
+hash). (5) Fixtures are synthesized from live-probed shapes (the probes
+are in the session log; values are fictional), and the live smoke ran
+the real pair end to end: 3 masked at $0, 3 reveals at $0.03, email
+legitimately absent on one (extraction treated it as absent, the run
+continued).
+**Why:** `make check` green including the rewritten conformance kit;
+`TestHelpAgentExamplesPassPlan` proves the new canonical example plans;
+the §11 M20 offline acceptance holds, and the live smoke closes the
+loop against the real vendor.
+**Spec impact:** The one-line §10.2 provides amend, recorded in v0.27.

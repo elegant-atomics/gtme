@@ -237,6 +237,36 @@ type Problem struct {
 	Msg  string
 }
 
+// providerHint names installed adapters whose provides cover a missing
+// need — "needs email" is only half an error message when `apollo/enrich`
+// is one step away (M20; the round-trip agents read these messages as
+// documentation).
+func providerHint(missing []string) string {
+	var parts []string
+	for _, field := range missing {
+		var ids []string
+		for _, m := range adapters.Installed() {
+			var schema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if len(m.Provides) == 0 || json.Unmarshal(m.Provides, &schema) != nil {
+				continue
+			}
+			if _, ok := schema.Properties[field]; ok {
+				ids = append(ids, m.ID)
+			}
+		}
+		if len(ids) > 0 {
+			sort.Strings(ids)
+			parts = append(parts, field+" ← "+strings.Join(ids, "|"))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "installed adapters provide it: " + strings.Join(parts, ", ")
+}
+
 func (p Problem) Error() string {
 	if p.Step == "" {
 		return p.Msg
@@ -312,9 +342,12 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 				}
 			}
 			if len(missing) > 0 && !plan.Wildcard {
-				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-					Msg: fmt.Sprintf("needs %s, which no earlier step provides (available: %s)",
-						strings.Join(missing, ", "), describe(available))})
+				msg := fmt.Sprintf("needs %s, which no earlier step provides (available: %s)",
+					strings.Join(missing, ", "), describe(available))
+				if hint := providerHint(missing); hint != "" {
+					msg += "; " + hint
+				}
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: msg})
 			}
 			// One-of needs (SPEC §7): at least one branch must be fully
 			// available; a failure names every branch and what it is missing.

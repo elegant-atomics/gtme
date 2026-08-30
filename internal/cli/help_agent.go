@@ -158,7 +158,7 @@ steps:
 	},
 	{
 		Name:        "full-funnel-with-uses",
-		Description: "source -> ai/filter (uses:, provides:) -> enrich -> ai/compose (uses:) -> deliver, the shape in SPEC.md §9. provides: (ADR-033) declares the judgment fields the filter stores beside its verdict, namespaced by pipeline (apollo-to-instantly.fit) unless marked canonical: true.",
+		Description: "source (masked) -> ai/filter (uses:, provides:) -> apollo/enrich (reveal past the filter, ADR-043) -> enrich -> ai/compose (uses:) -> deliver, the shape in SPEC.md §9. provides: (ADR-033) declares the judgment fields the filter stores beside its verdict, namespaced by pipeline (apollo-to-instantly.fit) unless marked canonical: true.",
 		Yaml: `name: apollo-to-instantly
 version: 1
 source:
@@ -169,7 +169,7 @@ source:
 steps:
   - id: icp-filter
     use: ai/filter
-    uses: [full_name, title, company_domain]
+    uses: [first_name, title, company_name]
     provides:
       fit: {enum: [strong, weak]}
       rationale: {}
@@ -178,6 +178,10 @@ steps:
         Keep only contacts likely to own outbound tooling decisions,
         and say how strong the fit is.
       batch_size: 25
+  - id: reveal
+    use: apollo/enrich
+    when: icp-filter.passed
+    cache: 30d
   - id: linkedin
     use: harvest/profile
     when: icp-filter.passed

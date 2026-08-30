@@ -42,11 +42,12 @@ func TestSpecExamplePipelinePlans(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"1. source [source] — apollo/search@1",
+		"1. source [source] — apollo/search@2",
 		"2. icp-filter [filter] — ai/filter@1",
-		"3. linkedin [enrich] — harvest/profile@1",
-		"4. personalize [compose] — ai/compose@1",
-		"5. send [deliver] — instantly/add-to-campaign@1",
+		"3. reveal [enrich] — apollo/enrich@1",
+		"4. linkedin [enrich] — harvest/profile@1",
+		"5. personalize [compose] — ai/compose@1",
+		"6. send [deliver] — instantly/add-to-campaign@1",
 		"send surface: 1 deliver step(s) (ADR-031)",
 		"send → instantly/add-to-campaign (touch scope: apollo-to-instantly)",
 		"requires:  any of linkedin_url | linkedin_internal_url | linkedin_sales_nav_url",
@@ -60,8 +61,9 @@ func TestSpecExamplePipelinePlans(t *testing.T) {
 		contains(t, res.stderr, want, "plan output")
 	}
 
-	// The contract really is satisfied: apollo provides the linkedin_url that
-	// harvest requires, and compose provides the lines instantly sends.
+	// The contract really is satisfied: the reveal step provides the
+	// linkedin_url that harvest requires (ADR-043 — masked search no longer
+	// carries it), and compose provides the lines instantly sends.
 	if strings.Contains(res.stderr, "plan problems") {
 		t.Errorf("plan reported problems:\n%s", res.stderr)
 	}

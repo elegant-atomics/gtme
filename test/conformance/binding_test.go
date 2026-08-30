@@ -121,36 +121,69 @@ func TestApolloBindingConformance(t *testing.T) {
 		t.Fatalf("records = %d, want 2\nlogs:\n%s", len(records), adaptertest.Logs(msgs))
 	}
 
+	// The masked surface (ADR-043): no email, no linkedin, the vendor's
+	// obfuscated last name (it keys the name-hash identity tier), and the
+	// has_email pay-signal.
 	jane := records[0].Fields
 	wantJane := map[string]any{
-		"apollo.id": "5f3b0c1a2d", "first_name": "Jane", "last_name": "Doe",
-		"full_name": "Jane Doe", "title": "VP Marketing", "seniority": "vp",
-		"email": "jane.doe@acme.com", "email_status": "verified",
-		"linkedin_url": "https://www.linkedin.com/in/jane-doe",
-		"city":         "Austin", "state": "Texas", "country": "United States",
-		"company_name": "Acme Inc", "company_website": "http://www.acme.com",
-		"company_linkedin_url": "https://www.linkedin.com/company/acme",
-		"company_industry":     "software", "company_domain": "acme.com",
-		"company_employees": float64(120),
+		"apollo.id": "5f3b0c1a2d", "first_name": "Jane", "last_name": "D.",
+		"title": "VP Marketing", "company_name": "Acme Inc",
+		"apollo.has_email": true,
 	}
 	if !reflect.DeepEqual(normalizeJSON(jane), normalizeJSON(wantJane)) {
 		t.Errorf("jane = %#v\nwant   %#v", normalizeJSON(jane), normalizeJSON(wantJane))
 	}
 	checkRegistryValid(t, "person", jane)
 
-	// Bob's email is Apollo's locked-email placeholder: a sentinel absent value
-	// that must never reach the ledger (it would poison the identity key).
 	bob := records[1].Fields
-	if _, has := bob["email"]; has {
-		t.Errorf("bob's locked-email placeholder leaked through: %v", bob["email"])
-	}
-	if bob["email_status"] != "locked" || bob["company_domain"] != "globex.io" {
+	if bob["apollo.has_email"] != false || bob["company_name"] != "Grove Labs" {
 		t.Errorf("bob = %#v", bob)
+	}
+	if _, has := bob["email"]; has {
+		t.Errorf("masked search must never emit an email: %v", bob["email"])
 	}
 	checkRegistryValid(t, "person", bob)
 
 	costs := adaptertest.Costs(msgs)
 	if len(costs) != 1 || costs[0].Provider != "apollo" || costs[0].Amount() != 0 {
+		t.Errorf("costs = %#v", costs)
+	}
+}
+
+// TestApolloEnrichConformance: the paid half of the split (ADR-043) — one
+// masked record in, the revealed surface out, one per-credit cost row.
+func TestApolloEnrichConformance(t *testing.T) {
+	b, fixtures := loadShipped(t, "apollo-enrich")
+	eng := &binding.Engine{B: b, HTTP: fixtures.Doer()}
+
+	msgs, err := adaptertest.Run(t, eng, adaptertest.Input{
+		Config: map[string]any{},
+		Records: []protocol.Message{adaptertest.Record("verify",
+			map[string]any{"apollo.id": "5f3b0c1a2d", "first_name": "Jane", "last_name": "D."})},
+		Env: map[string]string{"APOLLO_API_KEY": "k"},
+	})
+	if err != nil {
+		t.Fatalf("engine: %v\nlogs:\n%s", err, adaptertest.Logs(msgs))
+	}
+	records := adaptertest.Records(msgs)
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1\nlogs:\n%s", len(records), adaptertest.Logs(msgs))
+	}
+	got := records[0].Fields
+	for field, want := range map[string]any{
+		"email": "jane.doe@acme.com", "email_status": "verified",
+		"last_name": "Doe", "full_name": "Jane Doe",
+		"linkedin_url":   "https://www.linkedin.com/in/jane-doe",
+		"company_domain": "acme.com", "company_employees": float64(120),
+	} {
+		if normalizeJSON(got[field]) != normalizeJSON(want) {
+			t.Errorf("%s = %#v, want %#v", field, got[field], want)
+		}
+	}
+	checkRegistryValid(t, "person", got)
+
+	costs := adaptertest.Costs(msgs)
+	if len(costs) != 1 || costs[0].Provider != "apollo" || costs[0].Amount() != 0.01 {
 		t.Errorf("costs = %#v", costs)
 	}
 }

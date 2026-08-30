@@ -11,12 +11,14 @@ import (
 
 // builtinBindings are the embedded bindings registered as built-in adapters.
 // apollo-search joined attio-assert when its Go twin was retired (the M8
-// receipt diff proved parity; the scaffolding had done its job). The
+// receipt diff proved parity; the scaffolding had done its job), and
+// apollo-enrich joined in M20 (ADR-043: the vendor split search from
+// reveal, so the binary ships both halves). The
 // harvest-profile and instantly-add-to-campaign reference ports stay
 // unregistered — their ids belong to the Go adapters that keep tier-2
 // capabilities (posts/role_history; campaign-name resolution); they load as
 // external binding adapters or through the conformance kit.
-var builtinBindings = []string{"apollo-search", "attio-assert"}
+var builtinBindings = []string{"apollo-search", "apollo-enrich", "attio-assert"}
 
 // Loader is the adapters.BindingLoader implementation: binding.yaml (plus the
 // fixtures beside it) → manifest + engine factory. Wired up by

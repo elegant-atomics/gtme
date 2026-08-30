@@ -16,12 +16,14 @@ import (
 
 func TestBundleFreezeMoveSimulateDry(t *testing.T) {
 	srv := bindingFixtureServer(t, "apollo-search")
+	esrv := bindingFixtureServer(t, "apollo-enrich")
 	keys := []string{"APOLLO_API_KEY=k", "ATTIO_API_KEY=k"}
 
 	// Harness A: an external binding source feeding the built-in attio/assert
 	// binding, run dry to mint the run the freeze snapshots.
 	a := newHarness(t)
 	a.writeBinding("apollox/search", filepath.Join(repoRoot(), "spec", "bindings", "apollo-search", "binding.yaml"))
+	a.writeBinding("apollox/enrich", filepath.Join(repoRoot(), "spec", "bindings", "apollo-enrich", "binding.yaml"))
 	a.write("p.yaml", `name: bundle-proof
 source:
   use: apollox/search
@@ -30,6 +32,10 @@ source:
     base_url: `+jsonString(srv.URL)+`
 
 steps:
+  - id: reveal
+    use: apollox/enrich
+    with:
+      base_url: `+jsonString(esrv.URL)+`
   - id: deliver
     use: attio/assert
     variables:
@@ -52,6 +58,8 @@ steps:
 		"manifest.json", "pipeline.yaml",
 		"adapters/apollox-search/binding.yaml",
 		"adapters/apollox-search/fixtures/conformance.json",
+		"adapters/apollox-enrich/binding.yaml",
+		"adapters/apollox-enrich/fixtures/conformance.json",
 		"adapters/attio-assert/binding.yaml",
 		"adapters/attio-assert/fixtures/conformance.json",
 		"registry/person.json", "registry/company.json",
