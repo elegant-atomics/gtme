@@ -255,3 +255,20 @@ re-confirmed here, not re-litigated.
   the Messages API demands an `anthropic-workspace-id` header for them
   and the engine never sends one. Recovery exists (`engine:
   claude-code`), so deferred; the fix is a config/env passthrough.
+
+## (b) Spec question queued from Campaign 1 story 5 (2026-08-30) — proposed, not applied
+
+5. **Delivery idempotency is global per adapter, not per campaign.**
+   Observed: `deliveries` rows carry `target = 'instantly/add-to-campaign'`
+   (the adapter id) and `idempotency = <email>`, so §3's
+   UNIQUE(target, idempotency) dedupes across *campaigns*: a record
+   delivered to campaign A is silently cache-skipped when a later
+   pipeline delivers to campaign B through the same adapter (this is
+   also what campaign zero's 2026-08-30 re-run observed as "8 cached"
+   from a prior session). Defensible as a global do-not-touch guarantee;
+   surprising as campaign semantics; §10.6 doesn't say which is meant.
+   **Proposed direction:** decide the scope explicitly — either the
+   adapter composes the campaign into the idempotency key
+   (`<campaign-id>|<email>`, per-campaign dedupe) or §10.6 states the
+   global-per-adapter guarantee in words an operator will find. Queued
+   for a session packet; not applied.

@@ -555,3 +555,53 @@ New surface gaps, verified and queued:
   response until the agent switched seed identities — by design
   (freshness is the read gate), logged as operator-experience note, not
   a gap.
+
+### 2026-08-30 — Campaign 1: the eight stories, live, on the split economics (M20)
+
+Unblocked by ADR-043/M20 the same day it stopped. Total spend for the
+whole enactment ≈ $1.87. By story:
+
+1. **Guard** ✓ (logged above): the mistyped `uses:` failed at exit 2
+   naming the fix, zero network.
+2. **Launch** ✓ — run `01M1AE2R0DDP8E0BGWQYN1J6D2`, and the receipt *is*
+   the split economics: 24 masked rows $0 → filter dropped 5 before
+   anyone paid → 19 reveals $0.19 → harvest $0.228 → compose $0.0927 →
+   14 delivered, all ATTEST-confirmed; $0.5606 total. Finding: the new
+   `api_search` treats a long qualified phrase ("vp marketing, saas,
+   50-200 employees") as a literal and returns zero — the run completed
+   cleanly through every step at $0; use short keywords plus the
+   structured config filters. Second finding: 5 records revealed without
+   an email failed the deliver's needs floor per record (reason recorded
+   in `step_events`), and the run continued — correct, though "failed"
+   next to `on_missing: skip` reads ambiguously; an operator-experience
+   note, not a gap.
+3. **Interrogate** ✓ — every field on a delivered record shows a real
+   `source` adapter@version, confidence, and this run's id; deliveries
+   show `confirmed`. Note for operators: a masked-sourced identity keeps
+   its `nh:` name-hash key after reveal (§4 keys at the source and never
+   re-keys); the email is a field on it, not its name.
+4. **Recover** — honestly partial. Three timed kills (45s/30s/80s, up to
+   40 records) all landed after completion: the funnel is too fast at
+   validation scale to snipe (40 records through five steps in under
+   80s). What was proven live: `--resume` of a completed run is a $0
+   no-op, twice, and the per-(identity, step) cost invariant held at
+   max 1 across every attempt. The mid-step kill itself remains covered
+   by the offline resume acceptance.
+5. **Segment** ✓ — `--save validation-delivered`; count matches the
+   receipt (14). `deliveries.target` is the adapter id, as the script
+   said; see AUDIT (b) 5 for the scope question this surfaced.
+6. **Iterate** ✓ — the concrete number behind "test small": a compose
+   prompt edit re-ran against 3 records in 8 seconds for **$0.0131** —
+   only the edited step re-paid (its cache signature changed), while
+   filter verdicts, reveals and profiles all served from cache. The same
+   edit at the first run's scope would have cost ~$0.08 in compose alone,
+   plus ~$0.42 of re-fetches without the cache.
+7. **Top-up** ✓ — the identical re-run: **$0 spent, $0.418+ avoided, 95
+   records skipped, zero new deliveries, 0.4 seconds.** The savings
+   counter next to the spend line is the receipt working as designed.
+8. **Report** ✓ — `gtme runs <id>` reconstructs the per-step receipt and
+   total from the ledger alone.
+
+Cross-run bonus observed in 4: filter judgments and reveals from earlier
+runs served later runs' overlapping records from cache — M16's signature
+cache and the enrich freshness window compounding across pipelines.
