@@ -243,3 +243,15 @@ re-confirmed here, not re-litigated.
    (re-recorded from the new shape), cost table. Queued for a session
    packet; not applied, per SPEC §12(a) — Campaign 1 stays blocked on
    this decision.
+
+## Deferred (a) items — flagged 2026-08-30 (agent round-trip, round 2), not executed
+
+- **`help --agent` omits the `sql/*` step adapters.** `gtme plan`
+  resolves `sql/filter` and `sql/transform`, but the doc's adapter list
+  (from `adapters.Installed()`) carries no `sql/` ids — §8 requires every
+  resolvable adapter's manifest. Root cause not yet chased (they are
+  likely registered outside the builtin registry the doc reads).
+- **`internal/ai`'s `api` engine fails identity-linked Anthropic keys**:
+  the Messages API demands an `anthropic-workspace-id` header for them
+  and the engine never sends one. Recovery exists (`engine:
+  claude-code`), so deferred; the fix is a config/env passthrough.
