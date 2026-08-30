@@ -88,9 +88,18 @@ Add expectations for your binding to `test/conformance/binding_test.go`
 - [ ] Header comment says what the API is, auth env var, and docs URL
 - [ ] Cost declaration is honest (`per: record|request`, or absent)
 
+**6. Share it (optional).** Bindings worth sharing live in the registry:
+[github.com/elegant-atomics/gtme-bindings](https://github.com/elegant-atomics/gtme-bindings)
+publishes the index `gtme adapters search` reads. A PR there adds your
+binding to the *verified* set (its CI runs your fixtures on every
+change) or lists your own repository as a *community* entry — either
+way operators install it with `gtme adapters add <ref>`, verified and
+pinned. Its README has the checklist and the content-hash rule.
+
 You don't need a PR to *use* a binding, by the way — drop
 `binding.yaml` (+ fixtures) into `~/.gtme/adapters/<name>/` and it
-resolves like any built-in. PRs are for bindings worth sharing.
+resolves like any built-in (or `gtme adapters add` it from your own
+repository). PRs are for bindings worth sharing.
 
 ## Process adapters (tier 2)
 
