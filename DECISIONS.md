@@ -2402,3 +2402,49 @@ estimated ~80 — the difference is the discovery, fixtures and verbs
 sections, without which the round-trip criterion is not met by the
 schema alone.
 **Spec impact:** None beyond v0.23 (marked built as v0.24).
+
+### 2026-08-30 — M19 internals: the bindings registry (ADR-042)
+
+**Question:** How does the offline acceptance drive "a local tarball
+server" without changing the address grammar, what exactly does the
+content hash cover, how does `verify` drive a fixtures run for an
+arbitrary binding, and what happened to ADR-042's "minting verb"?
+**Choice:** (1) The two GitHub endpoints (`api.github.com` for ref →
+commit, `codeload.github.com` for the tarball) are env-overridable —
+`GTME_GITHUB_API`, `GTME_GITHUB_CODELOAD` — so the e2e stands up one
+local server speaking both path shapes; `github.com/…` stays the only
+address form. `GITHUB_TOKEN` is read from the secrets store first, the
+environment second. (2) The content hash is sha256 over the binding
+directory's files, sorted by slash path, each written as path NUL body
+NUL, with `.source.json` itself excluded; the registry's CI computes the
+same rule. `.source.json` carries §8's quartet plus the repository url
+and path — `update` needs them to re-fetch, and remove-and-re-add would
+otherwise be the only pin move. (3) `fixtures/conformance.json` gains
+two optional members: `config` (the step config `verify` opens the run
+with; must cover the config schema's required keys) and `input` (one
+sample record's fields, for a role that consumes records). `verify`
+drives the real engine with the fixture set as its HTTP seam — the
+conformance-kit shape — and fails a source whose fixtures yield zero
+records; a binding whose fixtures cannot be driven fails with the
+message naming the member to add. Older fixture files without the
+members still serve `--simulate` unchanged. (4) `add` installs into the
+home half of the §6 search path (never `GTME_ADAPTER_PATH`, the
+operator's own overlay), refuses an id that is already installed
+(`update` is the only pin move, staged and renamed so a failed update
+leaves the old install intact), and consults the index best-effort: an
+unreachable index warns and skips the hash check, a hash mismatch
+refuses. (5) ADR-042's consequences say "ADR-030's minting verb, built
+as part of this", but §8's DECIDED verb table — "the entire v0 verb
+set" — carries no such verb and ROADMAP still parks it ("needs a small
+design pass on invocation shape"). The verb table wins: no verb was
+added; the first registry entry's fixtures are minted registry-side
+from the round-trip's retained payloads (values synthesized — the
+payloads hold real contact data and the registry is public). Flagged in
+the M19 PR for the human; promoting the verb remains a session-packet
+decision.
+**Why:** The M19 acceptance runs offline end to end: search by vendor,
+verified pinned install with `.source.json`, failing/missing fixtures
+refuse, index mismatch refuses, the installed binding plans and
+simulates, update moves the pin only when asked, the listing shows
+source and pin, and a frozen bundle carries `.source.json`.
+**Spec impact:** None beyond v0.23 (marked built as v0.25).

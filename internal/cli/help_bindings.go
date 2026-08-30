@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/elegant-atomics/gtme/internal/adapterinstall"
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/binding"
 	"github.com/elegant-atomics/gtme/spec"
@@ -97,19 +98,18 @@ var bindingsVerbs = []agentVerb{
 	{"gtme plan pipeline.yaml", "resolve every `use: <id>` — built-ins first, then the discovery path; a binding that fails the schema, declares a different id than its directory, or lacks a credential is reported here, with no network and no spend"},
 	{"gtme run pipeline.yaml --simulate", "execute offline: the binding's requests are answered from fixtures/conformance.json instead of the network; a binding without fixtures is surfaced as a gap"},
 	{"gtme run pipeline.yaml --dry-run", "arm everything but delivery: a deliver binding receipts its resolved request instead of sending"},
-	{"gtme freeze RUN_ID|last --bundle DIR", "pack the referenced bindings with their fixtures into a portable campaign bundle (ADR-029); a bundle resolves its own copies first"},
+	{"gtme freeze RUN_ID|last --bundle DIR", "pack the referenced bindings with their fixtures (and their .source.json pins) into a portable campaign bundle (ADR-029); a bundle resolves its own copies first"},
 	{"gtme help --bindings", "print this document"},
 }
 
-// registryVerbs are ADR-042's registry verbs (SPEC §8 `gtme adapters`),
-// listed so an author knows how a finished binding is shared and installed;
-// they ship in M19 and are flagged as such until then.
+// registryVerbs are ADR-042's registry verbs (SPEC §8 `gtme adapters`, built
+// in M19): how a finished binding is shared, found, and installed.
 var registryVerbs = []agentVerb{
 	{"gtme adapters", "list installed adapters with their source and pin (.source.json)"},
-	{"gtme adapters search TEXT", "search the registry index by id, vendor, description and role (GTME_REGISTRY overrides the index URL)"},
+	{"gtme adapters search TEXT", "search the registry index by id, vendor, description and role"},
 	{"gtme adapters add github.com/<owner>/<repo>/<path>[@ref]", "fetch a binding over HTTPS at a pinned ref, verify it, install it under ~/.gtme/adapters/<id, slashes → dashes>/ with .source.json beside it"},
-	{"gtme adapters verify ID", "validate against the schema, run the fixtures offline, print the hosts it will call and the credentials it will demand; a binding with no fixtures, or failing ones, does not install"},
-	{"gtme adapters update ID [@ref]", "re-fetch at a newer ref, only when asked"},
+	{"gtme adapters verify ID", "validate against the schema, run the fixtures offline (a `config` member in fixtures/conformance.json drives the run; `input` supplies a sample record for a role that consumes them), print the hosts it will call and the credentials it will demand; a binding with no fixtures, or failing ones, does not install"},
+	{"gtme adapters update ID [@ref]", "re-fetch at a newer ref, only when asked — nothing else moves a pin"},
 }
 
 func bindingsSurface() (bindingsDoc, error) {
@@ -141,7 +141,7 @@ func bindingsSurface() (bindingsDoc, error) {
 		Reference: ref,
 		Verbs:     bindingsVerbs,
 		Registry: bindingsRegistry{
-			Status: "queued (SPEC §11 M19) — these verbs are not in this build; until then a binding is installed by hand on discovery.path",
+			Status: "live — the index at " + adapterinstall.DefaultRegistry + " (GTME_REGISTRY overrides); verified entries are fixture-tested by the registry's CI, community entries point at their authors' repositories and publish by pull request",
 			Verbs:  registryVerbs,
 		},
 	}, nil

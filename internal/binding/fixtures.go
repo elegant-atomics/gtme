@@ -15,6 +15,13 @@ import (
 // (SPEC §8), which is exactly the double duty ADR-028 wants fixtures to do.
 type FixtureSet struct {
 	Responses []FixtureResponse `json:"responses"`
+	// Config and Input make the fixtures drivable by `gtme adapters verify`
+	// (SPEC §8, ADR-042): Config is the step config the verify run opens
+	// with (covering the config schema's required keys), and Input is one
+	// sample record's fields for a binding whose role consumes records.
+	// Optional; older fixture files without them still serve --simulate.
+	Config map[string]any `json:"config,omitempty"`
+	Input  map[string]any `json:"input,omitempty"`
 }
 
 // FixtureResponse is one canned reply.

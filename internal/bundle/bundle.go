@@ -204,6 +204,12 @@ func bindingFiles(res *adapters.Resolved) (map[string][]byte, error) {
 	if fixtures, err := fs.ReadFile(dir, binding.FixtureFile); err == nil {
 		out[binding.FixtureFile] = fixtures
 	}
+	// A registry-installed binding carries its pin (SPEC §8 `.source.json`,
+	// ADR-042); the bundle records it so a frozen campaign names the exact
+	// commit its adapter came from.
+	if src, err := fs.ReadFile(dir, ".source.json"); err == nil {
+		out[".source.json"] = src
+	}
 	return out, nil
 }
 
