@@ -2,9 +2,15 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtme.spec/binding-schema.json",
   "title": "Declarative binding",
-  "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md §10a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter — no expression language may ever grow in here. Templating: '{{config.x}}', '{{record.field}}', '{{variables.name}}', '{{session}}'. A leaf that is exactly one placeholder substitutes the typed value; placeholders may list alternatives separated by '|' (first non-empty wins); leaves resolving to empty/null are omitted from the request (omitempty). In a deliver body, an object may carry the key '$variables': true — the resolved variables: mapping (minus any variable referenced individually elsewhere in the body) is spliced into that object. The engine pre-fills config defaults declared in config_schema.",
+  "description": "A tier-1 adapter: a YAML document the runner's generic HTTP engine interprets deterministically (SPEC.md \u00a710a, ADR-022). Validate after decoding the YAML to JSON. Deliberately ~8 primitives; the moment a binding needs logic it graduates to a process adapter \u2014 no expression language may ever grow in here. Templating: '{{config.x}}', '{{record.field}}', '{{variables.name}}', '{{session}}'. A leaf that is exactly one placeholder substitutes the typed value; placeholders may list alternatives separated by '|' (first non-empty wins); leaves resolving to empty/null are omitted from the request (omitempty). In a deliver body, an object may carry the key '$variables': true \u2014 the resolved variables: mapping (minus any variable referenced individually elsewhere in the body) is spliced into that object. The engine pre-fills config defaults declared in config_schema.",
   "type": "object",
-  "required": ["id", "version", "role", "entity_type", "request"],
+  "required": [
+    "id",
+    "version",
+    "role",
+    "entity_type",
+    "request"
+  ],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -12,21 +18,39 @@
       "minLength": 1,
       "description": "Adapter id, e.g. 'attio/assert'. Named by the contract owner (ADR-026). The id's vendor prefix is the COST provider name."
     },
-    "version": { "type": "integer", "minimum": 1 },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
     "role": {
-      "enum": ["source", "enrich", "deliver"],
+      "enum": [
+        "source",
+        "enrich",
+        "deliver"
+      ],
       "description": "source: pagination + cursor/STATE, config 'limit' caps emitted records; enrich: per-record request; deliver: idempotency + dry-run receipts."
     },
-    "entity_type": { "type": "string", "minLength": 1 },
+    "entity_type": {
+      "type": "string",
+      "minLength": 1
+    },
     "needs": {
-      "description": "Same manifest surface as process adapters (SPEC.md §6): a JSON Schema, 'dynamic', or the dynamic-with-floor object form."
+      "description": "Same manifest surface as process adapters (SPEC.md \u00a76): a JSON Schema, 'dynamic', or the dynamic-with-floor object form."
     },
     "provides": {
-      "description": "Same manifest surface as process adapters (SPEC.md §6)."
+      "description": "Same manifest surface as process adapters (SPEC.md \u00a76)."
     },
-    "config_schema": { "type": "object" },
-    "freshness_days": { "type": "integer", "minimum": 0 },
-    "cost_estimate_usd": { "type": "number", "minimum": 0 },
+    "config_schema": {
+      "type": "object"
+    },
+    "freshness_days": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost_estimate_usd": {
+      "type": "number",
+      "minimum": 0
+    },
     "keep_payloads": {
       "type": "boolean",
       "description": "ADR-030: whether the engine attaches raw responses to this binding's RECORDs for retention. Default true; steps may override with keep_payloads: false in config."
@@ -36,21 +60,41 @@
       "minimum": 0,
       "description": "ADR-030: retention window for this binding's payloads (default 90). 0 = no expiry."
     },
-    "credentials": { "type": "array", "items": { "type": "string" } },
-    "credentials_optional": { "type": "array", "items": { "type": "string" } },
+    "credentials": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "credentials_optional": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "auth": {
       "type": "object",
-      "required": ["type", "env"],
+      "required": [
+        "type",
+        "env"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "enum": ["header", "query", "basic", "bearer"] },
+        "type": {
+          "enum": [
+            "header",
+            "query",
+            "basic",
+            "bearer"
+          ]
+        },
         "name": {
           "type": "string",
           "description": "Header or query-param name; unused for basic/bearer."
         },
         "env": {
           "type": "string",
-          "description": "Env var holding the credential (resolved per SPEC.md §6 credentials rules)."
+          "description": "Env var holding the credential (resolved per SPEC.md \u00a76 credentials rules)."
         },
         "prefix": {
           "type": "string",
@@ -60,20 +104,38 @@
     },
     "request": {
       "type": "object",
-      "required": ["method", "url"],
+      "required": [
+        "method",
+        "url"
+      ],
       "additionalProperties": false,
-      "description": "Templating draws only from step config, the record's canonical fields, resolved variables, and the session id — no expressions, no computation.",
+      "description": "Templating draws only from step config, the record's canonical fields, resolved variables, and the session id \u2014 no expressions, no computation.",
       "properties": {
-        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
-        "url": { "type": "string", "minLength": 1 },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
         "query": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Query-param templates; empty resolutions are omitted."
         },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "body": {
           "description": "Body template: a JSON shape whose string leaves are templates. Empty resolutions are omitted. '$variables': true in an object splices the resolved variables map."
@@ -82,40 +144,95 @@
     },
     "pagination": {
       "type": "object",
-      "required": ["strategy"],
+      "required": [
+        "strategy"
+      ],
       "additionalProperties": false,
       "properties": {
-        "strategy": { "enum": ["page", "cursor", "offset"] },
-        "param": { "type": "string", "description": "Request param carrying the page number / cursor / offset." },
-        "in": { "enum": ["query", "body"], "description": "Where pagination params ride (default query)." },
-        "cursor_path": { "type": "string", "description": "Dotted path to the next cursor in the response (cursor strategy)." },
+        "strategy": {
+          "enum": [
+            "page",
+            "cursor",
+            "offset"
+          ]
+        },
+        "param": {
+          "type": "string",
+          "description": "Request param carrying the page number / cursor / offset."
+        },
+        "in": {
+          "enum": [
+            "query",
+            "body"
+          ],
+          "description": "Where pagination params ride (default query)."
+        },
+        "cursor_path": {
+          "type": "string",
+          "description": "Dotted path to the next cursor in the response (cursor strategy)."
+        },
         "page_size": {
           "description": "Records per page: an integer or a template (e.g. '{{config.per_page}}').",
-          "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string" }]
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string"
+            }
+          ]
         },
-        "size_param": { "type": "string", "description": "Request param carrying the page size." },
+        "size_param": {
+          "type": "string",
+          "description": "Request param carrying the page size."
+        },
         "termination": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "empty_records": { "type": "boolean", "description": "Stop when a page yields zero records (engine default: always on)." },
-            "short_page": { "type": "boolean", "description": "Stop when a page yields fewer records than page_size." },
-            "total_pages_path": { "type": "string", "description": "Dotted path to a total-page count; alternatives via '|'." }
+            "empty_records": {
+              "type": "boolean",
+              "description": "Stop when a page yields zero records (engine default: always on)."
+            },
+            "short_page": {
+              "type": "boolean",
+              "description": "Stop when a page yields fewer records than page_size."
+            },
+            "total_pages_path": {
+              "type": "string",
+              "description": "Dotted path to a total-page count; alternatives via '|'."
+            }
           }
         },
-        "max": { "type": "integer", "minimum": 1, "description": "Hard cap on pages fetched." }
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Hard cap on pages fetched."
+        }
       }
     },
     "extract": {
       "type": "object",
-      "required": ["records", "fields"],
+      "required": [
+        "records",
+        "fields"
+      ],
       "additionalProperties": false,
       "properties": {
         "records": {
           "description": "Dotted path to the record array (or single record) in the response; a list means first non-empty wins.",
           "anyOf": [
-            { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
           ]
         },
         "fields": {
@@ -124,21 +241,28 @@
           "description": "canonical (or vendor-namespaced) field name -> extraction rule.",
           "additionalProperties": {
             "oneOf": [
-              { "type": "string", "description": "Dotted path within a record." },
+              {
+                "type": "string",
+                "description": "Dotted path within a record."
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "path": { "type": "string" },
+                  "path": {
+                    "type": "string"
+                  },
                   "paths": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "minItems": 1,
                     "description": "Alternatives; first non-empty wins."
                   },
                   "transform": {
                     "type": "string",
-                    "description": "A registry normalization rule id (SPEC.md §4a) — or 'linkedin', the engine-owned §4 classify-and-route rule that stores a LinkedIn-URL-shaped value under the field matching its shape. Never arbitrary logic."
+                    "description": "A registry normalization rule id (SPEC.md \u00a74a) \u2014 or 'linkedin', the engine-owned \u00a74 classify-and-route rule that stores a LinkedIn-URL-shaped value under the field matching its shape. Never arbitrary logic."
                   },
                   "absent": {
                     "type": "array",
@@ -158,40 +282,81 @@
     },
     "errors": {
       "type": "object",
-      "description": "HTTP status (or status class like '4xx') -> verdict mapping; statuses the map does not name follow the engine's default classification (SPEC.md §8 exit-code classes).",
+      "description": "HTTP status (or status class like '4xx') -> verdict mapping; statuses the map does not name follow the engine's default classification (SPEC.md \u00a78 exit-code classes).",
       "additionalProperties": {
         "type": "object",
-        "required": ["verdict"],
+        "required": [
+          "verdict"
+        ],
         "additionalProperties": false,
         "properties": {
-          "verdict": { "enum": ["fail_record", "fail_run", "retry", "skip"] },
-          "reason": { "type": "string" }
+          "verdict": {
+            "enum": [
+              "fail_record",
+              "fail_run",
+              "retry",
+              "skip"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
         }
       }
     },
     "idempotency": {
-      "enum": ["native", "ledger"],
+      "enum": [
+        "native",
+        "ledger"
+      ],
       "description": "Which party guarantees delivery dedupe: the vendor's own semantics (native, e.g. an assert/upsert endpoint) or the runner's deliveries table (ledger). Required for role: deliver."
+    },
+    "idempotency_scope": {
+      "type": "string",
+      "description": "Deliver bindings (ADR-044): config key whose resolved value scopes deliveries rows (SPEC \u00a78). Optional."
     },
     "cost": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "per": { "enum": ["record", "request", "unit"] },
-        "amount_usd": { "type": "number", "minimum": 0 },
-        "unit_path": { "type": "string", "description": "Dotted path to a units-consumed count in the response (per: unit)." }
+        "per": {
+          "enum": [
+            "record",
+            "request",
+            "unit"
+          ]
+        },
+        "amount_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit_path": {
+          "type": "string",
+          "description": "Dotted path to a units-consumed count in the response (per: unit)."
+        }
       }
     },
     "retry": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "max_attempts": { "type": "integer", "minimum": 0 },
-        "backoff_seconds": { "type": "number", "minimum": 0 },
-        "rate_per_hour": { "type": "integer", "minimum": 1 },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backoff_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rate_per_hour": {
+          "type": "integer",
+          "minimum": 1
+        },
         "windows": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Hourly send/fetch windows, e.g. '09:00-17:00'."
         }
       }
@@ -201,8 +366,16 @@
       "additionalProperties": false,
       "description": "Optional pagination-consistency session: a UUID minted per run and passed through on every request.",
       "properties": {
-        "param": { "type": "string" },
-        "in": { "enum": ["header", "query", "body"] }
+        "param": {
+          "type": "string"
+        },
+        "in": {
+          "enum": [
+            "header",
+            "query",
+            "body"
+          ]
+        }
       }
     }
   }
