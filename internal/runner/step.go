@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +29,9 @@ type item struct {
 	fields     map[string]any
 	// fetched names the projected fields whose provenance is an external
 	// fetch (SPEC §10.3, ADR-035) — what an AI step fences.
-	fetched []string
-	idem    string // deliver steps
+	fetched  []string
+	idem     string // deliver steps
+	varsHash string // hash of resolved variables (ADR-045), deliver steps
 
 	advanced bool // state moved to this step
 	verdict  bool // a VERDICT arrived (filter steps)
@@ -356,15 +359,31 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 			return nil, err
 		}
 		it.idem = idem
-		delivered, err := r.l.AlreadyDelivered(ctx, st.Target(), deliveryScope(st), idem)
+		// Variables resolve before the dedupe decision (ADR-045): under
+		// redeliver: on_change, "the same delivery" means the same values.
+		rv := resolveVariables(st.Variables, it)
+		it.varsHash = hashVariables(rv.Resolved)
+		delivered, storedHash, err := r.l.DeliveredState(ctx, st.Target(), deliveryScope(st), idem)
 		if err != nil {
 			return nil, err
 		}
 		if delivered {
-			if err := r.skip(ctx, st, it, "already_delivered"); err != nil {
-				return nil, err
+			switch st.RedeliverMode {
+			case "always":
+				// A natively idempotent target re-delivers on request.
+			case "on_change":
+				if it.varsHash == storedHash {
+					if err := r.skip(ctx, st, it, "unchanged"); err != nil {
+						return nil, err
+					}
+					return nil, nil
+				}
+			default:
+				if err := r.skip(ctx, st, it, "already_delivered"); err != nil {
+					return nil, err
+				}
+				return nil, nil
 			}
-			return nil, nil
 		}
 
 		// Suppression (SPEC §8, ADR-021): a chosen contact policy layered above
@@ -382,7 +401,6 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 		// Deliver completeness (SPEC §8, ADR-019): every variables: target must
 		// resolve to a non-empty value before the record may send — blank merge
 		// fields never do. The policy applies armed and dry alike.
-		rv := resolveVariables(st.Variables, it)
 		if len(rv.Missing) > 0 {
 			return nil, r.holdMissing(ctx, st, it, rv)
 		}
@@ -393,6 +411,24 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 		}
 	}
 	return it, nil
+}
+
+// hashVariables is the ADR-045 change signature: sha256 over the resolved
+// variables, sorted by target, each written as target NUL value NUL.
+func hashVariables(resolved map[string]string) string {
+	keys := make([]string, 0, len(resolved))
+	for k := range resolved {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write([]byte{0})
+		h.Write([]byte(resolved[k]))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // resolveVariables renders a record's deliver variables: each target merge
@@ -982,7 +1018,7 @@ func (r *runner) applyAttest(ctx context.Context, st *planner.Step, byKey map[st
 		}
 		// The record exists at the target: keep the row so idempotency holds,
 		// marked for what it is, and fail the record.
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, it.varsHash, r.runID); err != nil {
 			return err
 		}
 		if err := r.l.SetDeliveryStatus(ctx, st.Target(), deliveryScope(st), it.idem, ledger.DeliveryContradicted); err != nil {
@@ -1109,7 +1145,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		return err
 	}
 	if st.IsDeliver {
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, it.varsHash, r.runID); err != nil {
 			return err
 		}
 		// The handoff itself (SPEC §8, ADR-032): membership in the target

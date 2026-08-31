@@ -76,6 +76,10 @@ type Step struct {
 	// (ADR-031).
 	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
+	// Redeliver is a deliver step's repeat policy (SPEC §8/§9, ADR-045):
+	// always | on_change | never; empty means the adapter's default.
+	Redeliver string `yaml:"redeliver,omitempty" json:"redeliver,omitempty"`
+
 	// Respend declares that re-running the pipeline MAY pay for this step's
 	// records again (SPEC §7/§9, ADR-038): it silences the plan's respend
 	// warning and nothing else.
@@ -221,6 +225,11 @@ func (p *Pipeline) normalize() error {
 	// role-gates variables:/on_missing:/idempotency:/record:/suppress: to
 	// deliver steps (SPEC §9, ADR-031), the way it gates uses:.
 	wellFormed := func(s *Step) error {
+		switch s.Redeliver {
+		case "", "always", "on_change", "never":
+		default:
+			return fmt.Errorf("pipeline: %s: redeliver must be \"always\", \"on_change\" or \"never\" (got %q)", s.ID, s.Redeliver)
+		}
 		switch s.OnMissing {
 		case "", "skip", "fail":
 		default:

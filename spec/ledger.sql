@@ -92,6 +92,7 @@ CREATE TABLE deliveries (
   created_at     TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
   sent_at        TEXT,                    -- set only by attestation (ADR-036)
+  variables_hash TEXT NOT NULL DEFAULT '', -- resolved variables at delivery (ADR-045); drives redeliver: on_change
   UNIQUE(target, scope, idempotency)
 );
 

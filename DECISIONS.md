@@ -2661,3 +2661,29 @@ reviewer sees why nothing will send.
 §6 (manifest `idempotency`), §8 (redeliver modes and defaults), §9
 (`redeliver:` grammar), §10a (the binding key's meaning completed); §11
 milestone M22; schema artifacts ride the build (machine-compared).
+
+### 2026-08-31 — M22 internals: on-change re-delivery (ADR-045)
+
+**Question:** Where does the change signature come from, and what does a
+re-delivery do to the existing row?
+**Choice:** (1) Variables now resolve *before* the dedupe decision on a
+deliver step (they were resolved after it): under `on_change`, "the same
+delivery" means the same resolved values, so the hash — sha256 over the
+resolved targets, sorted, target NUL value NUL — must exist when the
+skip/deliver call is made. A step with no `variables:` hashes the empty
+map, so it re-delivers only under `always`. (2) `RecordDelivery` becomes
+an upsert on the (target, scope, idempotency) key: a conflict is a
+re-delivery — the row keeps its first `created_at`, takes the new hash
+and run, and returns to `accepted` so attestation runs a fresh cycle
+(a contradicted row heals the same way when the next changed delivery
+succeeds). (3) The mode resolves at plan time onto the step
+(`RedeliverMode`), printed in the plan for deliver steps whenever it is
+not `never`, and validated there: `always`/`on_change` without
+`idempotency: native` on the manifest is a config problem naming the
+rule. (4) attio/assert needed no change — its binding already declared
+`native`; the bridge now carries the declaration onto the manifest.
+**Why:** The M22 acceptance runs offline against a counting local
+server: one assert, an unchanged skip with reason `unchanged`, a changed
+re-assert with the same single row and a moved hash, `always` repeating,
+`never` restoring the floor, and csv/deliver refusing the key at plan.
+**Spec impact:** None beyond v0.30 (marked built as v0.31).

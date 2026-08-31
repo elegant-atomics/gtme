@@ -99,6 +99,9 @@ func Print(w io.Writer, p *Plan) {
 				idem = "(identity key)"
 			}
 			fmt.Fprintf(w, "     idempotency: %s\n", idem)
+			if s.RedeliverMode != "" && s.RedeliverMode != "never" {
+				fmt.Fprintf(w, "     redeliver: %s\n", s.RedeliverMode)
+			}
 			if len(s.Variables) > 0 {
 				targets := make([]string, 0, len(s.Variables))
 				for t := range s.Variables {

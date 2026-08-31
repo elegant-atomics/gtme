@@ -158,6 +158,10 @@
           },
           "description": "Deliver steps only (ADR-018/019/031): egress mapping of target merge-field name → canonical or namespaced ledger field. Its values are the step's dynamic needs (SPEC.md §6, §7); the planner validates each against upstream provides and rejects the key on any other step."
         },
+        "redeliver": {
+          "enum": ["always", "on_change", "never"],
+          "description": "ADR-045, deliver steps only: repeat policy. Defaults to on_change when the adapter declares idempotency: native, never otherwise; always/on_change are plan errors on a target without native idempotency."
+        },
         "on_missing": {
           "enum": [
             "skip",
