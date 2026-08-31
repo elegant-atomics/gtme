@@ -1983,8 +1983,8 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
-- **M21 — scoped delivery dedupe (ADR-044; §3, §6, §8, §10). Queued
-  2026-08-31.** Migration 0008 rebuilds `deliveries` with `scope` and
+- **M21 — scoped delivery dedupe (ADR-044; §3, §6, §8, §10). Built 2026-08-31
+  (changelog v0.29).** Migration 0008 rebuilds `deliveries` with `scope` and
   UNIQUE(target, scope, idempotency); `idempotency_scope` in the manifest
   and binding schemas and the three declarations (instantly: campaign,
   attio: object, csv/deliver: path); the runner resolves the scope from
@@ -2194,6 +2194,15 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.29 — 2026-08-31 (M21 build: scoped delivery dedupe, built)
+**Changed:** §11 M21 marked built; no normative text changed beyond
+v0.28 — migration 0008 rebuilds `deliveries` (SQLite cannot alter a
+UNIQUE), `spec/ledger.sql` mirrors the migrated shape, and the doc's
+ledger surface describes the triple key. Behavioural notes: the scope
+resolves from the step's resolved config at run time (group handoffs and
+undeclared adapters stay ''); `gtme show` prints `scope` on a delivery
+when present; attestation updates address only their own scope's row.
 
 ### v0.28 — 2026-08-31 (ADR-044 reconciliation: scoped delivery dedupe; build queued as M21)
 **Changed:** §3 `deliveries` gains `scope` and the triple

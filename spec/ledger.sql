@@ -86,12 +86,13 @@ CREATE TABLE deliveries (
   id             TEXT PRIMARY KEY,
   identity_id    TEXT NOT NULL,
   target         TEXT NOT NULL,           -- adapter id, or group:<name> for a handoff (ADR-032)
+  scope          TEXT NOT NULL DEFAULT '', -- resolved idempotency_scope config value (ADR-044); '' = unscoped
   idempotency    TEXT NOT NULL,           -- computed key, see §8 deliver
   run_id         TEXT NOT NULL,
   created_at     TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
   sent_at        TEXT,                    -- set only by attestation (ADR-036)
-  UNIQUE(target, idempotency)
+  UNIQUE(target, scope, idempotency)
 );
 
 -- The current-value projection (ADR-003) is two views, not one: "highest

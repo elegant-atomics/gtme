@@ -6,29 +6,53 @@
   "needs": {
     "dynamic": true,
     "type": "object",
-    "required": ["email"],
+    "required": [
+      "email"
+    ],
     "properties": {
-      "email": {"type": "string"}
+      "email": {
+        "type": "string"
+      }
     }
   },
   "config_schema": {
     "type": "object",
-    "required": ["campaign"],
+    "required": [
+      "campaign"
+    ],
     "additionalProperties": false,
     "properties": {
-      "campaign": {"type": "string", "description": "Campaign name (resolved to an id once per run) or the campaign id itself"},
-      "skip_if_in_campaign": {"type": "boolean", "description": "Ask Instantly to ignore leads already in the campaign (default true)"},
+      "campaign": {
+        "type": "string",
+        "description": "Campaign name (resolved to an id once per run) or the campaign id itself"
+      },
+      "skip_if_in_campaign": {
+        "type": "boolean",
+        "description": "Ask Instantly to ignore leads already in the campaign (default true)"
+      },
       "variables": {
         "type": "object",
-        "additionalProperties": {"type": "string", "minLength": 1},
-        "description": "Egress mapping, target merge-field name → ledger field (ADR-018). Injected by the runner from the step-level variables: key — never authored inside with:."
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "Egress mapping, target merge-field name \u2192 ledger field (ADR-018). Injected by the runner from the step-level variables: key \u2014 never authored inside with:."
       },
-      "base_url": {"type": "string", "description": "Override the API host (testing)"},
-      "preflight": {"type": "boolean", "description": "ADR-040: check the live campaign before sending (default true); false skips"}
+      "base_url": {
+        "type": "string",
+        "description": "Override the API host (testing)"
+      },
+      "preflight": {
+        "type": "boolean",
+        "description": "ADR-040: check the live campaign before sending (default true); false skips"
+      }
     }
   },
-  "credentials": ["INSTANTLY_API_KEY"],
+  "credentials": [
+    "INSTANTLY_API_KEY"
+  ],
   "attests": true,
   "preflights": true,
-  "cost_estimate_usd": 0
+  "cost_estimate_usd": 0,
+  "idempotency_scope": "campaign"
 }

@@ -43,6 +43,10 @@ type Manifest struct {
 	// Batch marks adapters the runner must feed in batches (AI steps), one
 	// invocation per batch.
 	Batch bool `json:"batch,omitempty"`
+	// IdempotencyScope (deliver adapters, ADR-044) names the config key whose
+	// resolved value scopes this adapter's deliveries rows — the dedupe key
+	// is (target, scope, idempotency). Empty means unscoped ('').
+	IdempotencyScope string `json:"idempotency_scope,omitempty"`
 	// KeepPayloads / PayloadTTLDays declare ADR-030 retention for raw
 	// responses this adapter attaches to its RECORDs (SPEC §5, §6): keep
 	// defaults to true, TTL to 90 days; a step config may override keep.
