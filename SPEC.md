@@ -2230,13 +2230,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.30 — 2026-08-31 (ADR-045 packet: on-change re-delivery — PROPOSED, not yet accepted)
-**Changed (proposed):** §3 `variables_hash`; §6 manifest `idempotency:
+### v0.30 — 2026-08-31 (ADR-045 reconciliation: on-change re-delivery; build queued as M22)
+**Changed:** §3 `variables_hash`; §6 manifest `idempotency:
 native|ledger`; §8 redeliver modes with adapter-gated defaults; §9
 `redeliver:` grammar; §10a's binding key meaning completed; §11 milestone
 M22. Schema artifacts ride the build.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M22 is queued.
 
 ### v0.29 — 2026-08-31 (M21 build: scoped delivery dedupe, built)
 **Changed:** §11 M21 marked built; no normative text changed beyond

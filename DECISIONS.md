@@ -2622,9 +2622,8 @@ exactly one row, and no csv/deliver row carries an empty scope.
 **Spec impact:** None beyond v0.28 (marked built as v0.29).
 
 ### ADR-045: Native idempotency unlocks on-change re-delivery
-**Status:** Proposed (2026-08-31 — design conversation on ADR-044's Attio
-consequence; human chose adapter-gated on-change in session; Accepted on
-merge)
+**Status:** Accepted (2026-08-31 — design conversation on ADR-044's Attio
+consequence; human-approved 2026-08-31)
 **Context:** ADR-044's scoped dedupe still hard-blocks every repeat
 delivery, which is right for send-shaped targets (an email touch is
 one-shot) and wrong for sync-shaped ones: `attio/assert` is an upsert —
