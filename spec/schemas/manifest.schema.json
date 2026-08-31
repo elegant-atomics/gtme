@@ -70,6 +70,10 @@
       "type": "boolean",
       "description": "Marks adapters the runner must feed in batches — the AI steps — one invocation per batch_size records (SPEC.md §6, §9)."
     },
+    "idempotency": {
+      "enum": ["native", "ledger"],
+      "description": "Deliver adapters (ADR-045): 'native' means the target upserts (re-delivery cannot duplicate), unlocking redeliver:; 'ledger' or absent keeps the hard dedupe floor."
+    },
     "idempotency_scope": {
       "type": "string",
       "description": "Deliver adapters only (ADR-044): the config key whose resolved value scopes deliveries rows — UNIQUE(target, scope, idempotency). Undeclared = unscoped ('')."

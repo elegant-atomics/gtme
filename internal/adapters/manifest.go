@@ -43,6 +43,10 @@ type Manifest struct {
 	// Batch marks adapters the runner must feed in batches (AI steps), one
 	// invocation per batch.
 	Batch bool `json:"batch,omitempty"`
+	// Idempotency (deliver adapters, ADR-045; mirrors §10a's binding key):
+	// "native" declares the target upserts, so re-delivery cannot duplicate,
+	// which unlocks `redeliver:`; "ledger" or empty keeps the hard floor.
+	Idempotency string `json:"idempotency,omitempty"`
 	// IdempotencyScope (deliver adapters, ADR-044) names the config key whose
 	// resolved value scopes this adapter's deliveries rows — the dedupe key
 	// is (target, scope, idempotency). Empty means unscoped ('').

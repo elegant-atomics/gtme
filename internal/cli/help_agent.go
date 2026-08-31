@@ -290,7 +290,7 @@ var ledgerObjectNotes = map[string]string{
 	"run_records":       "a run's membership: state = last completed step id, verdicts = {step_id: pass|fail}",
 	"step_events":       "per-record trail: claimed|done|failed|skipped_cache|dry_run|simulated, detail JSON",
 	"costs":             "spend per step/record",
-	"deliveries":        "sends and handoffs, UNIQUE(target, scope, idempotency) — scope is the resolved idempotency_scope config value (ADR-044, '' = unscoped); status accepted|confirmed|contradicted|sent",
+	"deliveries":        "sends and handoffs, UNIQUE(target, scope, idempotency) — scope is the resolved idempotency_scope config value (ADR-044, '' = unscoped); status accepted|confirmed|contradicted|sent; variables_hash drives redeliver: on_change (ADR-045)",
 	"groups":            "named associations (ADR-021); character derived from events",
 	"group_events":      "append-only added|removed|touched events per (group, identity)",
 	"payloads":          "raw vendor responses, a purgeable cache tier (ADR-030) — never facts",

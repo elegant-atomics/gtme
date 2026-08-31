@@ -82,6 +82,9 @@ type Step struct {
 	Deferred bool
 	// Respend is the step's declared opt-out of the respend warning.
 	Respend bool
+	// RedeliverMode is the resolved repeat policy for a deliver step
+	// (ADR-045): always | on_change | never.
+	RedeliverMode string
 
 	Credentials map[string]string
 	// MissingOptional are declared-optional credentials that did not resolve;
@@ -971,11 +974,25 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 
 	if ps.IsDeliver {
 		ps.Idempotency = s.Idempotency
+		// Redeliver (ADR-045): explicit step policy, else the adapter's
+		// default — on_change for a natively idempotent target, never
+		// otherwise.
+		ps.RedeliverMode = s.Redeliver
+		if ps.RedeliverMode == "" {
+			ps.RedeliverMode = "never"
+			if ps.Manifest != nil && ps.Manifest.Idempotency == "native" {
+				ps.RedeliverMode = "on_change"
+			}
+		}
 		// http/deliver MUST be told its idempotency key (ADR-023, SPEC §10a):
 		// even the trivial case cannot infer delivery semantics.
 		if resolved.Manifest.ID == "http/deliver" && strings.TrimSpace(s.Idempotency) == "" {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
 				Msg: "http/deliver requires idempotency: — a generic target cannot infer delivery semantics, it must be told (ADR-023)"})
+		}
+		if ps.RedeliverMode != "never" && (ps.Manifest == nil || ps.Manifest.Idempotency != "native") {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("redeliver: %s needs a natively idempotent target — %s does not declare idempotency: native (§6, ADR-045), so repeats could duplicate; only `never` is safe here", ps.RedeliverMode, s.Use)})
 		}
 	}
 	return ps, problems

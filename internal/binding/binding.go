@@ -250,6 +250,9 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 	if b.IdempotencyScope != "" {
 		doc["idempotency_scope"] = b.IdempotencyScope
 	}
+	if b.Idempotency == "native" || b.Idempotency == "ledger" {
+		doc["idempotency"] = b.Idempotency
+	}
 	if len(b.Needs) > 0 {
 		doc["needs"] = json.RawMessage(b.Needs)
 	}

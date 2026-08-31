@@ -491,25 +491,38 @@ func (l *Ledger) StepIDs(ctx context.Context, runID string) ([]string, error) {
 	return out, nil
 }
 
-// AlreadyDelivered reports whether this (target, scope, idempotency) triple
-// was delivered before, in this run or any earlier one (SPEC §8, ADR-044).
-func (l *Ledger) AlreadyDelivered(ctx context.Context, target, scope, idempotency string) (bool, error) {
-	var n int
+// DeliveredState reports whether this (target, scope, idempotency) triple was
+// delivered before — in this run or any earlier one (SPEC §8, ADR-044) — and
+// the variables hash it was delivered with (ADR-045).
+func (l *Ledger) DeliveredState(ctx context.Context, target, scope, idempotency string) (bool, string, error) {
+	var hash string
 	err := l.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM deliveries WHERE target = ? AND scope = ? AND idempotency = ?`, target, scope, idempotency).Scan(&n)
-	if err != nil {
-		return false, fmt.Errorf("ledger: reading deliveries: %w", err)
+		`SELECT variables_hash FROM deliveries WHERE target = ? AND scope = ? AND idempotency = ?`,
+		target, scope, idempotency).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return false, "", nil
 	}
-	return n > 0, nil
+	if err != nil {
+		return false, "", fmt.Errorf("ledger: reading deliveries: %w", err)
+	}
+	return true, hash, nil
 }
 
 // RecordDelivery marks a record delivered. A duplicate key is not an error: it
 // means another worker or an earlier run got there first.
-func (l *Ledger) RecordDelivery(ctx context.Context, identityID, target, scope, idempotency, runID string) error {
+func (l *Ledger) RecordDelivery(ctx context.Context, identityID, target, scope, idempotency, variablesHash, runID string) error {
+	// A conflict is a re-delivery (ADR-045): the row keeps its first
+	// created_at, takes the new hash and run, and returns to accepted for a
+	// fresh attestation cycle.
 	_, err := l.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO deliveries (id, identity_id, target, scope, idempotency, run_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		ulid.New(), identityID, target, scope, idempotency, runID, l.stamp(l.now()))
+		`INSERT INTO deliveries (id, identity_id, target, scope, idempotency, variables_hash, run_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(target, scope, idempotency) DO UPDATE SET
+		   variables_hash = excluded.variables_hash,
+		   run_id = excluded.run_id,
+		   status = 'accepted',
+		   sent_at = NULL`,
+		ulid.New(), identityID, target, scope, idempotency, variablesHash, runID, l.stamp(l.now()))
 	if err != nil {
 		return fmt.Errorf("ledger: inserting delivery: %w", err)
 	}
