@@ -232,6 +232,7 @@ CREATE TABLE deliveries (
   created_at     TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
   sent_at        TEXT,                    -- set only by attestation (ADR-036)
+  variables_hash TEXT NOT NULL DEFAULT '', -- resolved variables at delivery (ADR-045); drives redeliver: on_change
   UNIQUE(target, scope, idempotency)
 );
 
@@ -655,6 +656,10 @@ beside it. The canonical schema for this file is
   process. The runner MUST source them from the OS env first, then
   `~/.gtme/secrets` (a `KEY=value` file, mode 0600, written by `gtme secret
   set KEY`). A missing declared credential is a plan-time error.
+- `idempotency` (deliver adapters, optional; ADR-045, mirroring §10a's
+  binding key): `native` declares the target upserts (re-delivery cannot
+  duplicate — Attio's assert), which unlocks `redeliver:` (§8, §9);
+  `ledger` or undeclared keeps the hard dedupe floor.
 - `idempotency_scope` (deliver adapters, optional; ADR-044): the name of a
   config key whose resolved value scopes this adapter's `deliveries` rows —
   see §8 deliver idempotency. Undeclared means unscoped (`''`).
@@ -1088,6 +1093,18 @@ this address twice through this adapter" is a policy, not a constraint:
 declare it as a suppression group (ADR-021), which sees touches across
 every adapter.
 
+Re-delivery (ADR-045): a deliver step MAY set `redeliver: always |
+on_change | never` (§9). The default is `on_change` when the manifest
+declares `idempotency: native` (§6) and `never` otherwise, and `always`/
+`on_change` are plan errors on a target that did not declare `native` —
+repeat-safety belongs to the adapter, intent to the step. Each delivery
+records the hash of its resolved `variables:` values; under `on_change`
+an already-delivered record re-delivers only when that hash changed
+(skip reason `unchanged` otherwise, distinct from `already_delivered` in
+events and receipts), and a re-delivery updates the row's hash and run
+and resets `status` to `accepted` for a fresh attestation cycle —
+`created_at` keeps the first delivery.
+
 ### deliver completeness — `on_missing` (ADR-019)
 
 Per-record completeness at deliver time is a runtime contract: every
@@ -1199,7 +1216,9 @@ reason `suppressed` (the `on_missing` pattern — and, like `on_missing:
 skip`, the record advances: suppression gates this step's send, not the
 record), and the terminal receipt lists every suppressed record with the
 group and the age of the blocking touch. Suppression layers above the §8
-idempotency floor: idempotency stops the *same* delivery twice;
+idempotency floor: idempotency stops the *same* delivery twice (or, on a
+natively idempotent target under `redeliver: on_change`, the same
+delivery *with the same values* twice, ADR-045);
 suppression enforces a *chosen* contact policy across deliveries.
 
 **Terminus — top-level `group: <name>`.** A pipeline MAY end in group
@@ -1340,7 +1359,10 @@ steps:
 Schema rules: `deferred: true` inside an AI step's `with:` sends its batch
 to the provider's batch surface and ends the run in flight (§8, ADR-038);
 it is adapter config, not grammar, and valid only on the last step.
-`respend: true` on a step (grammar, any paid step) declares that re-running
+`redeliver: always | on_change | never` on a deliver step (ADR-045) sets
+its repeat policy — defaulting per the adapter's declared idempotency
+(§8), and refusing `always`/`on_change` on a target that is not natively
+idempotent. `respend: true` on a step (grammar, any paid step) declares that re-running
 the pipeline MAY pay for that step's records again — it silences the §7
 respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
@@ -1983,6 +2005,19 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M22 — on-change re-delivery (ADR-045; §3, §6, §8, §9). Queued
+  2026-08-31.** Migration 0009 adds `variables_hash`; manifest
+  `idempotency: native|ledger` (bindings bridge theirs); `redeliver:`
+  grammar + plan validation + per-adapter defaults; the runner's deliver
+  path resolves variables before the dedupe decision, hashes them, and
+  upserts the row on re-delivery (status back to accepted).
+  ✅ E2E, offline: an armed attio/assert against a local server delivers
+  once; re-run unchanged skips with reason `unchanged`; a changed value
+  re-delivers (the server sees a second assert, the row's hash moves,
+  rows stay 1); `redeliver: always` re-asserts regardless;
+  `redeliver: on_change` on csv/deliver fails plan naming the native
+  requirement; dry receipts distinguish `unchanged` from
+  `already_delivered`.
 - **M21 — scoped delivery dedupe (ADR-044; §3, §6, §8, §10). Built 2026-08-31
   (changelog v0.29).** Migration 0008 rebuilds `deliveries` with `scope` and
   UNIQUE(target, scope, idempotency); `idempotency_scope` in the manifest
@@ -2194,6 +2229,14 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.30 — 2026-08-31 (ADR-045 packet: on-change re-delivery — PROPOSED, not yet accepted)
+**Changed (proposed):** §3 `variables_hash`; §6 manifest `idempotency:
+native|ledger`; §8 redeliver modes with adapter-gated defaults; §9
+`redeliver:` grammar; §10a's binding key meaning completed; §11 milestone
+M22. Schema artifacts ride the build.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.29 — 2026-08-31 (M21 build: scoped delivery dedupe, built)
 **Changed:** §11 M21 marked built; no normative text changed beyond

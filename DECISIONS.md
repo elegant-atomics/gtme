@@ -2620,3 +2620,45 @@ rows, re-running either adds nothing, each scope's artifact holds
 exactly one row, and no csv/deliver row carries an empty scope.
 **Why:** `make check` green; the e2e proves the §11 M21 clauses offline.
 **Spec impact:** None beyond v0.28 (marked built as v0.29).
+
+### ADR-045: Native idempotency unlocks on-change re-delivery
+**Status:** Proposed (2026-08-31 — design conversation on ADR-044's Attio
+consequence; human chose adapter-gated on-change in session; Accepted on
+merge)
+**Context:** ADR-044's scoped dedupe still hard-blocks every repeat
+delivery, which is right for send-shaped targets (an email touch is
+one-shot) and wrong for sync-shaped ones: `attio/assert` is an upsert —
+its own endpoint matches on `matching_attribute`, re-delivering cannot
+duplicate, and the operator *wants* changed values to land. The binding
+tier already carries the distinction (`idempotency: native | ledger`,
+§10a) but only as documentation: the runner never used it. Whether a
+repeat is *safe* is a property of the target adapter; whether it is
+*wanted* is the operator's. A pure step-level "send twice OK" knob would
+let a pipeline opt an email campaign into double-sends — the exact
+mistake the floor exists to prevent.
+**Decision:** (1) The manifest surface gains **`idempotency: native |
+ledger`** (§6, mirroring §10a's binding key; bindings bridge it through):
+`native` declares the target upserts, so re-delivery cannot duplicate.
+(2) `deliveries` gains **`variables_hash`** — the hash of the record's
+resolved `variables:` values at delivery time. (3) A deliver step MAY set
+**`redeliver: always | on_change | never`** (§9). Defaults: a
+`native`-idempotent target defaults to **`on_change`**; everything else
+defaults to **`never`** (today's block). `always` and `on_change` are
+plan errors on a target that did not declare `native` — safety is not
+configurable onto an unsafe target. (4) On-change semantics: an
+already-delivered record re-delivers only when its resolved variables
+hash differs from the stored one; unchanged skips with reason
+`unchanged`; a re-delivery updates the row's hash and run and resets its
+status to `accepted` for a fresh attestation cycle (`created_at` keeps
+first delivery). (5) Declarations: `attio/assert` is `native` (already
+declared); instantly and csv/deliver stay undeclared (csv appends —
+repeating duplicates the row; an email add gains nothing from repeats).
+**Consequences:** Attio becomes a true sync target out of the box —
+changed values flow on every run, unchanged records cost nothing and say
+so in the receipt — while send-shaped targets keep the hard floor. The
+dry-run receipt distinguishes `already_delivered` from `unchanged`, so a
+reviewer sees why nothing will send.
+**Spec impact:** AMEND (this packet's second commit) — §3 (`variables_hash`),
+§6 (manifest `idempotency`), §8 (redeliver modes and defaults), §9
+(`redeliver:` grammar), §10a (the binding key's meaning completed); §11
+milestone M22; schema artifacts ride the build (machine-compared).

@@ -605,3 +605,72 @@ whole enactment ≈ $1.87. By story:
 Cross-run bonus observed in 4: filter judgments and reveals from earlier
 runs served later runs' overlapping records from cache — M16's signature
 cache and the enrich freshness window compounding across pipelines.
+
+### 2026-08-31 — Agent round-trip, round 3: a source the registry does not have, and a receipt that could not explain itself
+
+A harder box than rounds 1 and 2, on main `79421ab` (v0.1.0-6, M21). Those
+gave the agent a vendor the registry knew. This one gave it a vendor gtme
+ships *half* of: `harvest/profile` is built in, nothing searches LinkedIn
+posts, and the registry carries no entry for one. Task in operator terms:
+one LinkedIn post search for people talking about Claude Code and GTM, pick
+the ten best, get their profile and latest posts, one CSV. Real API, no send
+surface.
+
+Outcome: four runs, six minutes, **$0.188**. The agent authored
+`harvest/post-search` as a tier-1 binding, recorded conformance fixtures,
+and ran `gtme adapters verify` on its own work before using it — every
+feature it used real (`transform: linkedin`, `paths:` fallbacks, an
+`errors:` verdict block, and `pagination:` deliberately omitted so one run
+is one call). One search returned 22 posts; identity resolution collapsed
+them to **9 unique authors** (11 posts were one person's). It ranked them,
+enriched nine with `posts_limit: 5`, and delivered a 9-row, 13-column CSV.
+The re-run cost $0.00 with all nine profiles cached.
+
+The box was built to test whether an agent filters *before* it pays. **That
+question is still open**: the pool was 9 and the cap was 10, so no cut ever
+bit. Re-running it against a query returning 30+ authors is the outstanding
+work.
+
+Three findings, two of them filed:
+
+- **A dropped source record is never written to `step_events`** (#30) — a
+  divergence from §5, which requires `event='failed'` on a record failing
+  `provides` validation. The first search run paid **$0.036 for 0 records**:
+  raw `author.linkedinUrl` carried LinkedIn's `?miniProfileUrn=` suffix and
+  failed `linkedin_url` normalization. Live, the runner named the field, the
+  rule, the value and the wanted form, and counted `failed: 2` — a genuinely
+  good message the agent recovered from unaided. Read back, `gtme runs`
+  shows `failed: -`, `records: 0`, `$0.0360`, status `done`, exit 0, and no
+  payload retained (`keepPayload` runs after every validation). Close the
+  terminal and a paid total-loss run is unexplainable. Reproduced offline.
+- **A receipt cannot distinguish a measured cost from an estimated one**
+  (#29). All $0.188 here was config-estimated — HarvestAPI returns no cost
+  metadata, so both the source's per-record figure and `harvest/profile`'s
+  $0.012 are arithmetic over constants, rendered identically to a
+  vendor-reported number. §10.3 already draws the distinction ("from
+  response metadata if present, else config-estimated") and the ledger
+  discards it. Suggested: a `basis` column, marked on the receipt, with the
+  registry index as the maintained source for the estimate.
+- **The judgment never entered the ledger.** No `ai/filter`, no
+  `ai/compose`, $0.00 of model spend: the agent ranked the nine itself and
+  hand-wrote the shortlist CSV that the enrich pipeline then sourced from.
+  The output is good and its stated reasoning is sound, but the cut has no
+  provenance, no verdicts, and `gtme freeze --bundle` reproduces the
+  enrichment while reproducing nothing about who was chosen or why — the
+  bundle's own line, "self-contained except credentials and input files,"
+  is exactly the gap. Not filed: it is a question about whether
+  rank-and-take-N is discoverable as an `ai/filter` shape, or wants a step
+  of its own, rather than a bug.
+
+Two notes that are not findings. `gtme adapters search` 404ing in the box
+was **#26** (an invalid `GITHUB_TOKEN` reads as a missing index), not a
+missing registry — the index is live; it simply has nothing for LinkedIn.
+And `--simulate` persists nothing at all, by design and as its banner says,
+so a rehearsal is not auditable after the fact; worth knowing when the
+operator ritual is "show me the dry run first."
+
+Worth keeping: unprompted, the agent added a `sql/transform` COALESCE step
+to guarantee every shortlisted person a row, because it read that
+`csv/deliver`'s `on_missing` would otherwise drop anyone lacking a current
+position — a silent-drop failure it had already been burned by once that
+run, defended against on the second encounter.
