@@ -318,3 +318,35 @@ committee's titles as a field, so every prompt carries the sibling facts
 and the model writes one person at a time knowing who else is written
 to. Revisit only if receipts show seat copy converging; a batching key is
 then a small change to how the runner chunks, not a new step.
+
+## Interactive review step
+
+Named 2026-08-31, not specified. A synchronous, in-band review step: the run
+stops at a record, shows the operator what would go out, and takes a decision
+from a set the pipeline author configured — each response mapped to what it
+does. Distinct from the dry-run receipt, which is out-of-band and whole-run
+(read an artifact, then re-run to arm). This one is per-record and blocking.
+
+The design question before anything else: **is a verdict a fact or a branch?**
+If the reviewer's answer writes a value or a group membership that ordinary
+downstream steps read, it is one atom and needs no new grammar — the shape
+`group/deliver` already has. If the configured "results" mean per-response
+control flow inside the pipeline (approved → this step, rejected → that one),
+that is an expression language by another name, which §0's closed grammar
+refuses. Worth keeping in the first form only; the second is the
+mechanism-shaped version and should be declined the way the workflow-engine
+pressure was under "Groups, option C".
+
+Two constraints it has to answer. Blocking on a TTY is hostile to the
+operators this tool is built for — agent sessions, and unattended runs under
+cron — so the step needs defined non-interactive behaviour (skip, fail, or
+fall through to the existing dry-run/arm ritual) rather than hanging. And
+"waiting of any kind stays out — no daemon" from "Asynchronous steps" still
+holds: blocking one process on stdin is not durable pending state, but this
+entry must not become the doorway to it.
+
+Scope deliberately unpinned. "Configure each message and the possible
+responses and their results" covers at least three separable features —
+per-record editing of the outgoing copy, a configurable verdict vocabulary,
+and consequence routing — and which of them is actually wanted has not been
+decided.
