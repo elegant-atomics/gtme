@@ -491,12 +491,12 @@ func (l *Ledger) StepIDs(ctx context.Context, runID string) ([]string, error) {
 	return out, nil
 }
 
-// AlreadyDelivered reports whether this (target, idempotency) pair was delivered
-// before, in this run or any earlier one (SPEC §8).
-func (l *Ledger) AlreadyDelivered(ctx context.Context, target, idempotency string) (bool, error) {
+// AlreadyDelivered reports whether this (target, scope, idempotency) triple
+// was delivered before, in this run or any earlier one (SPEC §8, ADR-044).
+func (l *Ledger) AlreadyDelivered(ctx context.Context, target, scope, idempotency string) (bool, error) {
 	var n int
 	err := l.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM deliveries WHERE target = ? AND idempotency = ?`, target, idempotency).Scan(&n)
+		`SELECT count(*) FROM deliveries WHERE target = ? AND scope = ? AND idempotency = ?`, target, scope, idempotency).Scan(&n)
 	if err != nil {
 		return false, fmt.Errorf("ledger: reading deliveries: %w", err)
 	}
@@ -505,11 +505,11 @@ func (l *Ledger) AlreadyDelivered(ctx context.Context, target, idempotency strin
 
 // RecordDelivery marks a record delivered. A duplicate key is not an error: it
 // means another worker or an earlier run got there first.
-func (l *Ledger) RecordDelivery(ctx context.Context, identityID, target, idempotency, runID string) error {
+func (l *Ledger) RecordDelivery(ctx context.Context, identityID, target, scope, idempotency, runID string) error {
 	_, err := l.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO deliveries (id, identity_id, target, idempotency, run_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		ulid.New(), identityID, target, idempotency, runID, l.stamp(l.now()))
+		`INSERT OR IGNORE INTO deliveries (id, identity_id, target, scope, idempotency, run_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		ulid.New(), identityID, target, scope, idempotency, runID, l.stamp(l.now()))
 	if err != nil {
 		return fmt.Errorf("ledger: inserting delivery: %w", err)
 	}
@@ -529,6 +529,7 @@ const (
 // Delivery is one deliveries row, as gtme show reports it.
 type Delivery struct {
 	Target      string
+	Scope       string
 	Idempotency string
 	Status      string
 	SentAt      string
@@ -539,14 +540,14 @@ type Delivery struct {
 // SetDeliveryStatus refines a delivery's status after attestation (ADR-036).
 // Promotion to sent is not done here: it must be compare-and-swap on the
 // observed (status, sent_at) pair, which is the listen verb's job.
-func (l *Ledger) SetDeliveryStatus(ctx context.Context, target, idempotency, status string) error {
+func (l *Ledger) SetDeliveryStatus(ctx context.Context, target, scope, idempotency, status string) error {
 	switch status {
 	case DeliveryAccepted, DeliveryConfirmed, DeliveryContradicted:
 	default:
 		return fmt.Errorf("ledger: %q is not a status attestation may set", status)
 	}
 	_, err := l.db.ExecContext(ctx,
-		`UPDATE deliveries SET status = ? WHERE target = ? AND idempotency = ?`, status, target, idempotency)
+		`UPDATE deliveries SET status = ? WHERE target = ? AND scope = ? AND idempotency = ?`, status, target, scope, idempotency)
 	if err != nil {
 		return fmt.Errorf("ledger: updating delivery status: %w", err)
 	}
@@ -556,7 +557,7 @@ func (l *Ledger) SetDeliveryStatus(ctx context.Context, target, idempotency, sta
 // Deliveries lists an identity's deliveries, oldest first.
 func (l *Ledger) Deliveries(ctx context.Context, identityID string) ([]Delivery, error) {
 	rows, err := l.db.QueryContext(ctx,
-		`SELECT target, idempotency, status, coalesce(sent_at, ''), run_id, created_at
+		`SELECT target, scope, idempotency, status, coalesce(sent_at, ''), run_id, created_at
 		 FROM deliveries WHERE identity_id = ? ORDER BY created_at, id`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: reading deliveries: %w", err)
@@ -565,7 +566,7 @@ func (l *Ledger) Deliveries(ctx context.Context, identityID string) ([]Delivery,
 	var out []Delivery
 	for rows.Next() {
 		var d Delivery
-		if err := rows.Scan(&d.Target, &d.Idempotency, &d.Status, &d.SentAt, &d.RunID, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.Target, &d.Scope, &d.Idempotency, &d.Status, &d.SentAt, &d.RunID, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)

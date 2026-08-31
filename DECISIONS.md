@@ -2558,9 +2558,8 @@ surface test asserts the doc names both steps.
 manifest surface already).
 
 ### ADR-044: Delivery dedupe scopes to the campaign, not the adapter
-**Status:** Proposed (2026-08-31 — from Campaign 1 story 5, VALIDATION.md
-2026-08-30 and AUDIT.md (b) item 5; human chose per-campaign scoping in
-session; Accepted on merge)
+**Status:** Accepted (2026-08-31 — from Campaign 1 story 5, VALIDATION.md
+2026-08-30 and AUDIT.md (b) item 5; human-approved 2026-08-31)
 **Context:** `deliveries` dedupes on UNIQUE(target, idempotency) with
 `target` = the adapter id, so a record delivered to campaign A is
 silently cache-skipped when a later pipeline delivers to campaign B
@@ -2600,3 +2599,24 @@ manifest field; §8 deliver idempotency; §10 items (instantly, attio,
 csv/deliver); `spec/schemas/manifest.schema.json`,
 `spec/binding-schema.json`; §11 milestone M21. AUDIT.md (b) item 5
 applied by it. Editorial: §8's doubled "deliver idempotency" heading.
+
+### 2026-08-31 — M21 internals: scoped delivery dedupe (ADR-044)
+
+**Question:** Where does the scope value come from at run time, and what
+does the migration do to a live ledger?
+**Choice:** (1) The runner resolves it per step from the *resolved* config
+(`st.Config[manifest.IdempotencyScope]`), trimmed and stringified; a
+group handoff (no manifest) or an undeclared adapter yields `''`. It
+rides every delivery read and write: the dedupe check, the insert, and
+both attestation status updates — an attestation can only touch its own
+scope's row. (2) Migration 0008 rebuilds the table (SQLite cannot alter
+a UNIQUE) and backfills `scope = ''`; the canonical `spec/ledger.sql`
+mirrors the post-0008 shape, which is what the conformance schema test
+compares. (3) Declarations landed as spec'd: instantly `campaign`
+(configured name), attio `object`, csv/deliver `path`; the binding
+schema rejects `idempotency_scope` on a non-deliver binding. (4)
+Acceptance: one record through one adapter into two scopes lands two
+rows, re-running either adds nothing, each scope's artifact holds
+exactly one row, and no csv/deliver row carries an empty scope.
+**Why:** `make check` green; the e2e proves the §11 M21 clauses offline.
+**Spec impact:** None beyond v0.28 (marked built as v0.29).

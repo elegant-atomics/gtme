@@ -221,7 +221,7 @@ func TestHelpAgentCarriesTheLedgerReadSurface(t *testing.T) {
 	for name, wantCols := range map[string]string{
 		"current_values":   "identity_id,field,value,source,confidence,run_id,created_at",
 		"group_membership": "group_name,group_id,identity_id",
-		"deliveries":       "id,identity_id,target,idempotency,run_id,created_at,status,sent_at",
+		"deliveries":       "id,identity_id,target,scope,idempotency,run_id,created_at,status,sent_at",
 		"relations":        "from_id,relation,to_id,created_at",
 	} {
 		if got := strings.Join(have[name], ","); got != wantCols {

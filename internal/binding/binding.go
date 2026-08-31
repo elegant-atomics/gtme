@@ -34,15 +34,16 @@ type Binding struct {
 	KeepPayloads        *bool           `json:"keep_payloads,omitempty"`
 	PayloadTTLDays      *int            `json:"payload_ttl_days,omitempty"`
 
-	Auth        *Auth                `json:"auth,omitempty"`
-	Request     Request              `json:"request"`
-	Pagination  *Pagination          `json:"pagination,omitempty"`
-	Extract     Extract              `json:"extract"`
-	Errors      map[string]ErrorRule `json:"errors,omitempty"`
-	Idempotency string               `json:"idempotency,omitempty"`
-	Cost        *Cost                `json:"cost,omitempty"`
-	Retry       *Retry               `json:"retry,omitempty"`
-	Session     *Session             `json:"session,omitempty"`
+	Auth             *Auth                `json:"auth,omitempty"`
+	Request          Request              `json:"request"`
+	Pagination       *Pagination          `json:"pagination,omitempty"`
+	Extract          Extract              `json:"extract"`
+	Errors           map[string]ErrorRule `json:"errors,omitempty"`
+	Idempotency      string               `json:"idempotency,omitempty"`
+	IdempotencyScope string               `json:"idempotency_scope,omitempty"`
+	Cost             *Cost                `json:"cost,omitempty"`
+	Retry            *Retry               `json:"retry,omitempty"`
+	Session          *Session             `json:"session,omitempty"`
 }
 
 // Auth is primitive 1: where the credential goes.
@@ -212,6 +213,9 @@ func Parse(rawYAML []byte) (*Binding, error) {
 
 // check enforces what the JSON schema cannot express.
 func (b *Binding) check() error {
+	if b.Role != adapters.RoleDeliver && b.IdempotencyScope != "" {
+		return fmt.Errorf("binding: %s: idempotency_scope is a deliver-binding key (ADR-044)", b.ID)
+	}
 	if b.Role == adapters.RoleDeliver && b.Idempotency == "" {
 		return fmt.Errorf("binding: %s: a deliver binding must declare idempotency: native | ledger", b.ID)
 	}
@@ -242,6 +246,9 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 		"version":     b.Version,
 		"role":        b.Role,
 		"entity_type": b.EntityType,
+	}
+	if b.IdempotencyScope != "" {
+		doc["idempotency_scope"] = b.IdempotencyScope
 	}
 	if len(b.Needs) > 0 {
 		doc["needs"] = json.RawMessage(b.Needs)

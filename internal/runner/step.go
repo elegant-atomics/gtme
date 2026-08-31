@@ -356,7 +356,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 			return nil, err
 		}
 		it.idem = idem
-		delivered, err := r.l.AlreadyDelivered(ctx, st.Target(), idem)
+		delivered, err := r.l.AlreadyDelivered(ctx, st.Target(), deliveryScope(st), idem)
 		if err != nil {
 			return nil, err
 		}
@@ -713,6 +713,21 @@ func (r *runner) skip(ctx context.Context, st *planner.Step, it *item, reason st
 	return nil
 }
 
+// deliveryScope is the resolved value of the config key the manifest names
+// in idempotency_scope (SPEC §6, §8; ADR-044): the campaign for instantly,
+// the object for attio, the path for csv/deliver. Empty — an undeclared
+// scope, a group handoff, or an unset key — means unscoped (”).
+func deliveryScope(st *planner.Step) string {
+	if st.Manifest == nil || st.Manifest.IdempotencyScope == "" {
+		return ""
+	}
+	v, ok := st.Config[st.Manifest.IdempotencyScope]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
 // idempotencyKey is the value of the configured field, defaulting to the
 // identity key (SPEC §8).
 func (r *runner) idempotencyKey(ctx context.Context, st *planner.Step, it *item) (string, error) {
@@ -955,7 +970,7 @@ func (r *runner) applyAttest(ctx context.Context, st *planner.Step, byKey map[st
 		if err := r.advance(ctx, st, it, map[string]any{"attested": m.Status, "reason": m.Reason}, nil); err != nil {
 			return err
 		}
-		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryConfirmed); err != nil {
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), deliveryScope(st), it.idem, ledger.DeliveryConfirmed); err != nil {
 			return err
 		}
 		r.bump(st, func(s *StepStat) { s.Attests = true; s.Confirmed++ })
@@ -967,10 +982,10 @@ func (r *runner) applyAttest(ctx context.Context, st *planner.Step, byKey map[st
 		}
 		// The record exists at the target: keep the row so idempotency holds,
 		// marked for what it is, and fail the record.
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, r.runID); err != nil {
 			return err
 		}
-		if err := r.l.SetDeliveryStatus(ctx, st.Target(), it.idem, ledger.DeliveryContradicted); err != nil {
+		if err := r.l.SetDeliveryStatus(ctx, st.Target(), deliveryScope(st), it.idem, ledger.DeliveryContradicted); err != nil {
 			return err
 		}
 		r.bump(st, func(s *StepStat) { s.Attests = true; s.Contradicted++ })
@@ -1094,7 +1109,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		return err
 	}
 	if st.IsDeliver {
-		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), it.idem, r.runID); err != nil {
+		if err := r.l.RecordDelivery(ctx, it.identityID, st.Target(), deliveryScope(st), it.idem, r.runID); err != nil {
 			return err
 		}
 		// The handoff itself (SPEC §8, ADR-032): membership in the target

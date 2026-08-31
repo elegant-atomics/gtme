@@ -88,6 +88,9 @@ func showIdentity(ctx context.Context, env Env, l *ledger.Ledger, key string, on
 			entry := map[string]any{
 				"target": d.Target, "status": d.Status, "run_id": d.RunID, "created_at": d.CreatedAt,
 			}
+			if d.Scope != "" {
+				entry["scope"] = d.Scope
+			}
 			if d.SentAt != "" {
 				entry["sent_at"] = d.SentAt
 			}
