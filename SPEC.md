@@ -226,12 +226,13 @@ CREATE TABLE deliveries (
   id             TEXT PRIMARY KEY,
   identity_id    TEXT NOT NULL,
   target         TEXT NOT NULL,           -- adapter id, or group:<name> for a handoff (ADR-032)
+  scope          TEXT NOT NULL DEFAULT '', -- resolved idempotency_scope config value (ADR-044); '' = unscoped
   idempotency    TEXT NOT NULL,           -- computed key, see §8 deliver
   run_id         TEXT NOT NULL,
   created_at     TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'accepted',  -- accepted|confirmed|contradicted|sent (ADR-036)
   sent_at        TEXT,                    -- set only by attestation (ADR-036)
-  UNIQUE(target, idempotency)
+  UNIQUE(target, scope, idempotency)
 );
 
 -- Layer 3: groups — named associations between identities and a context
@@ -654,6 +655,9 @@ beside it. The canonical schema for this file is
   process. The runner MUST source them from the OS env first, then
   `~/.gtme/secrets` (a `KEY=value` file, mode 0600, written by `gtme secret
   set KEY`). A missing declared credential is a plan-time error.
+- `idempotency_scope` (deliver adapters, optional; ADR-044): the name of a
+  config key whose resolved value scopes this adapter's `deliveries` rows —
+  see §8 deliver idempotency. Undeclared means unscoped (`''`).
 - `credentials_optional`: env var names injected when present, exactly like
   `credentials`, but a missing one is a `gtme plan` warning, never an error.
   For an adapter that can genuinely work more than one way — an AI step on
@@ -1013,7 +1017,7 @@ spool file or directory; a `webhook/source` adapter (§10) reads and drains
 that spool the same way `csv/source` reads a CSV; a scheduled `gtme run`
 (cron, launchd, CI schedule) invokes the pipeline periodically. At-least-once
 redelivery from the receiver is absorbed structurally by the `deliveries`
-table's `UNIQUE(target, idempotency)` constraint (§3) — replaying the same
+table's `UNIQUE(target, scope, idempotency)` constraint (§3, ADR-044) — replaying the same
 event through the pipeline twice produces at most one delivery. Per-event
 low latency is explicitly out of scope for v0.
 
@@ -1057,7 +1061,7 @@ fixture engine (a rehearsal that ended in flight would rehearse nothing)
 and says so; `--dry-run` on a deferred pipeline is a plan warning — there
 is no deliver step to hold back.
 
-### deliver idempotency### deliver idempotency
+### deliver idempotency
 
 Per deliver step: idempotency key = the value of the field named by the
 step's `idempotency` config (default: the identity key). Before calling
@@ -1071,9 +1075,18 @@ timestamp — a 2xx is never a delivery. Adapters declaring `attests` (§6)
 refine `accepted` to `confirmed` or `contradicted` per record after a
 re-read; `inconclusive` stays `accepted` with a receipt warning. Promotion
 to `sent` is the `listen` verb's job (ROADMAP.md) and MUST be
-compare-and-swap on the observed `(status, sent_at)` pair. The `(target, idempotency)` key means each deliver
-step's dedupe scope is its own target (ADR-031): a pipeline delivering
-to a campaign and to a CRM dedupes each independently.
+compare-and-swap on the observed `(status, sent_at)` pair.
+
+The dedupe key is `(target, scope, idempotency)` (ADR-044). `target` is
+the adapter id (or `group:<name>`, ADR-032), so a pipeline delivering to
+a campaign and to a CRM dedupes each independently (ADR-031). `scope` is
+the resolved value of the config key the manifest names in
+`idempotency_scope` (§6), `''` when it declares none — so the same
+record into the *same* campaign can never double-add, while delivery
+into a different campaign is a fresh decision. A global "never touch
+this address twice through this adapter" is a policy, not a constraint:
+declare it as a suppression group (ADR-021), which sees touches across
+every adapter.
 
 ### deliver completeness — `on_missing` (ADR-019)
 
@@ -1506,7 +1519,9 @@ contract, pure YAML.
    (strings) by default, or whatever the step's `provides:` declares
    (ADR-033); output schema enforced; config supports `uses:`; prompt
    assembly and entity-agnosticism as item 3.
-6. **`instantly/add-to-campaign`** (deliver, person) — Instantly v2 API,
+6. **`instantly/add-to-campaign`** (deliver, person; `idempotency_scope:
+   campaign`, ADR-044 — the scope is the configured campaign *name*, so a
+   renamed campaign is a new dedupe scope) — Instantly v2 API,
    `Authorization: Bearer $INSTANTLY_API_KEY`: create/attach lead to
    campaign by name (resolve campaign name → id via list endpoint once per
    run; error if absent). Declares dynamic needs (§6, ADR-019) with a
@@ -1739,7 +1754,7 @@ REQUIRED — even the trivial case cannot infer delivery semantics, it
 must be told (ADR-023) — and a missing one is a plan error, not a
 defaulted identity key.
 
-**`csv/deliver`** (built in M12): write delivered records to a CSV —
+**`csv/deliver`** (built in M12; `idempotency_scope: path`, ADR-044): write delivered records to a CSV —
 universal output to anything with an import button, and the natural
 human-review artifact. Config: `path`; the columns are the `variables:`
 targets (sorted, stable), plus a leading `identity_key`. The header is
@@ -1968,6 +1983,18 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M21 — scoped delivery dedupe (ADR-044; §3, §6, §8, §10). Queued
+  2026-08-31.** Migration 0008 rebuilds `deliveries` with `scope` and
+  UNIQUE(target, scope, idempotency); `idempotency_scope` in the manifest
+  and binding schemas and the three declarations (instantly: campaign,
+  attio: object, csv/deliver: path); the runner resolves the scope from
+  step config for the check, the insert, and attestation updates;
+  `spec/ledger.sql` matches the migrated shape.
+  ✅ E2E, offline: the same record delivered to two campaigns through one
+  adapter lands two `deliveries` rows; re-running either campaign adds
+  nothing; group handoffs unchanged (`scope=''`); a pre-0008 ledger
+  migrates with `scope=''` backfilled; the attestation update touches
+  only its own scope's row.
 - **M20 — the Apollo split (ADR-043; §9, §10). Built 2026-08-30
   (changelog v0.27).**
   `spec/bindings/apollo-search/` rewritten against `mixed_people/api_search`
@@ -2167,6 +2194,18 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.28 — 2026-08-31 (ADR-044 packet: scoped delivery dedupe — PROPOSED, not yet accepted)
+**Changed (proposed):** §3 `deliveries` gains `scope` and the triple
+UNIQUE; §6 manifest `idempotency_scope`; §8 deliver idempotency rewritten
+around `(target, scope, idempotency)` with the global guarantee moved to
+suppression groups; §10 declarations (instantly: campaign — the
+configured name; attio: object; csv/deliver: path); both schema
+artifacts; §11 milestone M21. Editorial: §8's doubled heading. One-time
+migration consequence stated in ADR-044.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges. `spec/ledger.sql` changes ride the M21 build (it is
+machine-compared to the migrated database).
 
 ### v0.27 — 2026-08-30 (M20 build: the Apollo split, built)
 **Changed:** §11 M20 marked built; one normative amend found by the build —

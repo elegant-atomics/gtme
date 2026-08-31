@@ -2556,3 +2556,47 @@ the ledger notes. Unit test asserts the header on a stub; the e2e
 surface test asserts the doc names both steps.
 **Spec impact:** None (§8 floor unchanged; optional credentials are §6
 manifest surface already).
+
+### ADR-044: Delivery dedupe scopes to the campaign, not the adapter
+**Status:** Proposed (2026-08-31 — from Campaign 1 story 5, VALIDATION.md
+2026-08-30 and AUDIT.md (b) item 5; human chose per-campaign scoping in
+session; Accepted on merge)
+**Context:** `deliveries` dedupes on UNIQUE(target, idempotency) with
+`target` = the adapter id, so a record delivered to campaign A is
+silently cache-skipped when a later pipeline delivers to campaign B
+through the same adapter. Observed twice live: campaign zero's 2026-08-30
+re-run skipped eight records whose leads no longer existed in any
+campaign, and Campaign 1's story 5 surfaced the shape. Group handoffs
+already scope naturally (`target = group:<name>`, ADR-032); only vendor
+deliver adapters are global. A global "never touch this address twice
+through this adapter" is a suppression *policy*, and gtme already has an
+explicit surface for policies: groups and suppression windows (ADR-021).
+A table constraint is the wrong place for it.
+**Decision:** (1) A deliver manifest MAY declare **`idempotency_scope:
+"<config key>"`** — the name of a config key whose *resolved* value
+becomes the delivery's scope. The ledger key becomes
+**UNIQUE(target, scope, idempotency)** (`scope` defaults to `''`), so
+"same campaign, same record" still cannot double-add, while a different
+campaign is a fresh decision — protected, when the operator wants
+protection, by suppression groups, which see touches across every
+adapter. (2) Declarations: `instantly/add-to-campaign` scopes on
+`campaign` (the configured name — a renamed campaign is a new scope,
+stated in §10.6), `attio/assert` on `object`, `csv/deliver` on `path`;
+group deliveries keep their target scoping and `scope = ''`. (3)
+Migration 0008 rebuilds `deliveries` with the `scope` column and the
+triple UNIQUE; existing rows backfill `scope = ''`. One-time consequence,
+stated plainly: a record previously delivered through a now-scoped
+adapter no longer matches the new key, so the next armed run of the same
+campaign MAY re-add it once (the vendor's own idempotency — Instantly
+skips duplicate emails per campaign, Attio asserts — is the backstop).
+Pre-alpha, no external ledgers exist; acceptable.
+**Consequences:** Campaign semantics match operator expectations; the
+global guarantee moves to the surface built for choices
+(`gtme groups` + suppression), where it is visible and reviewable
+instead of implicit in a constraint. The dry-run receipt's cache-skip
+line now means "already in *this* campaign".
+**Spec impact:** AMEND (this packet's second commit) — §3 DDL; §6
+manifest field; §8 deliver idempotency; §10 items (instantly, attio,
+csv/deliver); `spec/schemas/manifest.schema.json`,
+`spec/binding-schema.json`; §11 milestone M21. AUDIT.md (b) item 5
+applied by it. Editorial: §8's doubled "deliver idempotency" heading.
