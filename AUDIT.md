@@ -260,7 +260,7 @@ re-confirmed here, not re-litigated.
   stored with `gtme secret set` like any credential); unit-tested against
   a header-asserting stub.
 
-## (b) Spec question queued from Campaign 1 story 5 (2026-08-30) — proposed, not applied
+## (b) Spec question queued from Campaign 1 story 5 (2026-08-30) — approved and applied (ADR-044, SPEC v0.28)
 
 5. **Delivery idempotency is global per adapter, not per campaign.**
    Observed: `deliveries` rows carry `target = 'instantly/add-to-campaign'`

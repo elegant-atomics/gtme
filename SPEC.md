@@ -2195,17 +2195,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.28 — 2026-08-31 (ADR-044 packet: scoped delivery dedupe — PROPOSED, not yet accepted)
-**Changed (proposed):** §3 `deliveries` gains `scope` and the triple
+### v0.28 — 2026-08-31 (ADR-044 reconciliation: scoped delivery dedupe; build queued as M21)
+**Changed:** §3 `deliveries` gains `scope` and the triple
 UNIQUE; §6 manifest `idempotency_scope`; §8 deliver idempotency rewritten
 around `(target, scope, idempotency)` with the global guarantee moved to
 suppression groups; §10 declarations (instantly: campaign — the
 configured name; attio: object; csv/deliver: path); both schema
 artifacts; §11 milestone M21. Editorial: §8's doubled heading. One-time
 migration consequence stated in ADR-044.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges. `spec/ledger.sql` changes ride the M21 build (it is
-machine-compared to the migrated database).
+**Not changed:** nothing built — M21 is queued. `spec/ledger.sql` changes
+ride the M21 build (it is machine-compared to the migrated database).
 
 ### v0.27 — 2026-08-30 (M20 build: the Apollo split, built)
 **Changed:** §11 M20 marked built; one normative amend found by the build —

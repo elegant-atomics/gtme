@@ -2558,9 +2558,8 @@ surface test asserts the doc names both steps.
 manifest surface already).
 
 ### ADR-044: Delivery dedupe scopes to the campaign, not the adapter
-**Status:** Proposed (2026-08-31 — from Campaign 1 story 5, VALIDATION.md
-2026-08-30 and AUDIT.md (b) item 5; human chose per-campaign scoping in
-session; Accepted on merge)
+**Status:** Accepted (2026-08-31 — from Campaign 1 story 5, VALIDATION.md
+2026-08-30 and AUDIT.md (b) item 5; human-approved 2026-08-31)
 **Context:** `deliveries` dedupes on UNIQUE(target, idempotency) with
 `target` = the adapter id, so a record delivered to campaign A is
 silently cache-skipped when a later pipeline delivers to campaign B
