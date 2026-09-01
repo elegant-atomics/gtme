@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 	"github.com/elegant-atomics/gtme/internal/pipeline"
 	"github.com/elegant-atomics/gtme/internal/registry"
@@ -362,11 +363,20 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 				}
 			}
 		}
-		// A source with an exact (probed, closed) schema is checked for an
-		// identity-key path (SPEC §7, ADR-018): no derivable tier is an error,
-		// only the name-hash fallback is a note. Judged here and only here —
-		// downstream sufficiency is each following step's own needs check.
-		if isSource && ps.Manifest != nil && !ps.Wildcard && len(ps.Provides) > 0 {
+		// An entity_type with no §4 key derivation fails the plan outright: the
+		// runner would drop every sourced record at the identity boundary,
+		// after the source has been called and billed (#27). Static, so it is
+		// judged here, with no network and no spend.
+		if isSource && ps.EntityType != "" && !identity.Supported(ps.EntityType) {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("entity_type %q has no identity derivation in this build (SPEC §4 defines %s) — every sourced record would be dropped at the identity boundary",
+					ps.EntityType, strings.Join(identity.SupportedTypes(), ", "))})
+		} else if isSource && ps.Manifest != nil && !ps.Wildcard && len(ps.Provides) > 0 {
+			// A source with an exact (probed, closed) schema is checked for an
+			// identity-key path (SPEC §7, ADR-018): no derivable tier is an
+			// error, only the name-hash fallback is a note. Judged here and
+			// only here — downstream sufficiency is each following step's own
+			// needs check.
 			strong, weak := identityPath(ps.EntityType, ps.Provides)
 			switch {
 			case !strong && !weak:

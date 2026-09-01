@@ -411,3 +411,81 @@ func TestAdaptersSearchWithStaleGitHubToken(t *testing.T) {
 	contains(t, res.stderr, "404", "stderr")
 	contains(t, res.stderr, "GITHUB_TOKEN", "the 404 error suspects the token")
 }
+
+// TestVerifyAndPlanRefuseUnsupportedEntityType (#27): an entity_type with no
+// SPEC §4 identity derivation is a static property of the manifest — verify
+// must refuse to certify it and plan must refuse to run it, instead of the
+// runner dropping 100% of the records after a source has been called and
+// billed.
+func TestVerifyAndPlanRefuseUnsupportedEntityType(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.home, ".gtme", "adapters", "example-thing-search")
+	if err := os.MkdirAll(filepath.Join(dir, "fixtures"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("binding.yaml", `id: example/thing-search
+version: 1
+role: source
+entity_type: widget
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    example.name: { type: string }
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    base_url: { type: string, default: "https://example.invalid" }
+request:
+  method: GET
+  url: "{{config.base_url}}/things"
+extract:
+  records: things
+  fields:
+    example.name: name
+`)
+	writeFile("fixtures/conformance.json", `{ "config": {},
+  "responses": [ { "match": "GET /things", "status": 200,
+    "body": { "things": [ { "name": "one" }, { "name": "two" } ] } } ] }`)
+
+	res := h.run("adapters", "verify", "example/thing-search")
+	if res.code != 2 {
+		t.Fatalf("verify exit = %d, want 2 for an underivable entity_type\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `"widget"`, "verify refusal names the type")
+	contains(t, res.stderr, "person", "verify refusal names the supported set")
+
+	h.write("probe.yaml", `name: widget-probe
+version: 1
+source:
+  use: example/thing-search
+`)
+	res = h.run("plan", "probe.yaml")
+	if res.code != 2 {
+		t.Fatalf("plan exit = %d, want 2 for an underivable entity_type\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `"widget"`, "plan problem names the type")
+
+	// The same gate holds when the entity type comes from config, not a
+	// manifest: csv/source with an unsupported entity_type.
+	h.write("things.csv", "name\none\n")
+	h.write("csvprobe.yaml", `name: csv-widget-probe
+version: 1
+source:
+  use: csv/source
+  with:
+    path: things.csv
+    entity_type: widget
+`)
+	res = h.run("plan", "csvprobe.yaml")
+	if res.code != 2 {
+		t.Fatalf("csv plan exit = %d, want 2 for an underivable entity_type\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, `"widget"`, "csv plan problem names the type")
+}

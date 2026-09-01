@@ -21,6 +21,7 @@ import (
 	"github.com/elegant-atomics/gtme/internal/adapterinstall"
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
@@ -311,6 +312,14 @@ func verifyBindingDir(env Env, dir string) (*binding.Binding, error) {
 	m, err := b.Manifest()
 	if err != nil {
 		return nil, fail(ExitValidation, "adapters: %s: %v", b.ID, err)
+	}
+	// An entity_type with no §4 identity derivation can never enter the
+	// ledger — refusing here closes the gap between "certified" and "works",
+	// instead of the runner dropping every record after a paid call (#27).
+	if m.EntityType != "" && !identity.Supported(m.EntityType) {
+		return nil, fail(ExitValidation,
+			"adapters: %s: entity_type %q has no identity derivation in this build (SPEC §4 defines %s) — its records would all be dropped at the identity boundary",
+			b.ID, m.EntityType, strings.Join(identity.SupportedTypes(), ", "))
 	}
 
 	fmt.Fprintf(env.Stderr, "%s v%d — %s (%s)\n", b.ID, b.Version, b.Role, m.EntityType)
