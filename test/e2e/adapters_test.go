@@ -361,3 +361,53 @@ func TestBundleRecordsThePin(t *testing.T) {
 	}
 	contains(t, string(raw), fakeSHA, "bundled .source.json")
 }
+
+// TestAdaptersSearchWithStaleGitHubToken (#26): the registry index is public
+// raw content — GITHUB_TOKEN must not be sent to it, because
+// raw.githubusercontent.com answers an invalid bearer token with 404 and a
+// stale token makes the whole registry look missing. And when a 404 does come
+// back from a host the token WAS sent to, the error names the token as a
+// suspect instead of impersonating a missing index.
+func TestAdaptersSearchWithStaleGitHubToken(t *testing.T) {
+	w := newRegistryWorld(t)
+	h := newHarness(t)
+
+	// A raw-content host with GitHub's observed behaviour: any Authorization
+	// header — valid or not — turns the answer into 404. Deliberately NOT set
+	// as GTME_GITHUB_API/CODELOAD; the token has no business here.
+	rawSrv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("Authorization") != "" {
+			http.NotFound(rw, req)
+			return
+		}
+		json.NewEncoder(rw).Encode(w.index)
+	}))
+	t.Cleanup(rawSrv.Close)
+
+	env := []string{
+		"GTME_GITHUB_API=" + w.srv.URL,
+		"GTME_GITHUB_CODELOAD=" + w.srv.URL,
+		"GTME_REGISTRY=" + rawSrv.URL + "/index.json",
+		"GITHUB_TOKEN=ghp_stale_or_revoked",
+	}
+	res := h.runWithEnv(env, "", "adapters", "search", "pets")
+	if res.code != 0 {
+		t.Fatalf("search exit = %d with a stale GITHUB_TOKEN — the token leaked to the raw host\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "pets/list", "search output")
+
+	// Same stale token, but the registry now lives on the API host, where the
+	// token IS attached: the 404 must name the credential as a possible cause.
+	authed := []string{
+		"GTME_GITHUB_API=" + rawSrv.URL,
+		"GTME_GITHUB_CODELOAD=" + rawSrv.URL,
+		"GTME_REGISTRY=" + rawSrv.URL + "/index.json",
+		"GITHUB_TOKEN=ghp_stale_or_revoked",
+	}
+	res = h.runWithEnv(authed, "", "adapters", "search", "pets")
+	if res.code == 0 {
+		t.Fatalf("search succeeded, want a 404 failure\n%s", res.stderr)
+	}
+	contains(t, res.stderr, "404", "stderr")
+	contains(t, res.stderr, "GITHUB_TOKEN", "the 404 error suspects the token")
+}

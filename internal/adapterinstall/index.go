@@ -74,6 +74,12 @@ func LoadIndex() (*Index, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// GitHub answers an invalid bearer token with 404, not 401 — when the
+		// token was actually sent, say so instead of impersonating a missing
+		// index (#26).
+		if resp.StatusCode == http.StatusNotFound && token() != "" && authorized(url) {
+			return nil, fmt.Errorf("adapters: registry index %s: %s (a GITHUB_TOKEN is set, and GitHub answers an invalid token with 404, not 401 — try unsetting it)", url, resp.Status)
+		}
 		return nil, fmt.Errorf("adapters: registry index %s: %s", url, resp.Status)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
