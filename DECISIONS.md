@@ -2745,6 +2745,47 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-01 — M23 internals: honest costs + engine-owned limit (ADR-046, ADR-047)
+
+**Question:** How does a binding's templated rate reach the planner, what
+does "labels its emissions" mean for built-ins that never read a vendor
+cost, and where exactly is `limit` stripped?
+**Choice:** (1) Migration 0010 rebuilds `costs` (not ALTER) so `basis`
+lands where §3 declares it, before `detail`; the schema-conformance test
+compares column order, and the spec's DDL is the one that was approved.
+(2) `protocol.Cost()` now sets `basis: estimated` explicitly and
+`protocol.MeasuredCost()` is the only constructor that says `measured`;
+the reader's `CostBasis()` maps absent to estimated, so foreign and
+pre-M23 adapters degrade honestly. Of the built-ins, only the claude-code
+engine ever measures (`total_cost_usd` in the CLI's JSON is
+vendor-reported); the Anthropic API path prices tokens from our table and
+is estimated; harvest, instantly and the binding engine multiply rates
+and are estimated. (3) `ai.Response` gains `Measured`; a batch collection
+is measured only if every summed item was. (4) The binding tier's
+`Cost.AmountUSD` becomes `any` (number | template, schema `anyOf` with a
+single-placeholder pattern); the engine resolves it through the same
+`tmplContext` as `page_size`, and an unresolved template costs $0. The
+manifest bridge carries a `CostRate func(config) (float64, bool)` (never
+serialized, `json:"-"`) instead of a static `cost_estimate_usd`, resolved
+per step at plan time with the binding's config defaults applied; the
+planner prints `est/record: unset` when it resolves to nothing. (5)
+`ledger.CostTotal{Measured, Estimated, Estimates}` — the count of
+estimated rows is what lets a `$0` guess print `(estimated)` while a run
+that spent nothing prints bare; `runner.FormatCost` is the one formatter
+and `gtme runs` calls it, so both surfaces agree by construction. The
+per-step `cost` column stays a plain figure; only totals carry the basis
+(§8). (6) `limit` is dropped before config validation only when the step
+is a source *binding* whose `config_schema` does not declare it
+(`planner.withoutReservedKeys`); the engine reads the cap from the OPEN
+config and, when undeclared, removes it from the template context so the
+binding never sees it. A declared `limit` (apollo/search) is untouched
+end to end.
+**Why:** `make check` green; the e2e proves the §11 M23 clauses offline
+(templated rate at the operator's figure, unset → `unset`/$0 estimated,
+measured row + split total on both receipts, undeclared `limit: 1` → one
+request, one record; an unknown key still refused).
+**Spec impact:** None beyond v0.32 (marked built as v0.33).
+
 ### ADR-047: Source `limit` is engine-owned, as documented
 **Status:** Accepted (2026-08-31 — drafted by the backlog session from
 issue #32; human-approved 2026-09-01 by merging the packet)

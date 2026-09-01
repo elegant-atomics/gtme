@@ -132,7 +132,12 @@ func Print(w io.Writer, p *Plan) {
 			fmt.Fprintf(w, "     warning:   optional credential %s is not set; this step will fail at run time if it needs it\n", name)
 		}
 		est := "?"
-		if s.CostEstimate != nil {
+		switch {
+		case s.CostUnset:
+			// The rate is the operator's to set and is not (ADR-046): the gap
+			// shows before anything is spent.
+			est = "unset"
+		case s.CostEstimate != nil:
 			est = fmt.Sprintf("$%.4f", *s.CostEstimate)
 		}
 		fmt.Fprintf(w, "     est/record: %s\n", est)

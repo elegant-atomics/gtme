@@ -78,6 +78,7 @@ CREATE TABLE costs (
   identity_id TEXT,
   provider    TEXT NOT NULL,
   amount_usd  REAL NOT NULL,              -- 0 allowed (unknown/free)
+  basis       TEXT NOT NULL DEFAULT 'estimated', -- measured|estimated (ADR-046)
   detail      TEXT,                       -- JSON (credits, tokens, etc.)
   created_at  TEXT NOT NULL
 );

@@ -327,8 +327,17 @@
           ]
         },
         "amount_usd": {
-          "type": "number",
-          "minimum": 0
+          "description": "Dollars per unit of `per`: a number, or a template resolved from config (e.g. '{{config.cost_per_record_usd}}') for vendors whose price is plan-dependent (ADR-046). Declare the knob in config_schema. An unresolved template costs $0 at run time and `gtme plan` prints `est/record: unset`. A page-billed endpoint declares `per: request` — `per: record` counts emitted records, and a `limit` truncates emission after the vendor has billed the page.",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*\\{\\{[^{}]+\\}\\}\\s*$"
+            }
+          ]
         },
         "unit_path": {
           "type": "string",

@@ -238,3 +238,20 @@ func TestEveryProtocolSchemaIsCompilable(t *testing.T) {
 		t.Run(name, func(t *testing.T) { compileSchema(t, name) })
 	}
 }
+
+// TestCostSchemaAcceptsBasis: the COST schema admits ADR-046's basis and
+// nothing else in that slot — a labeled emission from a built-in must
+// validate, and a made-up basis must not.
+func TestCostSchemaAcceptsBasis(t *testing.T) {
+	s := compileSchema(t, "msg-cost.schema.json")
+	for _, basis := range []string{"measured", "estimated"} {
+		msg := []byte(`{"type":"COST","provider":"vendor","amount_usd":0.01,"basis":"` + basis + `"}`)
+		if err := s.Validate(asJSONValue(t, msg)); err != nil {
+			t.Errorf("COST with basis %s fails the schema: %v", basis, err)
+		}
+	}
+	bad := []byte(`{"type":"COST","provider":"vendor","amount_usd":0.01,"basis":"guessed"}`)
+	if err := s.Validate(asJSONValue(t, bad)); err == nil {
+		t.Error("COST with basis guessed passed the schema; basis is measured|estimated")
+	}
+}

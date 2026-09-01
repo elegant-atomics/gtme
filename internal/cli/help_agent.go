@@ -289,7 +289,7 @@ var ledgerObjectNotes = map[string]string{
 	"runs":              "one row per gtme run; config_json is the resolved pipeline",
 	"run_records":       "a run's membership: state = last completed step id, verdicts = {step_id: pass|fail}",
 	"step_events":       "per-record trail: claimed|done|failed|skipped_cache|dry_run|simulated, detail JSON",
-	"costs":             "spend per step/record",
+	"costs":             "spend per step/record; basis measured|estimated (ADR-046: measured only when read back from vendor-reported cost metadata; a rate multiplied out is estimated)",
 	"deliveries":        "sends and handoffs, UNIQUE(target, scope, idempotency) — scope is the resolved idempotency_scope config value (ADR-044, '' = unscoped); status accepted|confirmed|contradicted|sent; variables_hash drives redeliver: on_change (ADR-045)",
 	"groups":            "named associations (ADR-021); character derived from events",
 	"group_events":      "append-only added|removed|touched events per (group, identity)",

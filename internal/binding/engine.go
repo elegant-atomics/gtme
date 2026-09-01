@@ -142,8 +142,13 @@ func (e *Engine) runGap(r *protocol.Reader, w *protocol.Writer) error {
 // runSource pages through the API, emitting records until termination or the
 // config record limit (SPEC §10a source role: pagination + cursor/STATE).
 func (e *Engine) runSource(ctx context.Context, w *protocol.Writer, p adapters.Ports, doer httpx.Doer, cfg map[string]any, session string) error {
-	tctx := tmplContext{Config: cfg, Session: session}
+	// limit is the engine's (ADR-047): read it, and unless the binding
+	// declares it too, keep it out of the templates' sight.
 	limit := intConfig(cfg, "limit")
+	if !e.B.declaresConfig("limit") {
+		cfg = without(cfg, "limit")
+	}
+	tctx := tmplContext{Config: cfg, Session: session}
 	pageSize := e.pageSize(tctx)
 
 	emitted, pages := 0, 0
@@ -197,12 +202,13 @@ func (e *Engine) runSource(ctx context.Context, w *protocol.Writer, p adapters.P
 	}
 
 	if e.B.Cost != nil {
+		rate, _ := e.B.Cost.rate(tctx) // unresolved: $0, and the plan said `unset`
 		amount := 0.0
 		switch e.B.Cost.Per {
 		case "record":
-			amount = e.B.Cost.AmountUSD * float64(emitted)
+			amount = rate * float64(emitted)
 		case "request":
-			amount = e.B.Cost.AmountUSD * float64(pages)
+			amount = rate * float64(pages)
 		}
 		if err := w.Write(protocol.Cost(nil, e.B.Provider(), amount,
 			map[string]any{"records": emitted, "requests": pages})); err != nil {
@@ -231,7 +237,8 @@ func (e *Engine) enrichRecord(ctx context.Context, w *protocol.Writer, p adapter
 	learned := e.extractFields(target, in)
 
 	if e.B.Cost != nil && e.B.Cost.Per == "record" {
-		if err := w.Write(protocol.Cost(&key, e.B.Provider(), e.B.Cost.AmountUSD,
+		rate, _ := e.B.Cost.rate(tctx)
+		if err := w.Write(protocol.Cost(&key, e.B.Provider(), rate,
 			map[string]any{"records": 1})); err != nil {
 			return err
 		}
@@ -284,7 +291,8 @@ func (e *Engine) deliverRecord(ctx context.Context, w *protocol.Writer, p adapte
 		return err
 	}
 	if e.B.Cost != nil && e.B.Cost.Per == "record" {
-		return w.Write(protocol.Cost(&key, e.B.Provider(), e.B.Cost.AmountUSD,
+		rate, _ := e.B.Cost.rate(tctx)
+		return w.Write(protocol.Cost(&key, e.B.Provider(), rate,
 			map[string]any{"records": 1}))
 	}
 	return nil
@@ -623,6 +631,10 @@ func (e *Engine) terminated(doc any, got, page, pages, pageSize int) (bool, stri
 // configWithDefaults fills config keys the config_schema declares defaults
 // for, so a binding can rely on them the way a Go adapter's parseConfig does.
 func (e *Engine) configWithDefaults(config map[string]any) map[string]any {
+	return e.B.configWithDefaults(config)
+}
+
+func (b *Binding) configWithDefaults(config map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range config {
 		out[k] = v
@@ -632,7 +644,7 @@ func (e *Engine) configWithDefaults(config map[string]any) map[string]any {
 			Default any `json:"default"`
 		} `json:"properties"`
 	}
-	if len(e.B.ConfigSchema) > 0 && json.Unmarshal(e.B.ConfigSchema, &doc) == nil {
+	if len(b.ConfigSchema) > 0 && json.Unmarshal(b.ConfigSchema, &doc) == nil {
 		for name, p := range doc.Properties {
 			if p.Default == nil {
 				continue
@@ -650,6 +662,29 @@ func (e *Engine) providesSchema() []byte {
 		return e.B.Provides
 	}
 	return []byte(`{"type":"object","properties":{}}`)
+}
+
+// declaresConfig reports whether the binding's config_schema names key.
+func (b *Binding) declaresConfig(key string) bool {
+	var doc struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if len(b.ConfigSchema) == 0 || json.Unmarshal(b.ConfigSchema, &doc) != nil {
+		return false
+	}
+	_, ok := doc.Properties[key]
+	return ok
+}
+
+// without copies cfg minus one key.
+func without(cfg map[string]any, key string) map[string]any {
+	out := make(map[string]any, len(cfg))
+	for k, v := range cfg {
+		if k != key {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func intConfig(cfg map[string]any, key string) int {

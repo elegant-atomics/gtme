@@ -287,7 +287,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	}
 
 	if res.CostUSD > 0 || res.Priced {
-		if err := w.Write(protocol.Cost(nil, "anthropic", res.CostUSD, res.Detail())); err != nil {
+		if err := w.Write(costMessage(res)); err != nil {
 			return err
 		}
 	}
@@ -330,6 +330,7 @@ func (a *Adapter) deferred(ctx context.Context, engine ai.BatchEngine, w *protoc
 		return w.Write(protocol.Pending(token, map[string]any{"provider": engine.Name(), "records": len(records), "still_processing": true}))
 	}
 	var cost ai.Response
+	summed := 0
 	answered := map[string]map[string]any{}
 	var order []record
 	for _, rec := range records {
@@ -344,6 +345,9 @@ func (a *Adapter) deferred(ctx context.Context, engine ai.BatchEngine, w *protoc
 		}
 		cost.CostUSD += res.Response.CostUSD
 		cost.Priced = cost.Priced || res.Response.Priced
+		// One table-priced item makes the batch's total an estimate.
+		cost.Measured = (cost.Measured || summed == 0) && res.Response.Measured
+		summed++
 		cost.InputTokens += res.Response.InputTokens
 		cost.OutputTokens += res.Response.OutputTokens
 		cost.Model, cost.Engine = res.Response.Model, res.Response.Engine
@@ -356,11 +360,20 @@ func (a *Adapter) deferred(ctx context.Context, engine ai.BatchEngine, w *protoc
 		order = append(order, rec)
 	}
 	if cost.CostUSD > 0 || cost.Priced {
-		if err := w.Write(protocol.Cost(nil, "anthropic", cost.CostUSD, cost.Detail())); err != nil {
+		if err := w.Write(costMessage(cost)); err != nil {
 			return err
 		}
 	}
 	return a.emit(w, sh, order, answered)
+}
+
+// costMessage labels the step's COST with the engine's basis (ADR-046):
+// measured only when the engine read the amount back from the vendor.
+func costMessage(res ai.Response) protocol.Message {
+	if res.Measured {
+		return protocol.MeasuredCost(nil, "anthropic", res.CostUSD, res.Detail())
+	}
+	return protocol.Cost(nil, "anthropic", res.CostUSD, res.Detail())
 }
 
 // ask sends the batch, validates the answer, and retries once with the

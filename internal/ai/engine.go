@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/elegant-atomics/gtme/internal/protocol"
 )
 
 // Engine names (SPEC §2). "fixture" is test-only and selected by environment,
@@ -72,8 +74,19 @@ type Response struct {
 	CacheWriteTokens int
 
 	// CostUSD is 0 when the engine cannot price the call; Priced says which.
-	CostUSD float64
-	Priced  bool
+	// Measured says the engine read the amount back from the vendor
+	// (ADR-046) rather than multiplying tokens by our price table.
+	CostUSD  float64
+	Priced   bool
+	Measured bool
+}
+
+// Basis is the COST basis this response reports (SPEC §5, ADR-046).
+func (r Response) Basis() string {
+	if r.Measured {
+		return protocol.BasisMeasured
+	}
+	return protocol.BasisEstimated
 }
 
 // Detail is the COST message detail an adapter reports (SPEC §5).
@@ -84,6 +97,7 @@ func (r Response) Detail() map[string]any {
 		"input_tokens":  r.InputTokens,
 		"output_tokens": r.OutputTokens,
 		"priced":        r.Priced,
+		"basis":         r.Basis(),
 	}
 }
 

@@ -367,11 +367,52 @@ func (l *Ledger) RunRecords(ctx context.Context, runID string) ([]RunRecord, err
 	return out, nil
 }
 
-// RecordCost appends a cost row. identityID may be empty for step-level costs.
-func (l *Ledger) RecordCost(ctx context.Context, runID, stepID, identityID, provider string, amountUSD float64, detail map[string]any) error {
+// Cost bases (SPEC §3/§5, ADR-046): a measured amount was read back from
+// vendor-reported cost metadata; an estimated one was multiplied out from a
+// config or manifest rate. An unlabeled amount is estimated.
+const (
+	BasisMeasured  = "measured"
+	BasisEstimated = "estimated"
+)
+
+// CostTotal is a step's spend split by basis (ADR-046). Estimates counts
+// the estimated rows, so a $0 guess (an unset rate) stays distinguishable
+// from no spend at all.
+type CostTotal struct {
+	Measured  float64
+	Estimated float64
+	Estimates int
+}
+
+// Total is the step's whole spend, both bases.
+func (c CostTotal) Total() float64 { return c.Measured + c.Estimated }
+
+// Add folds another total in.
+func (c *CostTotal) Add(o CostTotal) {
+	c.Measured += o.Measured
+	c.Estimated += o.Estimated
+	c.Estimates += o.Estimates
+}
+
+// AddAmount folds one cost row in under its basis.
+func (c *CostTotal) AddAmount(amount float64, basis string) {
+	if basis == BasisMeasured {
+		c.Measured += amount
+		return
+	}
+	c.Estimated += amount
+	c.Estimates++
+}
+
+// RecordCost appends a cost row. identityID may be empty for step-level costs;
+// an empty basis records as estimated (ADR-046).
+func (l *Ledger) RecordCost(ctx context.Context, runID, stepID, identityID, provider string, amountUSD float64, basis string, detail map[string]any) error {
 	var idArg any
 	if identityID != "" {
 		idArg = identityID
+	}
+	if basis != BasisMeasured {
+		basis = BasisEstimated
 	}
 	var detailArg any
 	if len(detail) > 0 {
@@ -382,31 +423,39 @@ func (l *Ledger) RecordCost(ctx context.Context, runID, stepID, identityID, prov
 		detailArg = string(raw)
 	}
 	_, err := l.db.ExecContext(ctx,
-		`INSERT INTO costs (id, run_id, step_id, identity_id, provider, amount_usd, detail, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		ulid.New(), runID, stepID, idArg, provider, amountUSD, detailArg, l.stamp(l.now()))
+		`INSERT INTO costs (id, run_id, step_id, identity_id, provider, amount_usd, basis, detail, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ulid.New(), runID, stepID, idArg, provider, amountUSD, basis, detailArg, l.stamp(l.now()))
 	if err != nil {
 		return fmt.Errorf("ledger: inserting cost: %w", err)
 	}
 	return nil
 }
 
-// CostsByStep totals a run's spend per step.
-func (l *Ledger) CostsByStep(ctx context.Context, runID string) (map[string]float64, error) {
+// CostsByStep totals a run's spend per step, measured and estimated apart.
+func (l *Ledger) CostsByStep(ctx context.Context, runID string) (map[string]CostTotal, error) {
 	rows, err := l.db.QueryContext(ctx,
-		`SELECT step_id, sum(amount_usd) FROM costs WHERE run_id = ? GROUP BY step_id`, runID)
+		`SELECT step_id, basis, sum(amount_usd), count(*) FROM costs WHERE run_id = ? GROUP BY step_id, basis`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: totalling costs: %w", err)
 	}
 	defer rows.Close()
-	out := map[string]float64{}
+	out := map[string]CostTotal{}
 	for rows.Next() {
-		var step string
+		var step, basis string
 		var total float64
-		if err := rows.Scan(&step, &total); err != nil {
+		var n int
+		if err := rows.Scan(&step, &basis, &total, &n); err != nil {
 			return nil, fmt.Errorf("ledger: totalling costs: %w", err)
 		}
-		out[step] = total
+		t := out[step]
+		if basis == BasisMeasured {
+			t.Measured += total
+		} else {
+			t.Estimated += total
+			t.Estimates += n
+		}
+		out[step] = t
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("ledger: totalling costs: %w", err)

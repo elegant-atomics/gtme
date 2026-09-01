@@ -136,3 +136,53 @@ func TestKeyString(t *testing.T) {
 		t.Error("empty key should be Zero")
 	}
 }
+
+// ADR-046: a COST carries its basis on the wire, and an unlabeled amount is
+// estimated — a dollar figure is a guess until proven otherwise.
+func TestCostBasis(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+	measured := Cost(nil, "claude-code", 0.02, nil)
+	measured.Basis = BasisMeasured
+	if err := w.Write(measured); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(Cost(nil, "harvest", 0.012, nil)); err != nil {
+		t.Fatal(err)
+	}
+	// An adapter that predates ADR-046 (or a foreign one) sends no basis.
+	if err := w.Write(Message{Type: TypeCost, Provider: "mock"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.Contains(lines[0], `"basis":"measured"`) {
+		t.Errorf("measured COST on the wire = %s, want a basis member", lines[0])
+	}
+	// Built-ins label every emission: Cost() says estimated out loud.
+	if !strings.Contains(lines[1], `"basis":"estimated"`) {
+		t.Errorf("Cost() on the wire = %s, want basis estimated", lines[1])
+	}
+
+	r := NewReader(bytes.NewReader(buf.Bytes()))
+	got, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CostBasis() != BasisMeasured {
+		t.Errorf("CostBasis() = %q, want measured", got.CostBasis())
+	}
+	got, err = r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CostBasis() != BasisEstimated {
+		t.Errorf("CostBasis() of Cost() = %q, want estimated", got.CostBasis())
+	}
+	got, err = r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Basis != "" || got.CostBasis() != BasisEstimated {
+		t.Errorf("CostBasis() of an unlabeled COST = %q (wire %q), want estimated", got.CostBasis(), got.Basis)
+	}
+}

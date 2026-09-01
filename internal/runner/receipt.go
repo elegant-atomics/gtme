@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
 // PrintReceipt writes the end-of-run receipt: records in and out per step, cache
@@ -27,7 +29,8 @@ func PrintReceipt(w io.Writer, res *Result) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "step\tadapter\tin\tout\tcached\tfiltered\tfailed\tcost\tavoided")
 
-	var totalCost, totalAvoided float64
+	var totalCost ledger.CostTotal
+	var totalAvoided float64
 	avoidedUnknown := false
 	totalSkips := 0
 	for _, s := range res.Steps {
@@ -46,12 +49,12 @@ func PrintReceipt(w io.Writer, res *Result) {
 		if s.AvoidedUnknown {
 			avoidedUnknown = true
 		}
-		totalCost += s.CostUSD
+		totalCost.Add(s.Cost)
 		totalAvoided += s.AvoidedUSD
 
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
 			s.ID, s.Use, s.In, s.Out, s.CacheSkips,
-			dash(s.Filtered), dash(s.Failed), money(s.CostUSD), avoided)
+			dash(s.Filtered), dash(s.Failed), money(s.Cost.Total()), avoided)
 	}
 	tw.Flush()
 
@@ -180,7 +183,7 @@ func PrintReceipt(w io.Writer, res *Result) {
 		}
 	}
 
-	total := fmt.Sprintf("total: %s spent", money(totalCost))
+	total := fmt.Sprintf("total: %s spent", FormatCost(totalCost))
 	if totalSkips > 0 {
 		amount := fmt.Sprintf("$%.4f", totalAvoided)
 		if avoidedUnknown {
@@ -205,6 +208,22 @@ func money(v float64) string {
 		return "$0"
 	}
 	return fmt.Sprintf("$%.4f", v)
+}
+
+// FormatCost renders a total with its basis (SPEC §8, ADR-046): a purely
+// measured total prints bare; a purely estimated one `$X (estimated)`; a
+// mixed run splits — `$X ($Y measured + $Z estimated)`. A total with no
+// estimated rows at all (nothing spent, or every dollar measured) is bare.
+// `gtme runs` prints the same string from the ledger.
+func FormatCost(c ledger.CostTotal) string {
+	switch {
+	case c.Estimates == 0:
+		return money(c.Total())
+	case c.Measured == 0:
+		return money(c.Estimated) + " (estimated)"
+	default:
+		return fmt.Sprintf("%s (%s measured + %s estimated)", money(c.Total()), money(c.Measured), money(c.Estimated))
+	}
 }
 
 func dash(n int) string {

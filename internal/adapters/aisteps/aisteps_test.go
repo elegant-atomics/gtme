@@ -20,6 +20,8 @@ type scriptEngine struct {
 	prompts   []string
 	err       error
 	callCount int
+	// measured marks the engine's cost as vendor-reported (ADR-046).
+	measured bool
 }
 
 func (e *scriptEngine) Name() string { return "script" }
@@ -43,6 +45,7 @@ func (e *scriptEngine) Complete(ctx context.Context, req ai.Request) (ai.Respons
 		InputTokens:  10,
 		OutputTokens: 20,
 		Priced:       true,
+		Measured:     e.measured,
 	}, nil
 }
 
@@ -665,5 +668,36 @@ func TestDeferredWithoutBatchSurfaceAnswersSynchronously(t *testing.T) {
 	}
 	if verdicts != 1 || warned != 1 {
 		t.Errorf("verdicts = %d, warned = %d", verdicts, warned)
+	}
+}
+
+// ADR-046: the COST an AI step emits carries the engine's basis — measured
+// only when the engine read the amount back from the vendor, estimated when
+// it multiplied tokens by a price table.
+func TestCostCarriesEngineBasis(t *testing.T) {
+	for _, tc := range []struct {
+		measured bool
+		want     string
+	}{{false, protocol.BasisEstimated}, {true, protocol.BasisMeasured}} {
+		engine := &scriptEngine{measured: tc.measured, answers: []string{
+			`[{"identity_key":"a@x.com","pass":true,"reason":"in icp"}]`,
+		}}
+		msgs, err := drive(t, &Adapter{Mode: modeFilter, Engine: engine}, map[string]any{"prompt": "Keep."}, "a@x.com")
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		costs := 0
+		for _, m := range msgs {
+			if m.Type != protocol.TypeCost {
+				continue
+			}
+			costs++
+			if m.Basis != tc.want {
+				t.Errorf("measured=%v: COST basis on the wire = %q, want %q", tc.measured, m.Basis, tc.want)
+			}
+		}
+		if costs != 1 {
+			t.Errorf("measured=%v: cost messages = %d, want 1", tc.measured, costs)
+		}
 	}
 }

@@ -57,19 +57,20 @@ type Options struct {
 
 // StepStat is one step's contribution to the receipt.
 type StepStat struct {
-	ID             string
-	Use            string
-	Role           string
-	In             int // records dispatched to the adapter
-	Out            int // records that advanced
-	CacheSkips     int
-	Filtered       int // failed a filter verdict
-	Failed         int
-	Gated          int  // excluded by when:
-	Skipped        int  // deliver records held back by on_missing (SPEC §8)
-	SimGap         bool // stubbed under --simulate: no fixtures to serve (SPEC §8)
-	SimGapRecords  int  // records that passed through the gap untouched
-	CostUSD        float64
+	ID            string
+	Use           string
+	Role          string
+	In            int // records dispatched to the adapter
+	Out           int // records that advanced
+	CacheSkips    int
+	Filtered      int // failed a filter verdict
+	Failed        int
+	Gated         int  // excluded by when:
+	Skipped       int  // deliver records held back by on_missing (SPEC §8)
+	SimGap        bool // stubbed under --simulate: no fixtures to serve (SPEC §8)
+	SimGapRecords int  // records that passed through the gap untouched
+	// Cost is the step's spend, measured and estimated apart (ADR-046).
+	Cost           ledger.CostTotal
 	AvoidedUSD     float64
 	AvoidedUnknown bool
 
@@ -798,10 +799,10 @@ func (r *runner) forwardLog(st *planner.Step, m protocol.Message) {
 }
 
 func (r *runner) recordCost(ctx context.Context, st *planner.Step, identityID string, m protocol.Message) error {
-	if err := r.l.RecordCost(ctx, r.runID, st.ID, identityID, m.Provider, m.Amount(), m.Detail); err != nil {
+	if err := r.l.RecordCost(ctx, r.runID, st.ID, identityID, m.Provider, m.Amount(), m.CostBasis(), m.Detail); err != nil {
 		return err
 	}
-	r.bump(st, func(s *StepStat) { s.CostUSD += m.Amount() })
+	r.bump(st, func(s *StepStat) { s.Cost.AddAmount(m.Amount(), m.CostBasis()) })
 	return nil
 }
 

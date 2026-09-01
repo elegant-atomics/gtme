@@ -44,6 +44,15 @@ const (
 	AttestInconclusive = "inconclusive"
 )
 
+// Cost bases (SPEC §5, ADR-046). `measured` is reserved for an amount derived
+// from vendor-reported cost metadata in the response; an amount multiplied out
+// from a config or manifest rate is `estimated` even when the unit count is
+// exact. A COST with no basis is estimated.
+const (
+	BasisMeasured  = "measured"
+	BasisEstimated = "estimated"
+)
+
 // Key identifies a record. The runner canonicalizes keys (SPEC §4); adapters
 // echo back whatever key they were handed.
 type Key struct {
@@ -103,6 +112,7 @@ type Message struct {
 	// omitempty would drop a real $0 COST from the wire.
 	Provider  string         `json:"provider,omitempty"`
 	AmountUSD *float64       `json:"amount_usd,omitempty"`
+	Basis     string         `json:"basis,omitempty"`
 	Detail    map[string]any `json:"detail,omitempty"`
 
 	// STATE
@@ -142,6 +152,23 @@ func (m Message) Amount() float64 {
 		return 0
 	}
 	return *m.AmountUSD
+}
+
+// CostBasis reports a COST message's basis (ADR-046): measured only when the
+// adapter said so; anything else, including no basis at all, is estimated.
+func (m Message) CostBasis() string {
+	if m.Basis == BasisMeasured {
+		return BasisMeasured
+	}
+	return BasisEstimated
+}
+
+// MeasuredCost builds a COST whose amount came from vendor-reported cost
+// metadata (SPEC §5, ADR-046). Everything else uses Cost, which is estimated.
+func MeasuredCost(key *Key, provider string, amountUSD float64, detail map[string]any) Message {
+	m := Cost(key, provider, amountUSD, detail)
+	m.Basis = BasisMeasured
+	return m
 }
 
 // Writer serializes messages as NDJSON. It is safe for concurrent use so an
@@ -202,9 +229,11 @@ func Pending(token string, detail map[string]any) Message {
 	return Message{Type: TypePending, Token: token, Detail: detail}
 }
 
-// Cost builds a COST message. key may be nil for step-level costs.
+// Cost builds an estimated COST message (ADR-046: an amount multiplied out
+// from a rate, which is every built-in emission that is not MeasuredCost).
+// key may be nil for step-level costs.
 func Cost(key *Key, provider string, amountUSD float64, detail map[string]any) Message {
-	return Message{Type: TypeCost, Key: key, Provider: provider, AmountUSD: &amountUSD, Detail: detail}
+	return Message{Type: TypeCost, Key: key, Provider: provider, AmountUSD: &amountUSD, Basis: BasisEstimated, Detail: detail}
 }
 
 // Log builds a LOG message.

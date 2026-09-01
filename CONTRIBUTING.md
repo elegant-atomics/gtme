@@ -86,7 +86,17 @@ Add expectations for your binding to `test/conformance/binding_test.go`
       (empty pages, sentinel values, the pagination terminator)
 - [ ] Conformance expectations added
 - [ ] Header comment says what the API is, auth env var, and docs URL
-- [ ] Cost declaration is honest (`per: record|request`, or absent)
+- [ ] Cost declaration is honest (`per: record|request`, or absent). A
+      page-billed endpoint declares `per: request` — `per: record` counts
+      *emitted* records, and a `limit` truncates emission after the vendor
+      has billed the whole page. Where the price depends on the operator's
+      plan, template the rate from config
+      (`amount_usd: "{{config.cost_per_record_usd}}"`, knob declared in
+      `config_schema`) rather than guessing a number (ADR-046)
+- [ ] `limit` is not something your source binding has to declare: it is
+      the engine's reserved key, accepted on any source binding and
+      enforced by the engine (ADR-047). Declare it only if your request
+      templates it into the call
 
 **6. Share it (optional).** Bindings worth sharing live in the registry:
 [github.com/elegant-atomics/gtme-bindings](https://github.com/elegant-atomics/gtme-bindings)
