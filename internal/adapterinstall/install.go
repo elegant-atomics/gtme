@@ -108,10 +108,19 @@ func get(url string, accept string) (*http.Response, error) {
 	if accept != "" {
 		req.Header.Set("Accept", accept)
 	}
-	if t := token(); t != "" {
+	if t := token(); t != "" && authorized(url) {
 		req.Header.Set("Authorization", "Bearer "+t)
 	}
 	return client.Do(req)
+}
+
+// authorized reports whether the URL belongs to a host the GITHUB_TOKEN is
+// meant for (the API and codeload). Raw content hosts never get the token:
+// the registry index is public, and raw.githubusercontent.com answers an
+// invalid bearer token with 404, turning a working fetch into a phantom
+// missing index (#26).
+func authorized(url string) bool {
+	return strings.HasPrefix(url, APIBase()+"/") || strings.HasPrefix(url, CodeloadBase()+"/")
 }
 
 // ResolveCommit resolves the ref (or the repository HEAD) to a commit sha via
