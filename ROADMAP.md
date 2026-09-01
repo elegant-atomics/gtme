@@ -321,32 +321,58 @@ then a small change to how the runner chunks, not a new step.
 
 ## Interactive review step
 
-Named 2026-08-31, not specified. A synchronous, in-band review step: the run
-stops at a record, shows the operator what would go out, and takes a decision
-from a set the pipeline author configured — each response mapped to what it
-does. Distinct from the dry-run receipt, which is out-of-band and whole-run
-(read an artifact, then re-run to arm). This one is per-record and blocking.
+Named 2026-08-31, not specified. A per-record human review: the pipeline
+stops a record at a review step, shows the operator a configured rendering of
+it, and takes a decision from a configured response set. Design position
+(leaning, not ADR'd): **the verdict is a fact, not a branch.** The reviewer's
+answer is a recorded judgment — provenance, judgment cache, asked once per
+scope — that downstream steps consume through the machinery that already
+exists (`sql/filter` on the verdict field, group membership). Per-response
+control flow inside the pipeline is declined: routing on responses is an
+expression language by another name, the same mechanism shape "Groups,
+option C" refused. "Rejected → nurture" is a second pipeline reading the
+verdict, and that idiom is a pattern to document, not syntax to add.
 
-The design question before anything else: **is a verdict a fact or a branch?**
-If the reviewer's answer writes a value or a group membership that ordinary
-downstream steps read, it is one atom and needs no new grammar — the shape
-`group/deliver` already has. If the configured "results" mean per-response
-control flow inside the pipeline (approved → this step, rejected → that one),
-that is an expression language by another name, which §0's closed grammar
-refuses. Worth keeping in the first form only; the second is the
-mechanism-shaped version and should be declined the way the workflow-engine
-pressure was under "Groups, option C".
+The step is structurally `ai/filter` with a human behind the contract —
+`engine: human` rather than a new step kind. It inherits declared output
+schemas (ADR-033): the **response set is the declared output enum**, so the
+pipeline author configures the verdict vocabulary the same way an AI step
+declares its shape. The author also configures the per-record rendering —
+which fields the reviewer sees and how the message is presented — in the
+step's config, so the review surface is authored in the pipeline file like
+everything else.
 
-Two constraints it has to answer. Blocking on a TTY is hostile to the
-operators this tool is built for — agent sessions, and unattended runs under
-cron — so the step needs defined non-interactive behaviour (skip, fail, or
-fall through to the existing dry-run/arm ritual) rather than hanging. And
-"waiting of any kind stays out — no daemon" from "Asynchronous steps" still
-holds: blocking one process on stdin is not durable pending state, but this
-entry must not become the doorway to it.
+Collection reuses ADR-038's pending machinery: a run with unanswered reviews
+ends `pending`, the receipt says what is awaited, and a later plain `gtme
+run` collects. No TTY block as the primitive, no daemon, no new verb —
+"waiting of any kind stays out" holds because the pending state is ledger
+state, not a live process.
 
-Scope deliberately unpinned. "Configure each message and the possible
-responses and their results" covers at least three separable features —
-per-record editing of the outgoing copy, a configurable verdict vocabulary,
-and consequence routing — and which of them is actually wanted has not been
-decided.
+Open question: the collection *surface*. At least two are real — a terminal
+prompt (gtme itself asks, record by record, when a human runs it) and an
+agent-mediated review (the run is pending; a Claude Code session presents
+each record to the human in conversation and records verdicts through the
+CLI). Whether those are two engines behind one contract (the AI steps'
+`api` / `claude-code` precedent) or two adapters is undecided; the contract —
+configured rendering in, enum verdict out, judgment recorded — should not
+differ between them.
+
+## Registry-maintained cost declarations
+
+DECISIONS.md ADR-046 records the basis of a spend (measured vs estimated)
+but leaves the estimated numbers themselves wherever the binding author
+typed them, which for community bindings is unverifiable (issue #29's
+durable ask). The natural home is the registry index: a per-binding cost
+declaration re-checked on the same cadence that re-records fixtures, so
+an estimate traces to something maintained and a stale price becomes a CI
+failure rather than a silent receipt error. Registry work, not runner
+work; deferred from M23.
+
+## Templated `cost_estimate_usd`
+
+ADR-046 lets `cost.amount_usd` (the ledger figure) template from config;
+`cost_estimate_usd` (the manifest figure `gtme plan` prints) has the same
+plan-dependent-pricing problem and could take the same treatment. Less
+urgent — a wrong estimate is less damaging than a wrong ledger row — and
+deferred so M23 stays small. Whoever picks it up: the resolution point is
+plan time, from the step's resolved config.

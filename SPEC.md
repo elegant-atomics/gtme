@@ -218,6 +218,7 @@ CREATE TABLE costs (
   identity_id TEXT,
   provider    TEXT NOT NULL,
   amount_usd  REAL NOT NULL,              -- 0 allowed (unknown/free)
+  basis       TEXT NOT NULL DEFAULT 'estimated', -- measured|estimated (ADR-046)
   detail      TEXT,                       -- JSON (credits, tokens, etc.)
   created_at  TEXT NOT NULL
 );
@@ -540,7 +541,7 @@ Adapter → runner:
 {"type":"ATTEST","key":{...},"status":"confirmed|contradicted|inconclusive","reason":"..."}  // deliver steps declaring attests (§6)
 {"type":"PENDING","token":"...","detail":{...}}           // work in flight (ADR-038): collect under token
 {"type":"PREFLIGHT","status":"ok|blocked|inconclusive","checks":[{"name":"...","ok":true,"detail":"..."}]}  // deliver steps declaring preflights (§6)
-{"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"detail":{...}}
+{"type":"COST","key":{...}|null,"provider":"harvest","amount_usd":0.012,"basis":"estimated","detail":{...}}
 {"type":"STATE","cursor":{...}}                            // resumable sources
 {"type":"LOG","level":"info|warn|error","msg":"..."}
 {"type":"END"}
@@ -606,6 +607,11 @@ Rules:
 - `confidence` is per-field, OPTIONAL, default 1.0.
 - COST is best-effort but every v0 built-in adapter that spends money or
   tokens MUST emit it (estimate token cost from the API usage response).
+  COST MAY carry `basis: "measured" | "estimated"` (ADR-046); absent
+  means `estimated`. `measured` is reserved for an amount derived from
+  vendor-reported cost metadata in the response — an amount multiplied
+  out from a config or manifest rate is `estimated` even when the unit
+  count is exact.
 - Output RECORD `fields` MUST be validated against the manifest `provides`
   schema before ledger write; on invalid input the record MUST fail
   (`step_events.event='failed'`), and the run MUST continue.
@@ -741,7 +747,10 @@ beside it. The canonical schema for this file is
 3. Verify all `credentials` across all steps are resolvable.
 4. Print the resolved plan: steps, projections, cache windows, and known
    per-record cost estimates (from a static `cost_estimate_usd` optional
-   manifest field; print `?` when absent).
+   manifest field; print `?` when absent). A binding whose
+   `cost.amount_usd` is a template that resolves to nothing (the operator
+   set no rate) prints `est/record: unset`, never `$0.0000` (ADR-046) —
+   the gap is visible before anything is spent.
 
 **AI-step needs (ADR-004):** an AI-role step's config MAY declare
 `uses: [field, ...]` (see §9). When present, the planner MUST treat `uses`
@@ -949,7 +958,11 @@ other.
 
 **Terminal receipt** (stderr, end of run): records in/out per step, cache
 skips, cost per step and total, cost avoided via cache (sum of
-`cost_estimate_usd` for skipped records; `?` if unknown).
+`cost_estimate_usd` for skipped records; `?` if unknown). Totals carry
+their basis (ADR-046): a purely measured total prints bare; a purely
+estimated one prints `total: $X (estimated)`; a mixed run splits —
+`total: $X ($Y measured + $Z estimated)`. `gtme runs <id>` mirrors the
+live receipt.
 
 ### `gtme show` (ADR-006)
 
@@ -1599,12 +1612,20 @@ response→canonical paths, with a `transform:` hook restricted to registry
 normalization rules — never arbitrary logic); error→verdict mapping; an
 idempotency declaration `native | ledger` (which party guarantees dedupe:
 Attio assert = native; Instantly = ledger via the deliveries table); a
-cost declaration (per record / per request / unit); and a retry/rate
+cost declaration (per record / per request / unit — `amount_usd` a
+number, or a template resolved from config for vendors whose price is
+plan-dependent, ADR-046; a page-billed endpoint declares `per: request`,
+because `per: record` counts *emitted* records and a `limit` truncates
+emission after the vendor has billed the page); and a retry/rate
 policy including hourly windows, with an optional session declaration
 (a UUID-per-run passed through, for vendors offering
 pagination-consistency sessions). Binding roles are source (pagination +
-cursor/STATE), enrich (per-record request), and deliver (idempotency +
-dry-run receipts). A binding declares the same manifest surface as a
+cursor/STATE; `limit` is a reserved engine key, ADR-047 — config
+validation accepts it whether or not the binding's `config_schema`
+declares it, the engine caps emitted records and terminates pagination
+at the cap, and a binding that does declare it receives it unchanged),
+enrich (per-record request), and deliver (idempotency + dry-run
+receipts). A binding declares the same manifest surface as a
 process adapter (`needs`/`provides`/`config_schema`/`freshness_days`, §6)
 so `gtme plan` treats both tiers identically; named external bindings are
 discovered on the §6 path (`~/.gtme/adapters/<name>/` containing
@@ -2005,6 +2026,22 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
+  §7, §8, §10a). Queued.** A migration adds `costs.basis` (backfill
+  `estimated`); the COST message carries `basis` and every built-in that
+  spends labels its emissions per the reserved-`measured` rule; receipts
+  and `gtme runs` print totals with their basis (bare / `(estimated)` /
+  split when mixed); `binding-schema.json` lets `amount_usd` template
+  from config and `gtme plan` prints `est/record: unset` for an
+  unresolved rate; the engine accepts `limit` on any source binding,
+  declared or not; `gtme help --bindings` and CONTRIBUTING carry the
+  `per: request` page-billing guidance and the `limit` reservation.
+  Acceptance, offline: a fixture binding with a templated rate runs at
+  the operator's figure and its cost rows say `estimated`; the same
+  binding with no rate set plans as `unset` and runs at $0; a fixture
+  adapter emitting vendor-reported cost lands `measured` and a mixed run
+  prints the split total; a strict binding that does not declare `limit`
+  accepts `limit: 1` and stops paginating after one record.
 - **M22 — on-change re-delivery (ADR-045; §3, §6, §8, §9). Built 2026-08-31
   (changelog v0.31).** Migration 0009 adds `variables_hash`; manifest
   `idempotency: native|ledger` (bindings bridge theirs); `redeliver:`
@@ -2229,6 +2266,18 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.32 — 2026-08-31 (ADR-046/047 reconciliation: honest costs, engine-owned limit; build queued as M23)
+**Changed:** §3 `costs.basis`; §5 COST `basis` with the
+reserved-`measured` rule; §7 plan prints `est/record: unset` for an
+unresolved templated rate; §8 receipt totals carry their basis; §10a
+cost declaration may template `amount_usd` from config, page-billed
+guidance (`per: request`), and `limit` as the source role's reserved
+engine key; §11 milestone M23. Schema artifacts
+(`spec/binding-schema.json`, `spec/ledger.sql`) ride the build.
+**Not changed:** nothing built — M23 is queued. `cost_estimate_usd`
+templating and registry-maintained cost declarations deferred to
+ROADMAP.md (ADR-046).
 
 ### v0.31 — 2026-08-31 (M22 build: on-change re-delivery, built)
 **Changed:** §11 M22 marked built; no normative text changed beyond

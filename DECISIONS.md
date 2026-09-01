@@ -2687,3 +2687,92 @@ server: one assert, an unchanged skip with reason `unchanged`, a changed
 re-assert with the same single row and a moved hash, `always` repeating,
 `never` restoring the floor, and csv/deliver refusing the key at plan.
 **Spec impact:** None beyond v0.30 (marked built as v0.31).
+
+### ADR-046: Honest costs — a recorded basis, and operator-declared rates
+**Status:** Proposed (2026-08-31 — drafted by the backlog session from
+issues #29 and #31; merging this packet is the acceptance)
+**Context:** Nothing in the ledger or a receipt distinguishes a cost that
+was *measured* (read back from a vendor's response) from one that was
+*estimated* (multiplied out from a number a binding author typed). SPEC
+§10.3 already draws the distinction for `harvest/profile` — "emit COST
+from response metadata if present, else config-estimated" — and then the
+ledger boundary discards it: both land in `costs.amount_usd` and render
+identically as dollars spent (#29). Compounding it, `cost.amount_usd` in
+a binding is a fixed number, so for any vendor whose price depends on
+the customer's plan no honest value exists at authoring time — a shared
+binding must choose between a confidently wrong receipt and a silent one,
+while the Go tier already solves this by exposing the rate as config
+(`harvest/profile`'s `cost_per_profile_usd`) (#31). "Every dollar has a
+receipt" is the project's own framing; a receipt that cannot separate a
+measurement from an assumption is weakest exactly where it is trusted
+most.
+**Decision:** (1) The COST wire message MAY carry **`basis: "measured" |
+"estimated"`**. Absent means `estimated` — an unlabeled dollar figure is
+a guess until proven otherwise. `measured` is reserved for an amount
+derived from vendor-reported cost metadata in the response; an amount
+multiplied out from a config or manifest rate is `estimated` even when
+the unit count is exact. (2) **`costs` gains `basis TEXT NOT NULL
+DEFAULT 'estimated'`** (migration and `spec/ledger.sql` ride the build;
+existing rows backfill `estimated`, which under the rule above is what
+every pre-M23 amount was). (3) **Receipts show it**: a purely measured
+total prints as today; a purely estimated total prints `total: $X
+(estimated)`; a mixed run splits — `total: $X ($Y measured + $Z
+estimated)`. `gtme runs <id>` mirrors the live receipt. (4)
+**`cost.amount_usd` MAY be a template** resolved from config
+(`"{{config.cost_per_record_usd}}"`), the exact mechanism
+`pagination.page_size` already uses; the binding declares its knob in
+its own `config_schema`. An unresolved or unset template costs $0 at run
+time, and `gtme plan` prints `est/record: unset` instead of `$0.0000` —
+the gap is visible at the moment it matters, before anything is spent.
+(5) **Authoring guidance** (§10a, `gtme help --bindings`, CONTRIBUTING's
+checklist): a page-billed endpoint declares `per: request` — `per:
+record` counts *emitted* records, and a `limit` truncates emission after
+the vendor has billed the whole page.
+**Not in this ADR:** templating `cost_estimate_usd` (the manifest-level
+plan figure; same shape, less urgent — a wrong estimate is less damaging
+than a wrong ledger row) and a registry-maintained per-binding cost
+declaration re-checked on the fixture cadence (#29's durable fix — it is
+registry work, not runner work). Both go to ROADMAP.md, not to M23.
+**Consequences:** Totals become explicit about their epistemic status,
+and an agent or operator reading a receipt after the fact can tell
+counted dollars from arithmetic. Responsibility for an estimated rate's
+accuracy moves to the operator wherever pricing is plan-dependent —
+deliberately: the operator's own figure replaces a stranger's guess, and
+that shift is a stated property of the design, not a side effect.
+**Spec impact:** AMEND (this packet's second commit) — §3 (`costs.basis`),
+§5 (COST `basis`), §7 (plan prints `unset`), §8 (receipt totals),
+§10a (cost declaration + `per: request` guidance); §11 milestone M23.
+`spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
+ride the build, machine-compared as always.
+
+### ADR-047: Source `limit` is engine-owned, as documented
+**Status:** Proposed (2026-08-31 — drafted by the backlog session from
+issue #32; merging this packet is the acceptance)
+**Context:** `gtme help --bindings` describes `limit` as engine config
+for source bindings ("config `limit` caps emitted records"), and the cap
+genuinely works — it terminates pagination early rather than trimming
+the result. But `limit` is validated against the binding's own
+`config_schema` like any other key, so a binding with
+`additionalProperties: false` — which the docs encourage and every
+shipped binding uses — rejects it unless its author happened to declare
+it. The failure reads as "the operator passed a bad key," and every
+strict community binding silently opts out of the one control an
+operator has over what a paginated source spends (#32). `pagination.max`
+is a fixed integer and cannot be templated, so `limit` has no
+substitute.
+**Decision:** `limit` is a **reserved engine key** for `role: source`
+bindings. Config validation MUST accept it whether or not the binding's
+`config_schema` declares it: when undeclared, the engine validates the
+remaining config with `limit` removed and keeps the cap to itself; when
+declared (as `apollo/search` does), the binding receives it unchanged —
+existing bindings keep working, templating included. Either way the
+engine caps emitted records and terminates pagination at the cap. The
+documentation becomes true as written; no binding has to opt in.
+**Consequences:** Retroactively fixes every community binding whose
+author did not copy the key across. Removes a per-binding correctness
+requirement with no upside. A step further — stripping `limit` from
+declared schemas too — was rejected: bindings legitimately template it
+into requests.
+**Spec impact:** AMEND (this packet's second commit) — §10a (the source
+role's reserved key); §11 (folded into milestone M23). `gtme help
+--bindings` and CONTRIBUTING ride the build.
