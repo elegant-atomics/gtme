@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -194,5 +195,22 @@ source:
 	contains(t, res.stderr, "dropped a record", "stderr")
 	if n := h.queryInt(`SELECT count(*) FROM identities WHERE entity_type = 'person'`); n != 1 {
 		t.Errorf("person identities = %d, want 1 (the keyable row)", n)
+	}
+
+	// SPEC §5: the drop is recorded, not just printed. A failed step event with
+	// the reason keeps the run explainable after the terminal is gone (#30).
+	if n := h.queryInt(`SELECT count(*) FROM step_events WHERE step_id = 'source' AND event = 'failed'`); n != 1 {
+		t.Errorf("failed step events for source = %d, want 1", n)
+	}
+	details := h.queryStrings(`SELECT detail FROM step_events WHERE step_id = 'source' AND event = 'failed'`)
+	if len(details) != 1 || !strings.Contains(details[0], "reason") {
+		t.Errorf("failed event detail = %v, want a reason", details)
+	}
+
+	// And the read-back receipt reports it, matching what the live run printed:
+	// claimed -, done 1, cached -, failed 1.
+	readback := h.mustRun("runs", "last")
+	if !regexp.MustCompile(`(?m)^source\s+-\s+1\s+-\s+1\s`).MatchString(readback.stderr) {
+		t.Errorf("runs last does not report failed = 1 for source:\n%s", readback.stderr)
 	}
 }
