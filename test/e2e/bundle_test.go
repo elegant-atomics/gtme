@@ -119,3 +119,74 @@ steps:
 	}
 	contains(t, res.stderr, "does not match its manifest hash", "tamper detection")
 }
+
+// TestBundleWithSQLSteps: sql/transform and sql/filter are runner-owned steps
+// (SPEC §10a), not adapters — the bundler must not try to resolve them on the
+// adapter path (#28). Their query travels inside pipeline.yaml; nothing else
+// has to be packed.
+func TestBundleWithSQLSteps(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", "full_name,linkedin_url\nJane Doe,https://www.linkedin.com/in/jane-doe\n")
+	h.write("p.yaml", `name: sql-bundle-proof
+version: 1
+source:
+  use: csv/source
+  with:
+    path: people.csv
+    entity_type: person
+steps:
+  - id: shout
+    use: sql/transform
+    with:
+      provides: [probe.shout]
+      query: |
+        SELECT identity_id, upper(value) AS "probe.shout"
+        FROM current_values WHERE field = 'full_name'
+  - id: keep
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values
+        WHERE field = 'full_name' AND value != ''
+  - id: out
+    use: csv/deliver
+    with:
+      path: out.csv
+    variables:
+      name: full_name
+      shout: probe.shout
+`)
+	h.mustRun("run", "p.yaml")
+
+	bundleDir := filepath.Join(h.work, "sqlbundle")
+	res := h.mustRun("freeze", "last", "--bundle", bundleDir)
+	contains(t, res.stderr, "self-contained except credentials", "freeze output")
+
+	// No adapters/sql-* entries exist — there is nothing on the adapter path to
+	// pack — and the frozen pipeline still carries both steps verbatim.
+	for _, name := range []string{"adapters/sql-transform", "adapters/sql-filter"} {
+		if _, err := os.Stat(filepath.Join(bundleDir, name)); err == nil {
+			t.Errorf("bundle packed %s, but sql/* steps are runner-owned", name)
+		}
+	}
+	frozen := readFile(t, filepath.Join(bundleDir, "pipeline.yaml"))
+	for _, want := range []string{"sql/transform", "sql/filter", "probe.shout"} {
+		if !strings.Contains(frozen, want) {
+			t.Errorf("frozen pipeline.yaml is missing %q", want)
+		}
+	}
+
+	// The bundle runs on a clean ledger — the runner owns the sql steps, so
+	// simulation needs nothing beyond the bundle and the binary.
+	clean := newHarness(t)
+	clean.write("people.csv", "full_name,linkedin_url\nJane Doe,https://www.linkedin.com/in/jane-doe\n")
+	moved := filepath.Join(clean.work, "bundle")
+	if err := os.Rename(bundleDir, moved); err != nil {
+		t.Fatal(err)
+	}
+	res = clean.run("run", "bundle", "--simulate")
+	if res.code != 0 {
+		t.Fatalf("bundle simulate exit = %d\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "hashes verified", "bundle banner")
+}

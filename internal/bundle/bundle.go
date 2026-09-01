@@ -20,6 +20,7 @@ import (
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/binding"
 	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/elegant-atomics/gtme/internal/planner"
 	"github.com/elegant-atomics/gtme/spec"
 )
 
@@ -77,6 +78,12 @@ func Write(dir string, p *pipeline.Pipeline, sourceRunID, gtmVersion, createdAt 
 	for _, s := range p.AllSteps() {
 		if strings.TrimSpace(s.Use) == "" {
 			continue // a group source references ledger state, not an adapter
+		}
+		if s.Use == planner.SQLTransformID || s.Use == planner.SQLFilterID {
+			// Runner-owned SQL steps (SPEC §10a) resolve to executors inside the
+			// gtme binary, not to entries on the adapter path; their query already
+			// travels in pipeline.yaml (#28).
+			continue
 		}
 		res, err := adapters.Resolve(s.Use)
 		if err != nil {
