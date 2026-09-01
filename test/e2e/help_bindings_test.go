@@ -212,3 +212,16 @@ func TestUnknownAdapterNamesTheBindingSurface(t *testing.T) {
 	contains(t, res.stderr, "binding.yaml", "stderr")
 	contains(t, res.stderr, "gtme help --bindings", "stderr")
 }
+
+// TestHelpBindingsCarriesTheCostAndLimitGuidance (SPEC §11 M23): the
+// authoring contract says how to declare a plan-dependent rate, that a
+// page-billed endpoint declares per: request, and that limit is the
+// engine's on a source binding — an author reading only this document
+// makes the honest declaration.
+func TestHelpBindingsCarriesTheCostAndLimitGuidance(t *testing.T) {
+	h := newHarness(t)
+	doc, _ := helpBindings(t, h)
+	for _, want := range []string{"per: request", "{{config.", "limit", "estimated"} {
+		contains(t, doc.Note, want, "help --bindings note")
+	}
+}

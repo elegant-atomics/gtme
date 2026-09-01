@@ -92,6 +92,9 @@ type Step struct {
 	// the plan reports them as warnings, not errors.
 	MissingOptional []string
 	CostEstimate    *float64
+	// CostUnset marks a binding whose rate templates from config and
+	// resolved to nothing (ADR-046): the plan prints `unset`, never $0.
+	CostUnset bool
 
 	IsSource  bool
 	IsDeliver bool
@@ -705,6 +708,14 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	ps.Needs = resolved.Manifest.NeedsFields()
 	ps.Required = resolved.Manifest.RequiredNeeds()
 	ps.CostEstimate = resolved.Manifest.CostEstimate
+	if rate := resolved.Manifest.CostRate; rate != nil {
+		// The operator's figure (ADR-046), or its absence made visible.
+		if v, ok := rate(ps.Config); ok {
+			ps.CostEstimate = &v
+		} else {
+			ps.CostUnset = true
+		}
+	}
 	ps.Batch = resolved.Manifest.Batch
 	ps.NeedsAll = len(ps.Needs) == 0 && adapters.Wildcard(resolved.Manifest.Needs)
 
@@ -877,7 +888,9 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 			Msg: fmt.Sprintf("%s is a source adapter and can only be the pipeline source", s.Use)})
 	}
 
-	if err := resolved.Manifest.ValidateConfig(ps.Config); err != nil {
+	// limit is the engine's on a source binding (ADR-047): validated only
+	// when the binding declares it, capped by the engine either way.
+	if err := resolved.Manifest.ValidateConfig(withoutReservedKeys(resolved, ps.Config)); err != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 	}
 
@@ -1517,4 +1530,24 @@ func resolveConfigQuery(scope Scope, path, kind, text string) (any, string, erro
 		return values[0], fmt.Sprintf("%s → 1 row (scalar): %s", label, shown[0]), nil
 	}
 	return values, fmt.Sprintf("%s → %d rows (list): %s", label, len(values), strings.Join(shown, ", ")), nil
+}
+
+// withoutReservedKeys drops the engine-owned keys a source binding's
+// config_schema need not declare (ADR-047: `limit`) before validation. A
+// binding that declares the key keeps it, so its own schema and templates
+// see it unchanged.
+func withoutReservedKeys(resolved *adapters.Resolved, config map[string]any) map[string]any {
+	if !resolved.Binding || resolved.Manifest.Role != adapters.RoleSource {
+		return config
+	}
+	if _, declared := config["limit"]; !declared || resolved.Manifest.DeclaresConfig("limit") {
+		return config
+	}
+	out := make(map[string]any, len(config))
+	for k, v := range config {
+		if k != "limit" {
+			out[k] = v
+		}
+	}
+	return out
 }

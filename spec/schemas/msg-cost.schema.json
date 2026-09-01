@@ -11,6 +11,7 @@
     "key": {"oneOf": [{"$ref": "#/definitions/key"}, {"type": "null"}]},
     "provider": {"type": "string"},
     "amount_usd": {"type": "number", "minimum": 0, "description": "0 allowed (unknown/free). Absent means 0."},
+    "basis": {"enum": ["measured", "estimated"], "description": "ADR-046: `measured` is reserved for an amount derived from vendor-reported cost metadata in the response; an amount multiplied out from a config or manifest rate is `estimated` even when the unit count is exact. Absent means estimated."},
     "detail": {"type": "object", "description": "Credits, tokens, whatever the provider reported."}
   },
   "definitions": {

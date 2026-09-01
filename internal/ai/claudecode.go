@@ -62,10 +62,17 @@ func (e *claudeCodeEngine) Complete(ctx context.Context, req Request) (Response,
 		return Response{}, fmt.Errorf("ai: claude-code failed: %w: %s", err, strings.TrimSpace(errb.String()))
 	}
 
+	return parseClaudeCodeOutput(out.Bytes(), req.Model)
+}
+
+// parseClaudeCodeOutput reads `claude -p --output-format json`. A response
+// carrying total_cost_usd is measured (ADR-046: vendor-reported cost
+// metadata); one without it is priced from our table, an estimate.
+func parseClaudeCodeOutput(raw []byte, reqModel string) (Response, error) {
 	var parsed claudeCodeResult
-	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+	if err := json.Unmarshal(raw, &parsed); err != nil {
 		// Older or differently-configured CLIs may print bare text.
-		return Response{Text: out.String(), Engine: EngineClaudeCode, Model: req.Model}, nil
+		return Response{Text: string(raw), Engine: EngineClaudeCode, Model: reqModel}, nil
 	}
 	if parsed.IsError {
 		return Response{}, fmt.Errorf("ai: claude-code reported an error: %s", parsed.Result)
@@ -73,7 +80,7 @@ func (e *claudeCodeEngine) Complete(ctx context.Context, req Request) (Response,
 
 	model := parsed.Model
 	if model == "" {
-		model = req.Model
+		model = reqModel
 	}
 	res := Response{
 		Text:             parsed.Result,
@@ -86,7 +93,7 @@ func (e *claudeCodeEngine) Complete(ctx context.Context, req Request) (Response,
 	}
 	if parsed.TotalCostUSD > 0 {
 		// The CLI reports what it actually cost; trust it over our own table.
-		res.CostUSD, res.Priced = parsed.TotalCostUSD, true
+		res.CostUSD, res.Priced, res.Measured = parsed.TotalCostUSD, true, true
 	} else {
 		res.CostUSD, res.Priced = Price(res.Model, res.InputTokens, res.OutputTokens, res.CacheReadTokens, res.CacheWriteTokens)
 	}

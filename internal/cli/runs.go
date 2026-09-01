@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/runner"
 )
 
 // cmdRuns lists runs, or prints one run's receipt (SPEC §8).
@@ -101,17 +102,18 @@ func printReceipt(ctx context.Context, env Env, l *ledger.Ledger, run ledger.Run
 
 	tw := tabwriter.NewWriter(env.Stderr, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "\nstep\tclaimed\tdone\tcached\tfailed\tcost")
-	var total float64
+	var total ledger.CostTotal
 	for _, step := range order {
 		counts := events[step]
 		cost := costs[step]
-		total += cost
+		total.Add(cost)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", step,
 			count(counts["claimed"]), count(counts["done"]),
-			count(counts["skipped_cache"]), count(counts["failed"]), money(cost))
+			count(counts["skipped_cache"]), count(counts["failed"]), money(cost.Total()))
 	}
 	tw.Flush()
-	fmt.Fprintf(env.Stderr, "total: %s\n", money(total))
+	// The total carries its basis exactly as the live receipt did (ADR-046).
+	fmt.Fprintf(env.Stderr, "total: %s\n", runner.FormatCost(total))
 
 	// The states show where records stopped, which is the useful thing when a run
 	// did not finish cleanly.

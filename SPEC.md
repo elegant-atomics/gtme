@@ -2027,21 +2027,26 @@ decided contract, not shipped behavior.
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
-  §7, §8, §10a). Queued.** A migration adds `costs.basis` (backfill
-  `estimated`); the COST message carries `basis` and every built-in that
-  spends labels its emissions per the reserved-`measured` rule; receipts
-  and `gtme runs` print totals with their basis (bare / `(estimated)` /
-  split when mixed); `binding-schema.json` lets `amount_usd` template
-  from config and `gtme plan` prints `est/record: unset` for an
-  unresolved rate; the engine accepts `limit` on any source binding,
-  declared or not; `gtme help --bindings` and CONTRIBUTING carry the
-  `per: request` page-billing guidance and the `limit` reservation.
-  Acceptance, offline: a fixture binding with a templated rate runs at
-  the operator's figure and its cost rows say `estimated`; the same
-  binding with no rate set plans as `unset` and runs at $0; a fixture
-  adapter emitting vendor-reported cost lands `measured` and a mixed run
-  prints the split total; a strict binding that does not declare `limit`
-  accepts `limit: 1` and stops paginating after one record.
+  §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
+  rebuilds `costs` with `basis` (backfill `estimated`); the COST message
+  carries `basis` and every built-in that spends labels its emissions per
+  the reserved-`measured` rule (the claude-code engine's reported
+  `total_cost_usd` is the one measured source; every rate-multiplied
+  amount, the binding engine's included, is estimated); receipts and
+  `gtme runs` print totals with their basis (bare / `(estimated)` / split
+  when mixed); `binding-schema.json` lets `amount_usd` template from
+  config and `gtme plan` prints `est/record: unset` for an unresolved
+  rate; the engine accepts `limit` on any source binding, declared or
+  not; `gtme help --bindings` and CONTRIBUTING carry the `per: request`
+  page-billing guidance and the `limit` reservation.
+  ✅ E2E, offline: a fixture binding with a templated rate runs at the
+  operator's figure and its cost rows say `estimated`; the same binding
+  with no rate set plans as `unset` and runs at $0 `(estimated)`; a
+  fixture adapter emitting vendor-reported cost lands `measured` and a
+  mixed run prints the split total on both the live receipt and `gtme
+  runs`; a strict binding that does not declare `limit` accepts `limit:
+  1` and stops paginating after one record (one request), while an
+  unknown key is still refused.
 - **M22 — on-change re-delivery (ADR-045; §3, §6, §8, §9). Built 2026-08-31
   (changelog v0.31).** Migration 0009 adds `variables_hash`; manifest
   `idempotency: native|ledger` (bindings bridge theirs); `redeliver:`
@@ -2266,6 +2271,17 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.33 — 2026-09-01 (M23 build: honest costs + engine-owned limit, built)
+**Changed:** §11 M23 marked built; no normative text changed beyond
+v0.32 — migration 0010, both schema artifacts (`spec/ledger.sql`,
+`spec/binding-schema.json`) and the COST message schema
+(`spec/schemas/msg-cost.schema.json` admits `basis`) landed with the
+build. Behavioural notes: built-ins label `estimated` explicitly on the
+wire rather than relying on the absent default; a `$0` total with
+estimated rows prints `$0 (estimated)` (an unset rate stays visible
+after the run, not just at plan); the plan-time rate resolves with the
+binding's `config_schema` defaults applied, so plan and run agree.
 
 ### v0.32 — 2026-08-31 (ADR-046/047 reconciliation: honest costs, engine-owned limit; build queued as M23)
 **Changed:** §3 `costs.basis`; §5 COST `basis` with the

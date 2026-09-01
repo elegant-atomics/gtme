@@ -146,11 +146,59 @@ type ErrorRule struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// Cost is primitive 7.
+// Cost is primitive 7. AmountUSD is a number, or a template resolved from
+// config for vendors whose price is plan-dependent (ADR-046) — the exact
+// mechanism pagination.page_size uses.
 type Cost struct {
-	Per       string  `json:"per,omitempty"` // record|request|unit
-	AmountUSD float64 `json:"amount_usd,omitempty"`
-	UnitPath  string  `json:"unit_path,omitempty"`
+	Per       string `json:"per,omitempty"` // record|request|unit
+	AmountUSD any    `json:"amount_usd,omitempty"`
+	UnitPath  string `json:"unit_path,omitempty"`
+}
+
+// StaticAmount reports the declared amount when it is a plain number.
+func (c *Cost) StaticAmount() (float64, bool) {
+	switch t := c.AmountUSD.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	}
+	return 0, false
+}
+
+// Template reports the declared amount's template, when it is one.
+func (c *Cost) Template() (string, bool) {
+	s, ok := c.AmountUSD.(string)
+	return s, ok && s != ""
+}
+
+// rate resolves the per-unit amount against a template context. ok=false
+// means the rate is a template that resolved to nothing — the operator set
+// no rate — which runs at $0 (ADR-046) and plans as `unset`.
+func (c *Cost) rate(tctx tmplContext) (float64, bool) {
+	if v, ok := c.StaticAmount(); ok {
+		return v, true
+	}
+	tmpl, ok := c.Template()
+	if !ok {
+		return 0, true // no amount declared at all: a free declaration
+	}
+	v, ok := tctx.resolveString(tmpl)
+	if !ok {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case string:
+		var f float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(n), "%g", &f); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 // Retry is primitive 8.
@@ -265,10 +313,20 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 	if b.FreshnessDays > 0 {
 		doc["freshness_days"] = b.FreshnessDays
 	}
+	var rate func(map[string]any) (float64, bool)
 	if b.CostEstimate != nil {
 		doc["cost_estimate_usd"] = *b.CostEstimate
 	} else if b.Cost != nil && b.Cost.Per == "record" {
-		doc["cost_estimate_usd"] = b.Cost.AmountUSD
+		if v, ok := b.Cost.StaticAmount(); ok {
+			doc["cost_estimate_usd"] = v
+		} else if _, ok := b.Cost.Template(); ok {
+			// The operator's figure, resolved per step at plan time (ADR-046);
+			// unresolved plans as `unset`, never $0.
+			cost := b.Cost
+			rate = func(config map[string]any) (float64, bool) {
+				return cost.rate(tmplContext{Config: b.configWithDefaults(config)})
+			}
+		}
 	}
 	if len(b.Credentials) > 0 {
 		doc["credentials"] = b.Credentials
@@ -286,7 +344,12 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binding: %s: %w", b.ID, err)
 	}
-	return adapters.ParseManifest(raw)
+	m, err := adapters.ParseManifest(raw)
+	if err != nil {
+		return nil, err
+	}
+	m.CostRate = rate
+	return m, nil
 }
 
 // Provider is the COST provider name: the id's vendor prefix.

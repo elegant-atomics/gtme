@@ -40,6 +40,11 @@ type Manifest struct {
 	FreshnessDays       int             `json:"freshness_days,omitempty"`
 	EmitsKeyFields      []string        `json:"emits_key_fields,omitempty"`
 	CostEstimate        *float64        `json:"cost_estimate_usd,omitempty"`
+	// CostRate, when set, resolves the per-record estimate from a step's
+	// config (ADR-046: a binding whose amount_usd templates from config).
+	// ok=false means the operator set no rate: the plan prints `unset`, the
+	// run costs $0. Never on the wire — a bridge from the binding tier.
+	CostRate func(config map[string]any) (float64, bool) `json:"-"`
 	// Batch marks adapters the runner must feed in batches (AI steps), one
 	// invocation per batch.
 	Batch bool `json:"batch,omitempty"`
@@ -270,6 +275,16 @@ func (m *Manifest) needsIsBareDynamic() bool {
 
 // ProvidesFields lists every field the adapter can produce, sorted.
 func (m *Manifest) ProvidesFields() []string { return schemaProperties(m.Provides) }
+
+// DeclaresConfig reports whether config_schema names key as a property.
+func (m *Manifest) DeclaresConfig(key string) bool {
+	for _, name := range schemaProperties(m.ConfigSchema) {
+		if name == key {
+			return true
+		}
+	}
+	return false
+}
 
 // ValidateConfig checks a step's resolved config against config_schema.
 func (m *Manifest) ValidateConfig(config map[string]any) error {
