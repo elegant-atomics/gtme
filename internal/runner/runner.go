@@ -634,6 +634,12 @@ func (r *runner) runSource(ctx context.Context) error {
 			if err := r.ingestSourceRecord(ctx, st, m); err != nil {
 				stat.Failed++
 				fmt.Fprintf(r.stderr, "%s: dropped a record: %v\n", st.ID, err)
+				// SPEC §5: an invalid record fails and the run continues — the
+				// failure is a ledger event, not just a line on a terminal (#30).
+				if lerr := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "failed",
+					map[string]any{"reason": err.Error()}); lerr != nil {
+					return lerr
+				}
 				continue
 			}
 			count++
