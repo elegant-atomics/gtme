@@ -41,6 +41,21 @@ type Key struct {
 	Strength   Strength
 }
 
+// Supported reports whether an entity type has a §4 key derivation in this
+// build — the set Candidates switches over. The static gates (plan, adapters
+// verify) consult it so an underivable type fails before anything is spent,
+// not per record at run time (#27).
+func Supported(entityType string) bool {
+	switch entityType {
+	case Person, Company:
+		return true
+	}
+	return false
+}
+
+// SupportedTypes names the derivable entity types, for error text.
+func SupportedTypes() []string { return []string{Person, Company} }
+
 // Candidates returns every key that can be derived from fields for the given
 // entity type, strongest first. The first element is the key a new identity
 // should be created with; all of them are worth looking up, because the record
