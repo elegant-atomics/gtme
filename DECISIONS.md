@@ -2689,8 +2689,8 @@ re-assert with the same single row and a moved hash, `always` repeating,
 **Spec impact:** None beyond v0.30 (marked built as v0.31).
 
 ### ADR-046: Honest costs — a recorded basis, and operator-declared rates
-**Status:** Proposed (2026-08-31 — drafted by the backlog session from
-issues #29 and #31; merging this packet is the acceptance)
+**Status:** Accepted (2026-08-31 — drafted by the backlog session from
+issues #29 and #31; human-approved 2026-09-01 by merging the packet)
 **Context:** Nothing in the ledger or a receipt distinguishes a cost that
 was *measured* (read back from a vendor's response) from one that was
 *estimated* (multiplied out from a number a binding author typed). SPEC
@@ -2746,8 +2746,8 @@ that shift is a stated property of the design, not a side effect.
 ride the build, machine-compared as always.
 
 ### ADR-047: Source `limit` is engine-owned, as documented
-**Status:** Proposed (2026-08-31 — drafted by the backlog session from
-issue #32; merging this packet is the acceptance)
+**Status:** Accepted (2026-08-31 — drafted by the backlog session from
+issue #32; human-approved 2026-09-01 by merging the packet)
 **Context:** `gtme help --bindings` describes `limit` as engine config
 for source bindings ("config `limit` caps emitted records"), and the cap
 genuinely works — it terminates pagination early rather than trimming
