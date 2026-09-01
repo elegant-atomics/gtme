@@ -237,6 +237,19 @@ judgment — which fields a campaign should judge on and what to conclude
 is empirical knowledge about a market, and the ledger (verdicts and
 reasons persist) is how that gets earned, run by run.
 
+The same catalog slot (2026-09-01) likely holds an **operator plugin** —
+skills that guide the work rather than perform it: designing a pipeline
+(the interactive what-should-we-build conversation), authoring bindings
+(see "Bindings from OpenAPI specs"), and reading the ledger (a reporting
+skill over `gtme query`). Distinct from "MCP as a control-plane doorway"
+above — that is a call surface, this is guidance — though the overlap
+wants resolving before either is built. One design perspective belongs
+to whichever ships first: the schemas already describe every knob
+(`config_schema` for adapters, declared output schemas for steps), so
+interactive surfaces should be *generated from declarations* — a select
+menu from an enum, a form from a config schema — never hand-built per
+adapter or per step.
+
 ## Asynchronous steps
 
 Named 2026-08-28, not specified. A step that may return PENDING with a
@@ -318,6 +331,132 @@ committee's titles as a field, so every prompt carries the sibling facts
 and the model writes one person at a time knowing who else is written
 to. Revisit only if receipts show seat copy converging; a batching key is
 then a small change to how the runner chunks, not a new step.
+
+## Participants — humans and AI in the pipeline
+
+A governing perspective (2026-09-01), named ahead of any single feature:
+filters, reviews, and content creation should accept any participant — a
+person at a terminal, a person reached through an agent conversation, an
+API model, an agent session or workflow — under one contract: **a
+participant's output is a ledger fact** (a verdict, a score, a field, a
+group membership), written with provenance, never control flow. Three
+roles cover the space:
+
+- **filter** — closed verdict plus reason (`ai/filter` is the built
+  instance);
+- **create** — new content fields (`ai/compose`; a human writing or
+  editing outgoing copy is the same role on a different engine);
+- **review** — filter and create *fused*: one step emitting a closed
+  verdict and, optionally, free text or revised content. Open-ended
+  review is creation anchored to a referent, which exposes the one
+  mechanical gap in the ledger today: provenance cannot record
+  *was-a-review-of* (a referent link), which pure creation never needed.
+
+The arm gate is deliberately absent from that list: dry-vs-armed is a
+property of the run, not a step in the graph, precisely so it cannot be
+composed away.
+
+Positions this entry holds, each wanting an ADR before it is real:
+
+- **One declaration, any engine.** A step's declared output schema
+  (ADR-033) *is* its verdict vocabulary: the same enum constrains an API
+  model's output, an agent session's judgment, and the choice menu a
+  human is shown. Surfaces render from the declaration.
+- **Pending/collect is the universal out-of-band surface.** ADR-038's
+  shape — the run ends `pending` with the work described in ledger
+  state, and a later plain run collects — generalizes past the batch
+  API: an agent session that picks up the ledger, judges the pending
+  records through the CLI, and leaves results for the next run to
+  collect is the same mechanism, and a human answering through an agent
+  conversation is too. One collection surface for every participant
+  that is not synchronous.
+- **Retire the shell-out.** The `claude-code` engine (§2) blocks the
+  runner on a subprocess, which the pending/collect shape above makes
+  unnecessary — a session picking up the ledger on its own trigger is
+  strictly better aligned with "no waiting stays in the runner."
+  Spec-visible; wants its own ADR.
+- **Agent workflows are a candidate engine, not a new concept** —
+  useful where judgment outgrows one prompt (review-then-verify passes,
+  competing perspectives). The open question with teeth: ADR-039 caches
+  a judgment on a signature over prompt, model, and inputs; what is the
+  signature of a workflow?
+- **Routing is a pattern, not a key.** A verdict fact, a per-branch
+  `sql/filter`, and `group/deliver` already route N ways (the M14
+  acceptance runs the two-way case). A `route:` key is the
+  mechanism-shaped version; the signal for revisiting is operators
+  repeatedly failing to compose the assembly, not the assembly merely
+  existing.
+
+The engine landscape this entry governs:
+
+| Engine | Roles | Status | Timing shape |
+|---|---|---|---|
+| Human, in-band (terminal) | filter, review, create | named below ("Interactive review step"), unspecified | sync, per-record, blocking — needs defined non-interactive behavior |
+| Human, out-of-band | arm (run mode, not a role) | built (dry-run → arm, ADR-019/031) | whole-run, nothing waits |
+| Human, agent-mediated | filter, review, create | named, unspecified | async via pending/collect |
+| API model step | filter, create, review | built (ADR-004/033; cache ADR-039; batch ADR-038) | sync, or deferred → collect |
+| Agent session on the ledger | filter, create, review | position above; replaces the shell-out | async via pending/collect, own trigger |
+| Agent workflow | filter, review, create; multi-pass | candidate engine, unnamed elsewhere | async, long-running |
+| Cron / unattended | none — the forcing function | built | every row above must state its behavior here |
+
+The "Interactive review step" entry below predates this one and is its
+human-engine case; its open questions stand.
+
+## Object ontology — beyond person and company
+
+§4 derives identity for exactly two entity types; the binding schema
+deliberately keeps `entity_type` an open string, and plan/verify now
+refuse what has no derivation (issue #27) — so the extension point is
+real and the boundary is enforced. What a third type requires: a §4
+key-derivation rule, a registry vocabulary file, and an answer for which
+relations it carries. Some "objects" never need to be types — the
+account shape ran entirely on relations over person and company.
+
+The live candidates are the operational structures: groups, campaigns,
+segments. Today a group is runner-owned state and a campaign is a name
+in an adapter's config; making them addressable objects would let a
+record's association with them be a *fact*. The distinction that governs
+this entry: **association vs commitment**. Associating a record with an
+object (this person belongs with the campaign a field value names) is a
+relation write — per-record, data-driven, free, no gate, and the honest
+answer to "route on an enum." Committing a record (delivery into a
+group or campaign) keeps a static target per step, because the dry-run
+receipt, plan validation, and the idempotency scope all depend on the
+target being known before the run; a per-record computed delivery
+target is the routing key in disguise and stays refused. A later
+pipeline can always source *from* the association (`{query:}` over
+relations) into its one gated target.
+
+## Getting started paths
+
+v0.1.0 ships darwin/linux binaries with checksums on a tag-triggered
+workflow, and the README installs from a clone. Named but not built: a
+one-line installer, a package on the common managers. The bar to hold
+them to: a person or an agent goes from nothing to `gtme plan` on a
+working example in one command and a few minutes, offline after the
+download. Nothing here changes the tool; it changes how many people ever
+reach `--simulate`.
+
+## Bindings from OpenAPI specs
+
+Mass adapter coverage by generation splits into three layers with very
+different automation ceilings. **Mechanical:** a binding's request
+template, auth shape, `config_schema`, and often pagination are
+derivable straight from a vendor's OpenAPI document — a generator could
+scaffold a vendor's surface in minutes. **Judgment:** what the spec
+cannot say — which endpoints are even source/enrich/deliver-shaped, the
+`entity_type`, the extraction mapping onto the canonical registry (the
+thing that makes a binding compose), and an honest cost declaration,
+since pricing is never in the spec. That layer is agent work guided by
+the registry's own near-miss suggestions, not codegen. **Evidence:**
+conformance fixtures are recorded real responses, and `adapters verify`
+refuses a binding without them — the deliberate bottleneck, and it
+stays one: a scaffolded binding becomes certifiable only when someone
+with a credential records a real response. Validation round 3 showed an
+agent authoring a working binding from `gtme help --bindings` alone; a
+spec-driven path is a throughput multiplier on that demonstrated floor,
+and probably takes the form of the adapter-builder skill named under
+"Patterns as runnable bundles."
 
 ## Interactive review step
 

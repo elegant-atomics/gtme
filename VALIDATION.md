@@ -674,3 +674,16 @@ to guarantee every shortlisted person a row, because it read that
 `csv/deliver`'s `on_missing` would otherwise drop anyone lacking a current
 position — a silent-drop failure it had already been burned by once that
 run, defended against on the second encounter.
+
+## Open question carried from round 3: filter-before-pay (2026-09-01)
+
+Round 3 never actually tested whether an agent narrows a pool before
+paying to enrich it: the query returned nine authors under a cap of ten,
+so the cut never bit and whatever the agent would have done about
+filtering was unobservable. The question is about pipeline-shape
+judgment, not vendor handling, so the retest should run offline first: a
+local fixture source serving 30+ records with a declared per-record
+cost, and a goal that implies not all of them are worth enriching —
+score whether a filter appears between the source and the paid step, for
+$0. A live sealed-box confirmation can follow once the offline shape
+passes. Low urgency; parked here so it is not re-lost.
