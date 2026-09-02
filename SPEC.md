@@ -134,14 +134,16 @@ transport, the `listen` verb, a REPL, and MCP as a control-plane doorway.
 - **Wire format:** NDJSON (newline-delimited JSON) on stdin/stdout.
 - **External adapter proof:** one adapter MUST be written in Python
   (`adapters/mock-enrich-py/`), a plain script speaking the protocol.
-- **AI engine:** Anthropic Messages API (model `claude-sonnet-4-6`,
-  key from `ANTHROPIC_API_KEY`) is the default engine. A second engine,
-  `claude-code`, SHALL shell out to `claude -p --output-format json` when
-  the binary exists on PATH. Engine is selected per AI step config
-  (`engine: api | claude-code`), default `api`. Both MUST produce output
-  validated against the step's `provides` schema; on validation failure,
-  the runner MUST retry once with the validation error appended to the
-  prompt, then fail the batch.
+- **AI engine:** the Anthropic Messages API (model `claude-sonnet-4-6`,
+  key from `ANTHROPIC_API_KEY`) is the only model engine; the fixture
+  engine is test-only, selected by environment (`GTME_AI_ENGINE=fixture`)
+  or `--simulate`, never in YAML. There is no `engine:` key (ADR-050):
+  `engine:` in a step is a plan error, and `engine: claude-code` names
+  the replacement — an `agent/*` step answered through `gtme answer`
+  (§8, ADR-049); the former `claude -p` subprocess is retired. Output
+  MUST validate against the step's `provides` schema; on validation
+  failure the runner MUST retry once with the validation error appended
+  to the prompt, then fail the batch.
 - **No DuckDB.** Query features MUST use plain SQLite SQL.
 
 ---
@@ -170,6 +172,7 @@ CREATE TABLE field_values (
   source      TEXT NOT NULL,              -- adapter id, e.g. 'harvest/profile@1'
   confidence  REAL NOT NULL DEFAULT 1.0,  -- 0.0–1.0
   run_id      TEXT,                       -- provenance; nullable for imports
+  referent    TEXT,                       -- was-about: field_values.id of the value a review or edit concerned (ADR-048); null unless the step declared of:
   created_at  TEXT NOT NULL
 );
 CREATE INDEX ix_fv_lookup ON field_values(identity_id, field, created_at DESC);
@@ -206,7 +209,7 @@ CREATE TABLE step_events (
   run_id      TEXT NOT NULL,
   step_id     TEXT NOT NULL,
   identity_id TEXT,                       -- null for step-level events
-  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)
+  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)|answered (ADR-049: a participant's answer awaiting collection)
   detail      TEXT,                       -- JSON
   created_at  TEXT NOT NULL
 );
@@ -671,9 +674,9 @@ beside it. The canonical schema for this file is
   see §8 deliver idempotency. Undeclared means unscoped (`''`).
 - `credentials_optional`: env var names injected when present, exactly like
   `credentials`, but a missing one is a `gtme plan` warning, never an error.
-  For an adapter that can genuinely work more than one way — an AI step on
-  the `claude-code` engine needs no API key at all (§2) — declaring the key
-  as `credentials` would fail plans that are actually fine.
+  For an adapter that can genuinely work more than one way — a step that
+  can answer from a local fixture as well as a keyed API — declaring the
+  key as `credentials` would fail plans that are actually fine.
 - **Dynamic needs (ADR-019):** a manifest whose step contract is defined by
   external user-authored content (an AI prompt, a campaign template) cannot
   enumerate its needs statically. Such a manifest MAY declare its `needs`
@@ -765,6 +768,17 @@ manifest `needs` is the needs-all wildcard (`additionalProperties: true`, no
 `properties`) projects every field the ledger holds for the record, as
 before ADR-004 — `uses` is how an AI step narrows that to what it actually
 needs, gaining plan-time validation in exchange.
+
+**Referents and human surfaces (ADR-048, ADR-049):** a compose or review
+step MAY declare `of: <field>` — the value it is about (required on a
+review); the planner MUST validate it exactly as one more `uses:` entry,
+the runtime includes its current value in the record's input hash
+(ADR-039) and its `field_values.id` in the provenance of everything the
+step writes (`field_values.referent`, §3). A `human/*` step's `render:`
+fields are validated the same way. A `human/*` or `agent/*` step may sit
+at any position; when a deliver step follows one, `gtme plan` prints one
+note — under cron this pipeline waits for a person — and names the
+pattern (§8: review into a group, send from the group).
 
 **Dynamic needs generalized (ADR-019):** `uses:` is one instance of a
 general mechanism. For any step whose manifest declares dynamic needs (§6),
@@ -923,6 +937,8 @@ gtme query --save NAME "SQL"       # saved segment
 gtme show <identity-key>           # read-only projection inspector
 gtme show --run last [--fields ...] [--provenance] [--limit N]
 gtme runs [RUN_ID]                 # list runs / show one run's receipt
+gtme answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set f=v ...] [--as NAME] [--cost USD [--measured]] [--note TEXT]   # ADR-049: a participant's answer for a pending human/agent step; no key + TTY walks the records
+gtme show --run RUN_ID --pending [STEP]   # the pending records with their rendered surface (ADR-049)
 gtme freeze [RUN_ID|last] [--bundle DIR] # bare: YAML to stdout; --bundle: campaign bundle
 gtme groups [show NAME | add NAME ... | remove NAME ...]   # ADR-021, see below
 gtme vacuum                        # evict expired payloads (ADR-030), nothing else
@@ -936,7 +952,8 @@ gtme adapters update ID [@ref]     # re-fetch at a newer ref, explicitly
 ```
 
 This is the entire v0 verb set (ADR-005, extended by ADR-021's `gtme
-groups` in M9 and ADR-030's `gtme vacuum` in M11).
+groups` in M9, ADR-030's `gtme vacuum` in M11, ADR-042's `gtme adapters`
+in M19, and ADR-049's `gtme answer`).
 
 ### Payload eviction — `gtme vacuum` (ADR-030; built in M11)
 
@@ -968,8 +985,9 @@ live receipt.
 
 `gtme show <identity-key>` prints the full current-value projection
 (`current_fields`, §3) for that identity: every field, its current value,
-and — with `--provenance` — the source adapter, confidence, and run that
-wrote it. `gtme show --run last` (or a specific `RUN_ID`) lists the records
+and — with `--provenance` — the source adapter, confidence, run that
+wrote it, and, for a review's or edit's outputs, the referent (ADR-048:
+the `field_values` row it was about) and the participant's `--note`. `gtme show --run last` (or a specific `RUN_ID`) lists the records
 touched by that run instead of a single identity. `--fields a,b,c` narrows
 the printed fields; `--limit N` caps rows for `--run` mode. `gtme show` is
 strictly read-only: it MUST NOT write to the ledger, and it MUST NOT appear
@@ -1078,6 +1096,66 @@ in-flight count. `--simulate` runs a deferred step synchronously on the
 fixture engine (a rehearsal that ended in flight would rehearse nothing)
 and says so; `--dry-run` on a deferred pipeline is a plan warning — there
 is no deliver step to hold back.
+
+### People and agents answer — `human/*`, `agent/*`, `gtme answer` (ADR-048, ADR-049)
+
+`human/filter`, `human/compose` and `human/review` (§10) fill the three
+roles for a person; `agent/*` are the same adapters for an agent driving
+gtme, which never prompts. Neither opens an adapter session.
+
+**At a terminal the run asks.** With `prompt: tty` (the default) and a
+TTY, a `human/*` step walks its records inside `gtme run`: the rendered
+record (`render:`, §9; default the `uses:` fields or the `of:` value),
+then the declared outputs as a menu or a field to fill — a filter takes
+pass/fail and a reason, a compose the declared fields, a review the
+declared labels — validated on the spot; Ctrl-C leaves the rest pending.
+Answered records continue to the next stage with the others.
+
+**Otherwise it waits in the ledger.** With no TTY, `prompt: never`, or an
+`agent/*` step, every unanswered record ends `pending` under the
+runner-owned token `<run-id>/<step-id>`, the run finishes `pending`
+exactly as a deferred step does (above), and the receipt says so:
+
+```
+grade: 12 in, 0 out — 12 awaiting human/review; `gtme answer review.yaml` records, the next `gtme run review.yaml` collects
+```
+
+**`gtme answer` is the write path.** `gtme answer [RUN_ID|last|PIPELINE]
+[STEP] IDENTITY_KEY --set field=value ...` records one participant's
+answer for one pending record as an `answered` step event (§3). The run
+is a `RUN_ID`, `last`, or a pipeline name or path — the most recent
+pending run of that pipeline, the lookup collect-first makes; `STEP` MAY
+be omitted when one step is pending. The answer is validated against the
+step's declared or default outputs (§7): a value outside an enum is
+refused naming the allowed values, a filter accepts only
+`pass=true|false` and `reason`, and a record not pending under that step
+is refused. `--as NAME` names the participant (default the OS user; the
+prefix — `human/` or `agent/` — follows the adapter); `--cost USD`
+records what the participant spent, `estimated` unless `--measured`
+(ADR-046); `--note TEXT` is kept in the event and shown by `gtme show
+--provenance`, never part of a cache key. With no identity key and a
+TTY, `gtme answer` walks the pending records interactively, exactly as
+the in-run walk does. Answers are ledger state — idempotent per (run,
+step, identity), the latest before collection wins, readable through
+`gtme show --run` and SQL. `gtme answer` writes only `answered` events,
+never sends, and MUST NOT appear in `gtme freeze` output. `gtme show
+--run RUN_ID --pending [STEP]` prints the pending records with their
+rendered surface, as text and as JSON — what an agent reads before it
+answers.
+
+**`gtme run` collects answers as it collects batches.** When a pending
+step is `human/*` or `agent/*`, collection reads the `answered` events
+instead of opening a session: each answered record completes the step —
+a VERDICT for a filter, fields for a compose or review, provenance
+`human/<name>` or `agent/<name>` (§10a), the referent when `of:` was
+declared, COST under the run — and continues; unanswered records stay
+pending and the run stays `pending`. Under cron the consequence is the
+stage-by-stage model's: a pending run is resumed, not re-sourced, so a
+pipeline with a human step waits for its person and sources nothing new
+until answered. The documented pattern: the reviewing pipeline is one a
+person runs and ends in a `group:`; the cron pipeline sources from that
+group. `--simulate` answers a `human/*`/`agent/*` step from the fixture
+engine and says so.
 
 ### deliver idempotency
 
@@ -1379,11 +1457,18 @@ idempotent. `respend: true` on a step (grammar, any paid step) declares that re-
 the pipeline MAY pay for that step's records again — it silences the §7
 respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
 `Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
-adapter role is `filter`/`compose`/an AI-backed role; the planner validates
-it exactly as `needs.required` (§7). `provides:` (ADR-033) is likewise
-valid only on AI-backed roles: the step's declared output fields, a list
-of names or a map of name → `{type, enum, canonical}` (§7); the planner
-rejects it elsewhere. Deliver adapters are ordinary
+adapter role is `filter`/`compose`/`review` (the participant roles,
+ADR-048: `ai/*`, `human/*`, `agent/*`); the planner validates it exactly
+as `needs.required` (§7). `provides:` (ADR-033) is likewise valid only on
+those roles: the step's declared output fields, a list of names or a map
+of name → `{type, enum, canonical}` (§7); the planner rejects it
+elsewhere. `of: <field>` (ADR-048) is valid on compose and review steps
+and required on a review — the value the step is about, validated as
+`uses:`, recorded as the referent of everything the step writes. A
+`human/*` step MAY carry `render: {fields: [..], template: ".."}` and
+`prompt: tty | never` (default `tty`) in `with:` (§8, ADR-049); an
+`agent/*` step never prompts. `engine:` is not a key (ADR-050): its
+presence is a plan error. Deliver adapters are ordinary
 `steps:` entries (ADR-031): a pipeline MAY carry zero, one, or many, at
 any position — steps execute strictly in order, so a deliver step sends
 exactly the records that survived everything before it. `variables:`
@@ -1538,9 +1623,20 @@ contract, pure YAML.
    entity-agnostic (`"entity_type": "*"`, §6): the step's entity type is
    the pipeline's. `deferred: true` (ADR-038) routes the batch to the
    Message Batches API under `custom_id` = identity key and ends the
-   session with PENDING (§5, §8); the `claude-code` engine has no batch
-   surface and ignores it with a plan warning; the fixture engine answers
-   synchronously.
+   session with PENDING (§5, §8); the fixture engine answers
+   synchronously. `of:` (ADR-048) names a value the step is about.
+3a. **`ai/review`** (review, ADR-048) — same adapter code as item 3 with
+   the review role's contract: `of:` required, the prompt presents that
+   value as the subject and the `uses:` fields as context, the output is
+   the declared labels (a grade, a yes/no, notes); emits RECORDs only,
+   never a VERDICT — a review does not gate. Prompt assembly and
+   entity-agnosticism as item 3.
+3b. **`human/filter`, `human/compose`, `human/review`** and their
+   **`agent/*`** aliases (ADR-049) — runner-owned; no protocol session, no
+   credentials, no cost of their own. Config: `render:` and `prompt:` (§9);
+   the declared outputs are the menu. Behaviour in §8 ("People and agents
+   answer"). `agent/*` never prompts and records provenance under
+   `agent/`.
 4. **`harvest/profile`** (enrich, person) — HarvestAPI LinkedIn profile
    lookup (`HARVEST_API_KEY`) by any one LinkedIn URL shape: needs are
    one-of `linkedin_url` | `linkedin_internal_url` |
@@ -1552,8 +1648,9 @@ contract, pure YAML.
    from response metadata if present, else config-estimated.
 5. **`ai/compose`** (compose) — batch; provides `first_line`, `ps_line`
    (strings) by default, or whatever the step's `provides:` declares
-   (ADR-033); output schema enforced; config supports `uses:`; prompt
-   assembly and entity-agnosticism as item 3.
+   (ADR-033); output schema enforced; config supports `uses:` and `of:`
+   (a revision of an existing value is a compose with a referent,
+   ADR-048); prompt assembly and entity-agnosticism as item 3.
 6. **`instantly/add-to-campaign`** (deliver, person; `idempotency_scope:
    campaign`, ADR-044 — the scope is the configured campaign *name*, so a
    renamed campaign is a new dedupe scope) — Instantly v2 API,
@@ -1686,7 +1783,11 @@ same canonical-when-shared, namespaced-when-proprietary logic as fields
 signature (§7, ADR-039) in the form `ai/compose @ <model-id>#<signature>`
 (e.g. `ai/compose @ claude-sonnet-4-6#1a2b3c4d5e6f`), so two prompts'
 outputs are distinguishable in provenance, and COST attributes spend per
-model. The `done` step event for an AI judgment carries `signature` and
+model. A `human/*` or `agent/*` step (ADR-049) takes the same form with
+the participant in the model's place — `human/review @ trevor#<sig>`,
+`agent/filter @ claude-code#<sig>` — the signature over the step
+declaration (`render:`, the declared outputs, `uses:`, `of:`) plus that
+name. The `done` step event for an AI judgment carries `signature` and
 `input` in its detail (§3) — the cache entry the runner reads back.
 
 ### `http/enrich` — generic fetch enricher (ADR-024; built in M11)
@@ -2026,6 +2127,36 @@ decided contract, not shipped behavior.
   shows it; the AI respend warning no longer appears while the
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
+- **M24 — participants (ADR-048, ADR-049, ADR-050; §2, §3, §7, §8, §9,
+  §10, §10a). Queued.** A migration adds `field_values.referent`;
+  `step_events.event` gains `answered`; the pipeline schema gains `of:`,
+  `render:`, `prompt:` and loses `engine:` (a plan error naming the fix);
+  the `claude-code` engine is deleted; `ai/review` (manifest + prompt
+  shape); `human/filter|compose|review` and `agent/*` as runner-owned
+  adapters with the in-run TTY walk; the planner validates `of:` and
+  `render:` as `uses:`, includes the referent's value in the input hash,
+  and prints the cron note; the runner ends such a run `pending` under a
+  runner-owned token and collects from `answered` events, writing facts
+  with `human/`/`agent/` provenance, the referent, and the ADR-039
+  signature; `gtme answer` (all three addressing forms, `--set`, `--as`,
+  `--cost`, `--note`, the interactive walk, refusals); `gtme show --run
+  --pending`; receipt and `gtme runs` wording; `gtme show --provenance`
+  prints the referent and note; `help --agent` gains the answer rhythm and
+  the routing-as-pattern example. Acceptance, offline: a review pipeline
+  (`human/review` with `of: first_line`, `provides: grade` enum) run with
+  no TTY ends `pending` with the receipt naming the verb; `gtme answer
+  review.yaml jane --set grade=Z` is refused naming A–F, `--set grade=B`
+  records, and the next `gtme run` collects — `grade` lands with
+  `human/<user>` provenance and a `referent` pointing at the reviewed
+  `first_line` row; re-running with the same draft cache-skips
+  (`same_judgment`), a rewritten draft re-pends; a `human/filter` answered
+  `pass=false` freezes the record and `pass=true` advances it; an
+  `agent/review` step under `--as claude-code --cost 0.01 --measured`
+  lands `agent/claude-code` provenance and a measured cost row; a
+  pseudo-TTY run walks the records in-run and Ctrl-C leaves the rest
+  pending; `engine: claude-code` fails plan naming `agent/*`; a deliver
+  step after a `human/*` step plans with the cron note; `--simulate`
+  answers from the fixture engine.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
   §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
   rebuilds `costs` with `basis` (backfill `estimated`); the COST message
@@ -2271,6 +2402,20 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.34 — 2026-09-02 (ADR-048..050 packet: participants — PROPOSED, not yet accepted)
+**Changed (proposed):** §2 (API is the only model engine; `engine:`
+removed; `claude-code` retired); §3 `field_values.referent`,
+`step_events` `answered`; §6 the `credentials_optional` example; §7
+`of:`/`render:` validation, the cron note; §8 `gtme answer`, `gtme show
+--run --pending`, the "People and agents answer" subsection,
+`--provenance` shows the referent and note, the verb set; §9 `of:`,
+`render:`, `prompt:` grammar, `engine:` a plan error; §10 items 3, 3a
+(`ai/review`), 3b (`human/*`, `agent/*`), 5; §10a provenance form; §11
+milestone M24. Schema artifacts (`spec/ledger.sql`, the pipeline and
+manifest schemas) ride the build.
+**Not changed:** nothing built; this entry becomes the accepted diff when
+the packet PR merges.
 
 ### v0.33 — 2026-09-01 (M23 build: honest costs + engine-owned limit, built)
 **Changed:** §11 M23 marked built; no normative text changed beyond
