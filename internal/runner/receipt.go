@@ -22,7 +22,21 @@ func PrintReceipt(w io.Writer, res *Result) {
 		title += " (dry run — nothing sent)"
 	}
 	if res.Status == "pending" {
-		title += " — ended with a step in flight; the next `gtme run` of this pipeline collects (ADR-038)"
+		awaiting := ""
+		for _, s := range res.Steps {
+			if s.InFlight > 0 && s.Awaiting != "" {
+				awaiting = s.Awaiting
+				break
+			}
+		}
+		switch {
+		case awaiting != "" && res.Interrupted:
+			title += fmt.Sprintf(" — interrupted; the rest awaits %s: `gtme answer %s` records, the next `gtme run %s` collects (ADR-049)", awaiting, res.Pipeline, res.Pipeline)
+		case awaiting != "":
+			title += fmt.Sprintf(" — ended awaiting %s: `gtme answer %s` records, the next `gtme run %s` collects (ADR-049)", awaiting, res.Pipeline, res.Pipeline)
+		default:
+			title += " — ended with a step in flight; the next `gtme run` of this pipeline collects (ADR-038)"
+		}
 	}
 	fmt.Fprintf(w, "\nrun %s — %s\n", res.RunID, title)
 
@@ -132,9 +146,15 @@ func PrintReceipt(w io.Writer, res *Result) {
 		fmt.Fprintln(w)
 	}
 	// In flight (SPEC §8, ADR-038): what a deferred step left with the
-	// provider, and how to collect it.
+	// provider, and how to collect it — or, for a human/agent step
+	// (ADR-049), who is awaited and the verb that answers.
 	for _, s := range res.Steps {
 		if s.InFlight == 0 {
+			continue
+		}
+		if s.Awaiting != "" {
+			fmt.Fprintf(w, "%s: %d in, %d out — %d awaiting %s; `gtme answer %s` records, the next `gtme run %s` collects (or `gtme show --run %s --pending %s` to read them)\n",
+				s.ID, s.In, s.Out, s.InFlight, s.Awaiting, res.Pipeline, res.Pipeline, res.RunID, s.ID)
 			continue
 		}
 		fmt.Fprintf(w, "%s: %d record(s) in flight (%s); the next `gtme run` of this pipeline collects, or `gtme run --resume %s`\n",

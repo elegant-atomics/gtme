@@ -2130,9 +2130,10 @@ decided contract, not shipped behavior.
   paid-enrich one still does; `--simulate` of a judged pipeline
   cache-skips; a deferred step cache-checks before submitting.
 - **M24 — participants (ADR-048, ADR-049, ADR-050; §2, §3, §7, §8, §9,
-  §10, §10a). Queued.** A migration adds `field_values.referent`;
-  `step_events.event` gains `answered`; the pipeline schema gains `of:`,
-  `render:`, `prompt:` and loses `engine:` (a plan error naming the fix);
+  §10, §10a). Built 2026-09-02 (changelog v0.35).** A migration adds
+  `field_values.referent`; `step_events.event` gains `answered`; the
+  pipeline schema gains `of:`, `render:`, `prompt:` and loses `engine:`
+  (a plan error naming the fix);
   the `claude-code` engine is deleted; `ai/review` (manifest + prompt
   shape); `human/filter|compose|review` and `agent/*` as runner-owned
   adapters with the in-run TTY walk; the planner validates `of:` and
@@ -2144,19 +2145,22 @@ decided contract, not shipped behavior.
   `--cost`, `--note`, the interactive walk, refusals); `gtme show --run
   --pending`; receipt and `gtme runs` wording; `gtme show --provenance`
   prints the referent and note; `help --agent` gains the answer rhythm and
-  the routing-as-pattern example. Acceptance, offline: a review pipeline
-  (`human/review` with `of: first_line`, `provides: grade` enum) run with
-  no TTY ends `pending` with the receipt naming the verb; `gtme answer
-  review.yaml jane --set grade=Z` is refused naming A–F, `--set grade=B`
+  the routing-as-pattern example.
+  ✅ E2E, offline: a review pipeline (`human/review` with `of:
+  <pipeline>.first_line`, `provides: grade` enum) run with no TTY ends
+  `pending` with the receipt naming the verb; `gtme answer review.yaml
+  jane --set grade=Z` is refused naming A–F, `--set grade=B`
   records, and the next `gtme run` collects — `grade` lands with
   `human/<user>` provenance and a `referent` pointing at the reviewed
   `first_line` row; re-running with the same draft cache-skips
   (`same_judgment`), a rewritten draft re-pends; a `human/filter` answered
   `pass=false` freezes the record and `pass=true` advances it; an
   `agent/review` step under `--as claude-code --cost 0.01 --measured`
-  lands `agent/claude-code` provenance and a measured cost row; a
-  pseudo-TTY run walks the records in-run and Ctrl-C leaves the rest
-  pending; `engine: claude-code` fails plan naming `agent/*`; a deliver
+  lands `agent/claude-code` provenance and a measured cost row; the in-run
+  walk asks, validates and stops on interruption with the rest pending
+  (proved at the walk and at the runner's ask/do-not-ask decision — the
+  terminal itself is `term.IsTerminal` on stdin, and a pty is a dependency
+  beyond §2); `engine: claude-code` fails plan naming `agent/*`; a deliver
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
@@ -2405,6 +2409,23 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.35 — 2026-09-02 (M24 build: participants, built)
+**Changed:** §11 M24 marked built. No normative text changed beyond that
+mark: v0.34 had already written the participants surface, and this pass
+built it. Migration 0011 adds `field_values.referent`; `step_events`
+carries `answered`; `human/filter|compose|review` and their `agent/*`
+aliases ship as runner-owned manifests with no protocol session; the
+planner validates `of:`/`render:` as `uses:`, refuses `engine:` naming
+`agent/*`, refuses `when: <review>.passed`, and prints the cron note; the
+runner pends participant records under `<run-id>/<step-id>`, walks them
+in-run at a terminal, and collects `answered` events into facts with
+`human/<name>`/`agent/<name>` provenance, the referent, and the
+participant's cost; `gtme answer` and `gtme show --run --pending` join the
+verb set; the `claude-code` engine is deleted. `spec/ledger.sql`, the
+pipeline schema and the participant manifests ride this entry.
+**Not changed:** the wire protocol (a participant step never opens a
+session), and every non-participant step's behavior.
 
 ### v0.34 — 2026-09-02 (ADR-048..050 reconciliation: participants; build queued as M24)
 **Changed:** §2 (API is the only model engine; `engine:`

@@ -128,7 +128,7 @@ steps:
 	if res.code != 2 {
 		t.Fatalf("exit = %d, want 2\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "uses: is only valid on filter/compose steps", "stderr")
+	contains(t, res.stderr, "uses: is only valid on filter/compose/review steps", "stderr")
 }
 
 // TestPlanFailsOnUnsatisfiableOneOfNeeds: a one-of needs step (SPEC §7,

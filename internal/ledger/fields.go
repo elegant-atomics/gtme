@@ -15,6 +15,9 @@ type FieldWrite struct {
 	Field      string
 	Value      any     // JSON-encoded on write
 	Confidence float64 // 0 means "unspecified" and is stored as 1.0
+	// Referent is the field_values.id of the value this write was about
+	// (SPEC §3, ADR-048): set by a review's or edit's outputs, empty else.
+	Referent string
 }
 
 // WriteFields appends field values for one identity. Nothing is ever updated
@@ -30,8 +33,8 @@ func (l *Ledger) WriteFields(ctx context.Context, identityID, source string, pro
 	n := 0
 	err := l.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx,
-			`INSERT INTO field_values (id, identity_id, field, value, source, confidence, run_id, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+			`INSERT INTO field_values (id, identity_id, field, value, source, confidence, run_id, referent, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return fmt.Errorf("ledger: preparing field insert: %w", err)
 		}
@@ -54,7 +57,11 @@ func (l *Ledger) WriteFields(ctx context.Context, identityID, source string, pro
 			if conf == 0 {
 				conf = 1.0
 			}
-			if _, err := stmt.ExecContext(ctx, ulid.New(), identityID, w.Field, string(raw), source, conf, runArg, now); err != nil {
+			var referent any
+			if w.Referent != "" {
+				referent = w.Referent
+			}
+			if _, err := stmt.ExecContext(ctx, ulid.New(), identityID, w.Field, string(raw), source, conf, runArg, referent, now); err != nil {
 				return fmt.Errorf("ledger: inserting field %q: %w", w.Field, err)
 			}
 			n++
@@ -71,6 +78,13 @@ func (l *Ledger) WriteFields(ctx context.Context, identityID, source string, pro
 // confidences as sent by adapters (SPEC §5). Fields are written in sorted order
 // so the ULIDs of a single batch are deterministic given the map.
 func (l *Ledger) WriteFieldMap(ctx context.Context, identityID, source string, prov Provenance, fields map[string]any, confidence map[string]float64) (int, error) {
+	return l.WriteFieldMapAbout(ctx, identityID, source, prov, fields, confidence, "")
+}
+
+// WriteFieldMapAbout is WriteFieldMap with a referent (SPEC §3, ADR-048):
+// every value written records the field_values.id it was about — a
+// review's labels, an edit's new draft. Empty means no referent.
+func (l *Ledger) WriteFieldMapAbout(ctx context.Context, identityID, source string, prov Provenance, fields map[string]any, confidence map[string]float64, referent string) (int, error) {
 	keys := make([]string, 0, len(fields))
 	for k := range fields {
 		keys = append(keys, k)
@@ -78,7 +92,7 @@ func (l *Ledger) WriteFieldMap(ctx context.Context, identityID, source string, p
 	sort.Strings(keys)
 	writes := make([]FieldWrite, 0, len(keys))
 	for _, k := range keys {
-		writes = append(writes, FieldWrite{Field: k, Value: fields[k], Confidence: confidence[k]})
+		writes = append(writes, FieldWrite{Field: k, Value: fields[k], Confidence: confidence[k], Referent: referent})
 	}
 	return l.WriteFields(ctx, identityID, source, prov, writes)
 }

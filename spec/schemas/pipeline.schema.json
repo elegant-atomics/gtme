@@ -126,7 +126,34 @@
         },
         "with": {
           "type": "object",
-          "description": "The step's config, validated against the adapter's config_schema. Sent as OPEN.config."
+          "description": "The step's config, validated against the adapter's config_schema. Sent as OPEN.config. On a human/* step (ADR-049) it MAY carry render: and prompt:, below; engine: is not a key anywhere (ADR-050).",
+          "properties": {
+            "render": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "template": {
+                  "type": "string"
+                }
+              },
+              "description": "ADR-049, human/* and agent/* steps: what the participant is shown per record — the listed fields (validated as uses:, SPEC.md §7) or a {{field}} template. Default: the uses: fields, or the of: value alone."
+            },
+            "prompt": {
+              "type": "string",
+              "description": "On a human/* step (ADR-049): tty (default) walks the records inside `gtme run` at a terminal, never leaves every record pending for `gtme answer`; an agent/* step is always never. On an ai/* step this is the operator's prompt text (SPEC.md §10.3)."
+            },
+            "engine": {
+              "not": {},
+              "description": "Removed (ADR-050): the API is the only model engine and the fixture engine is selected by environment. A step carrying engine: fails `gtme plan` naming the fix; `engine: claude-code` becomes an agent/* step answered through `gtme answer`."
+            }
+          }
         },
         "uses": {
           "type": "array",
@@ -134,7 +161,12 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "ADR-004: an AI step's dynamic needs. Valid only on steps whose adapter role is filter/compose or another AI-backed role. The planner MUST validate it exactly as needs.required (SPEC.md §7), and at execution time the projected fields object MUST be built from `uses` rather than from the manifest's open-ended `needs`."
+          "description": "ADR-004: a participant step's dynamic needs. Valid only on steps whose adapter role is filter/compose/review (the participant roles, ADR-048: ai/*, human/*, agent/*). The planner MUST validate it exactly as needs.required (SPEC.md §7), and at execution time the projected fields object MUST be built from `uses` rather than from the manifest's open-ended `needs`."
+        },
+        "of": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ADR-048: the referent — the field whose value a compose or review step is about (required on a review; an edit on a compose). Validated exactly as a uses: entry (SPEC.md §7); its current value joins the record's judgment-cache input hash, and its field_values.id is recorded as the referent of everything the step writes."
         },
         "when": {
           "type": "string",
@@ -173,7 +205,7 @@
           "description": "Reserved (SPEC.md §9); rejected in v0."
         },
         "provides": {
-          "description": "ADR-033: declared output fields, valid only on AI-backed roles. A list of field names, or an object whose keys are field names and whose values are null or declare type, enum, canonical. Bare names land as <pipeline>.<name>; a dotted name is kept as written; canonical: true lands the field on the canonical field of that name (SPEC.md §7).",
+          "description": "ADR-033: declared output fields, valid only on participant steps (ai/*, human/*, agent/*; ADR-048). A review MUST declare its labels here. A list of field names, or an object whose keys are field names and whose values are null or declare type, enum, canonical. Bare names land as <pipeline>.<name>; a dotted name is kept as written; canonical: true lands the field on the canonical field of that name (SPEC.md §7).",
           "oneOf": [
             {
               "type": "array",

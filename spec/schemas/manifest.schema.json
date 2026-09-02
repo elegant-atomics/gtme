@@ -18,8 +18,8 @@
       "description": "Manifest version; part of the provenance string."
     },
     "role": {
-      "enum": ["source", "filter", "enrich", "verify", "compose", "deliver"],
-      "description": "What the adapter does in a pipeline. Only enrich/verify are cache-skippable (SPEC.md §7)."
+      "enum": ["source", "filter", "enrich", "verify", "compose", "review", "deliver"],
+      "description": "What the adapter does in a pipeline. Only enrich/verify are cache-skippable (SPEC.md §7). review (ADR-048) is compose-shaped — records advance on RECORD, no VERDICT is expected — with of: required on the step and never gating."
     },
     "entity_type": {
       "type": "string",

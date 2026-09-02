@@ -1,7 +1,8 @@
-// Package ai is the engine layer behind AI steps. Engines are interchangeable
-// (SPEC §2): the Anthropic Messages API by default, the claude CLI when the
-// operator prefers it, and a scripted fixture engine so tests never touch the
-// network.
+// Package ai is the engine layer behind AI steps (SPEC §2): the Anthropic
+// Messages API is the only model engine, and a scripted fixture engine,
+// selected by environment, keeps tests off the network. There is no
+// `engine:` key (ADR-050): an operator who wants their own judgment — or an
+// agent's — in the ledger answers an agent/* step through `gtme answer`.
 package ai
 
 import (
@@ -16,9 +17,8 @@ import (
 // Engine names (SPEC §2). "fixture" is test-only and selected by environment,
 // never by pipeline config.
 const (
-	EngineAPI        = "api"
-	EngineClaudeCode = "claude-code"
-	EngineFixture    = "fixture"
+	EngineAPI     = "api"
+	EngineFixture = "fixture"
 )
 
 // DefaultModel is the model AI steps use unless a step overrides it (SPEC §2).
@@ -45,7 +45,7 @@ type Request struct {
 	// Keys are the identity keys of the records in this batch. Engines use them
 	// for logging; the fixture engine uses them to synthesize valid answers.
 	Keys []string
-	// Kind is "filter" or "compose", for the same reason.
+	// Kind is "filter", "compose" or "review", for the same reason.
 	Kind string
 	// Fields is the step's output shape beyond identity_key (and, for a
 	// filter, pass/reason): the declared or default provides (ADR-033), in
@@ -107,22 +107,20 @@ type Engine interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
 
-// Resolve picks an engine. The step's config chooses between the engines the
-// spec defines; GTME_AI_ENGINE overrides it so tests (and an operator debugging a
-// pipeline) can swap in the fixture engine without editing the pipeline. getenv
-// is the caller's env view — an adapter passes its Ports.Getenv so credentials
-// injected by the runner (including ~/.gtme/secrets) are seen; nil falls back to
-// the process env.
-func Resolve(engine, model string, getenv func(string) string) (Engine, string, error) {
+// Resolve picks the engine: the API, unless GTME_AI_ENGINE selects the
+// fixture engine — how tests (and the runner under --simulate) keep a step
+// off the network without editing the pipeline. getenv is the caller's env
+// view — an adapter passes its Ports.Getenv so credentials injected by the
+// runner (including ~/.gtme/secrets) are seen; nil falls back to the process
+// env.
+func Resolve(model string, getenv func(string) string) (Engine, string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
 	// The Ports view is consulted first so the runner can put a step onto the
 	// fixture engine under --simulate (SPEC §8) without touching process env;
 	// process env still works for tests and operators.
-	if v := envOverride(getenv, "GTME_AI_ENGINE"); v != "" {
-		engine = v
-	}
+	engine := envOverride(getenv, "GTME_AI_ENGINE")
 	if model == "" {
 		model = envOverride(getenv, "GTME_AI_MODEL")
 	}
@@ -134,14 +132,11 @@ func Resolve(engine, model string, getenv func(string) string) (Engine, string, 
 	case "", EngineAPI:
 		e, err := newAPIEngine(getenv)
 		return e, model, err
-	case EngineClaudeCode:
-		e, err := newClaudeCodeEngine()
-		return e, model, err
 	case EngineFixture:
 		e, err := newFixtureEngine(getenv)
 		return e, model, err
 	default:
-		return nil, model, fmt.Errorf("ai: unknown engine %q (want %q or %q)", engine, EngineAPI, EngineClaudeCode)
+		return nil, model, fmt.Errorf("ai: unknown engine %q in GTME_AI_ENGINE (want %q or %q)", engine, EngineAPI, EngineFixture)
 	}
 }
 
@@ -157,14 +152,11 @@ func envOverride(getenv func(string) string, key string) string {
 // resolution without constructing an engine, so the runner — which writes
 // provenance — computes the same answer the adapter will. The fixture engine
 // reports "fixture", which is what marks simulated judgments as synthetic.
-func ProvenanceModel(engine, model string, getenv func(string) string) string {
+func ProvenanceModel(model string, getenv func(string) string) string {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	if v := envOverride(getenv, "GTME_AI_ENGINE"); v != "" {
-		engine = v
-	}
-	if strings.TrimSpace(engine) == EngineFixture {
+	if strings.TrimSpace(envOverride(getenv, "GTME_AI_ENGINE")) == EngineFixture {
 		return "fixture"
 	}
 	if model == "" {
@@ -178,9 +170,9 @@ func ProvenanceModel(engine, model string, getenv func(string) string) string {
 
 // BatchEngine is an engine that can take a batch of requests now and answer
 // later under a token (SPEC §5/§8, ADR-038): the Message Batches API for the
-// api engine, a scripted stand-in for the fixture engine. Engines without a
-// batch surface (claude-code) do not implement it, and a deferred step on
-// them answers synchronously.
+// api engine, a scripted stand-in for the fixture engine. An engine without
+// a batch surface would not implement it, and a deferred step on it would
+// answer synchronously.
 type BatchEngine interface {
 	Engine
 	// Submit dispatches every request, keyed by its CustomID, and returns the

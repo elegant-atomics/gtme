@@ -96,6 +96,8 @@ func Run(ctx context.Context, env Env) int {
 		err = cmdRun(ctx, env, rest)
 	case "show":
 		err = cmdShow(ctx, env, rest)
+	case "answer":
+		err = cmdAnswer(ctx, env, rest)
 	case "freeze":
 		err = cmdFreeze(ctx, env, rest)
 	case "query":
@@ -142,6 +144,9 @@ Usage:
   gtme query --save NAME "SQL"       save a segment
   gtme show <identity-key>           print what the ledger knows about a record
   gtme show --run last               list a run's records
+  gtme show --run RUN_ID --pending [STEP]  records awaiting a participant, with what they are shown
+  gtme answer [RUN_ID|last|PIPELINE] [STEP] [KEY] --set f=v
+                                     record a participant's answer for a pending human/* or agent/* step
   gtme runs [RUN_ID|last]            list runs / show one run's receipt
   gtme freeze [RUN_ID|last]          rebuild a pipeline.yaml from a run
   gtme freeze [RUN_ID|last] --bundle DIR   assemble a portable campaign bundle

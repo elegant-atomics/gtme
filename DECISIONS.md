@@ -2745,6 +2745,59 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-02 — M24 internals: participants (ADR-048, ADR-049, ADR-050)
+
+**Question:** Where does the one implementation behind `human/*` and
+`agent/*` live, how does `gtme answer` know a step's contract when it is
+handed only a run, what does `--set grade=B` name when `provides:` landed
+the field namespaced, and how is the in-run walk proved without a pty?
+**Choice:** (1) `internal/participant` is the one implementation: the
+answer contract (`ContractFor`, `Parse`, `Validate`), the surface
+(`Render`), and the interactive `Walker`. The runner and the CLI both
+call it, so a person at a terminal inside `gtme run` and an agent
+answering later through `gtme answer` are held to exactly the same
+contract by construction rather than by two code paths agreeing. The
+`human/*` and `agent/*` manifests in `internal/adapters/participants`
+exist so the planner resolves and validates them like any adapter; the
+adapter they register fails loudly if anything ever opens a session.
+(2) `gtme answer` reconstructs the step from `runs.config_json` — the
+resolved pipeline snapshot `gtme freeze` already reads — and re-plans it,
+so the answer is validated against the declaration that actually pended
+the record, not against whatever the pipeline file says now. It needs no
+pipeline path, which is what lets `gtme answer last` work at all.
+(3) `--set` accepts the bare declared name (`grade`) as well as the
+namespaced one (`review.grade`): ADR-033 namespaces a declared `provides:`
+but the operator wrote the bare name in the YAML, and SPEC §11's own
+acceptance answers with it. A bare name resolves only when exactly one
+declared output ends in it; two that collide require the full name.
+(4) The `answered` event names who answered as `human/<name>` /
+`agent/<name>` (ADR-049 (6)), while `field_values.source` keeps ADR-026's
+form with the *bare* name after the `@` — `agent/review @
+claude-code#<sig>` (ADR-049 (8)). `participant.Bare` is the one place that reconciles them;
+without it provenance read `agent/review @ agent/claude-code#<sig>`.
+(5) The note lives on the `answered` event, so `gtme show --provenance`
+joins it back by run: `AnswerNotes` returns the note per run for an
+identity, latest in a run winning, matching collection's own rule. A
+value written by a participant therefore shows its note; nothing else
+does.
+(6) `--pending` writes NDJSON to stdout and the rendered surface to
+stderr, like every other read verb, so one call serves both an agent and
+a person. A pending step that is *not* a participant (a deferred adapter
+batch) is named and skipped rather than failing the listing.
+(7) The acceptance's pseudo-TTY leg is proved below the terminal: the
+walk's asking, validation and stop-on-interrupt in
+`internal/participant`, and the ask/do-not-ask decision (`canAsk`:
+human + `prompt: tty` + interactive + not a rehearsal) in
+`internal/runner`. What is left unproved by a test is the single
+`term.IsTerminal(stdin)` call that sets `Interactive`, because a pty is a
+dependency beyond §2 and this did not seem worth one. Recorded here
+rather than silently narrowed; SPEC §11's M24 acceptance says the same.
+**Why:** Every one of these is a place where the obvious implementation
+would have split a rule across two code paths that then drift — two
+validators, two provenance formats, two surfaces. The participants
+package exists to make the drift impossible rather than to remove
+duplication.
+
 ### 2026-09-01 — M23 internals: honest costs + engine-owned limit (ADR-046, ADR-047)
 
 **Question:** How does a binding's templated rate reach the planner, what

@@ -1,7 +1,7 @@
 {
-  "id": "ai/filter",
+  "id": "ai/review",
   "version": 1,
-  "role": "filter",
+  "role": "review",
   "entity_type": "*",
   "needs": "dynamic",
   "config_schema": {
@@ -13,7 +13,7 @@
     "properties": {
       "prompt": {
         "type": "string",
-        "description": "What to keep, in the operator's words"
+        "description": "What to judge about the subject value, in the operator's words; the labels come from the step's provides: (ADR-048)"
       },
       "batch_size": {
         "type": "integer",

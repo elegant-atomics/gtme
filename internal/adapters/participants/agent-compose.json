@@ -1,0 +1,58 @@
+{
+  "id": "agent/compose",
+  "version": 1,
+  "role": "compose",
+  "entity_type": "*",
+  "needs": "dynamic",
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "first_line": {
+        "type": "string"
+      },
+      "ps_line": {
+        "type": "string"
+      }
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "render": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The fields shown to the participant (default: the uses: fields, or the of: value alone); validated as uses: (SPEC \u00a77)"
+          },
+          "template": {
+            "type": "string",
+            "description": "A text template rendered per record \u2014 {{field}} placeholders \u2014 shown instead of the field listing"
+          }
+        },
+        "description": "What the participant is shown per record (ADR-049)"
+      },
+      "provides": {
+        "type": "object",
+        "description": "The step's derived provides schema (ADR-033) \u2014 the menu the participant answers. Injected by the runner from the step-level provides: key \u2014 never authored inside with:."
+      },
+      "of": {
+        "type": "string",
+        "description": "The referent (ADR-048): the field whose value this step is about. Injected by the runner from the step-level of: key \u2014 never authored inside with:."
+      },
+      "prompt": {
+        "type": "string",
+        "enum": [
+          "never"
+        ],
+        "description": "An agent/* step never prompts (ADR-049): its records wait in the ledger for `gtme answer --as <name>`"
+      }
+    }
+  }
+}

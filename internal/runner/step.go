@@ -42,10 +42,13 @@ type item struct {
 	// (ADR-038); pending marks a PENDING that covered it this session.
 	token   string
 	pending bool
-	// signature and input are the judgment cache keys (ADR-039) for an AI
-	// step's record, recorded on its done event.
+	// signature and input are the judgment cache keys (ADR-039) for a
+	// participant step's record, recorded on its done event.
 	signature string
 	input     string
+	// referent is the field_values.id of the of: value (ADR-048) — what a
+	// review's or edit's outputs record as what they were about.
+	referent string
 }
 
 // bump mutates a step's stats under the lock.
@@ -156,6 +159,12 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		}
 		r.printStepLine(st)
 		return nil
+	}
+	if st.RunnerOwned() {
+		// A human/agent step (SPEC §8, ADR-049): no session — the run asks at
+		// a terminal, collects what `gtme answer` recorded, or leaves the
+		// records pending in the ledger.
+		return r.runParticipantStep(ctx, st, work)
 	}
 	if st.IsGroupDeliver {
 		// The handoff (SPEC §8, ADR-032): no adapter, no network — every
@@ -321,11 +330,20 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 		key:        protocol.Key{EntityType: rec.Identity.EntityType, IdentityKey: rec.Identity.IdentityKey},
 		fields:     fields,
 	}
-	if isAIStep(st) {
+	if isParticipant(st) {
 		for name, v := range rec.Values {
 			if r.fetchedSource(v.Source) {
 				it.fetched = append(it.fetched, name)
 			}
+		}
+		// The referent (ADR-048): a review or edit of a value the record
+		// does not have is a failed record, not a judgment about nothing.
+		if st.Of != "" {
+			v, ok := rec.Values[st.Of]
+			if !ok {
+				return nil, r.failItem(ctx, st, it, fmt.Sprintf("of: %s has no value for this record", st.Of))
+			}
+			it.referent = v.ID
 		}
 	}
 
@@ -339,7 +357,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 	// The judgment cache (SPEC §7, ADR-039): same question, same facts,
 	// same answer — unless the step said respend. A record being collected
 	// (ADR-038) is past this point by definition.
-	if isAIStep(st) {
+	if isParticipant(st) {
 		it.signature = r.judgmentSignature(st)
 		it.input = inputHash(st, r.plan.Pipeline.Name, fields)
 		if token == "" && !st.Respend {
@@ -643,7 +661,10 @@ func (r *runner) printStepLine(st *planner.Step) {
 	if stat.Gated > 0 {
 		line += fmt.Sprintf(", %d gated", stat.Gated)
 	}
-	if stat.InFlight > 0 {
+	switch {
+	case stat.InFlight > 0 && stat.Awaiting != "":
+		line += fmt.Sprintf(", %d awaiting %s", stat.InFlight, stat.Awaiting)
+	case stat.InFlight > 0:
 		line += fmt.Sprintf(", %d in flight", stat.InFlight)
 	}
 	fmt.Fprintln(r.stderr, line)

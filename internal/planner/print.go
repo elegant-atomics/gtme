@@ -116,6 +116,27 @@ func Print(w io.Writer, p *Plan) {
 				fmt.Fprintf(w, "     on_missing: %s\n", s.OnMissing)
 			}
 		}
+		if s.Of != "" {
+			fmt.Fprintf(w, "     of:        %s (the referent — its value joins the cache key, its id the provenance; ADR-048)\n", s.Of)
+		}
+		if s.RunnerOwned() {
+			surface := "the uses: fields"
+			switch {
+			case s.RenderTemplate != "":
+				surface = "a template"
+			case len(s.RenderFields) > 0:
+				surface = list(s.RenderFields)
+			case s.Of != "":
+				surface = "the of: value"
+			}
+			fmt.Fprintf(w, "     render:    %s\n", surface)
+			switch s.Prompt {
+			case "never":
+				fmt.Fprintf(w, "     prompt:    never — records wait in the ledger; `gtme answer` records, the next `gtme run` collects (ADR-049)\n")
+			default:
+				fmt.Fprintf(w, "     prompt:    tty — at a terminal the run asks; otherwise records wait for `gtme answer` (ADR-049)\n")
+			}
+		}
 		if s.Deferred {
 			fmt.Fprintf(w, "     deferred:  the run ends in flight here; the next `gtme run` of this pipeline collects (ADR-038)\n")
 		}
@@ -164,6 +185,9 @@ func Print(w io.Writer, p *Plan) {
 	}
 	for _, warning := range p.Warnings {
 		fmt.Fprintf(w, "\nwarning: %s\n", warning)
+	}
+	for _, note := range p.Notes {
+		fmt.Fprintf(w, "\nnote: %s\n", note)
 	}
 
 	if p.Pipeline.Group != "" {
