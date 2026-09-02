@@ -2819,10 +2819,10 @@ role's reserved key); §11 (folded into milestone M23). `gtme help
 --bindings` and CONTRIBUTING ride the build.
 
 ### ADR-048: Three roles, any participant — filter, compose, review; and the referent
-**Status:** Proposed (2026-09-02 — drafted by the M23 session from
+**Status:** Accepted (2026-09-02 — drafted by the M23 session from
 ROADMAP.md "Participants — humans and AI in the pipeline" and "Interactive
 review step", then reshaped in conversation with the human on 2026-09-01/02;
-merging this packet is the acceptance)
+human-approved 2026-09-02 by merging the packet)
 **Context:** Judgment and writing in a pipeline are done today by one kind
 of participant — an API model behind `ai/filter` and `ai/compose` — and
 every other kind is either absent (a person reviewing records, an agent
@@ -2894,8 +2894,8 @@ M24 with ADR-049/050. `spec/ledger.sql` and the manifest schema ride the
 build.
 
 ### ADR-049: People and agents are adapters — `human/*`, `agent/*`, and `gtme answer`
-**Status:** Proposed (2026-09-02 — drafted with ADR-048; merging this
-packet is the acceptance)
+**Status:** Accepted (2026-09-02 — drafted with ADR-048; human-approved
+2026-09-02 by merging the packet)
 **Context:** A person reviewing records was named in ROADMAP.md as "an
 `ai/filter` with a human behind the contract" and an agent judging on its
 own as a "session" engine. Both put *who answers* in a config switch under
@@ -3006,8 +3006,8 @@ the participants subsection, receipt and `gtme runs` wording), §9
 and the manifests ride the build.
 
 ### ADR-050: The `claude-code` shell-out and the `engine:` key retire
-**Status:** Proposed (2026-09-02 — drafted with ADR-048; merging this
-packet is the acceptance)
+**Status:** Accepted (2026-09-02 — drafted with ADR-048; human-approved
+2026-09-02 by merging the packet)
 **Context:** The `claude-code` engine (§2) runs one `claude -p` subprocess
 per batch so an operator with Claude Code authenticated need not hold an
 API key. It blocks the runner on a process it does not control, has no

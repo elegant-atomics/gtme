@@ -2406,8 +2406,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.34 — 2026-09-02 (ADR-048..050 packet: participants — PROPOSED, not yet accepted)
-**Changed (proposed):** §2 (API is the only model engine; `engine:`
+### v0.34 — 2026-09-02 (ADR-048..050 reconciliation: participants; build queued as M24)
+**Changed:** §2 (API is the only model engine; `engine:`
 removed; `claude-code` retired); §3 `field_values.referent`,
 `step_events` `answered`; §6 the `review` role and the
 `credentials_optional` example; §7
@@ -2418,8 +2418,8 @@ removed; `claude-code` retired); §3 `field_values.referent`,
 (`ai/review`), 3b (`human/*`, `agent/*`), 5; §10a provenance form; §11
 milestone M24. Schema artifacts (`spec/ledger.sql`, the pipeline and
 manifest schemas) ride the build.
-**Not changed:** nothing built; this entry becomes the accepted diff when
-the packet PR merges.
+**Not changed:** nothing built — M24 is queued (accepted 2026-09-02 by
+merging the packet).
 
 ### v0.33 — 2026-09-01 (M23 build: honest costs + engine-owned limit, built)
 **Changed:** §11 M23 marked built; no normative text changed beyond
