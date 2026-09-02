@@ -1,7 +1,9 @@
-// Package aisteps holds the two AI adapters: ai/filter, which judges records,
-// and ai/compose, which writes fields. Both batch their records into one model
-// call, validate what comes back against a strict output schema, and retry once
-// with the validation error appended before failing the batch (SPEC §2, §10).
+// Package aisteps holds the three AI adapters — one per participant role
+// (ADR-048): ai/filter, which judges records; ai/compose, which writes
+// fields; and ai/review, which labels one value (`of:`) and never gates. All
+// batch their records into one model call, validate what comes back against
+// a strict output schema, and retry once with the validation error appended
+// before failing the batch (SPEC §2, §10).
 //
 // The output shape is one general rule (ADR-033): a step MAY declare its
 // output fields (`provides:`, injected by the runner into OPEN config as the
@@ -30,12 +32,14 @@ import (
 const (
 	FilterID  = "ai/filter"
 	ComposeID = "ai/compose"
+	ReviewID  = "ai/review"
 )
 
-// Modes.
+// Modes — the three participant roles (ADR-048).
 const (
 	modeFilter  = "filter"
 	modeCompose = "compose"
+	modeReview  = "review"
 )
 
 //go:embed filter.json
@@ -44,25 +48,32 @@ var filterManifest []byte
 //go:embed compose.json
 var composeManifest []byte
 
+//go:embed review.json
+var reviewManifest []byte
+
 func init() {
 	adapters.Register(filterManifest, func() adapters.Adapter { return &Adapter{Mode: modeFilter} })
 	adapters.Register(composeManifest, func() adapters.Adapter { return &Adapter{Mode: modeCompose} })
+	adapters.Register(reviewManifest, func() adapters.Adapter { return &Adapter{Mode: modeReview} })
 }
 
 // Adapter is one AI step. Mode decides whether it emits verdicts or fields.
 type Adapter struct {
 	Mode string
-	// Engine overrides engine resolution. Tests set it directly; in production it
-	// comes from the step's config.
+	// Engine overrides engine resolution. Tests set it directly; in production
+	// it is the API, or the fixture engine by environment (SPEC §2).
 	Engine ai.Engine
 }
 
 type config struct {
 	Prompt    string
-	Engine    string
 	Model     string
 	MaxTokens int
 	Fields    []string
+	// Of names the referent (ADR-048): the field whose value the step is
+	// about — a review's subject, an edit's original. Injected by the runner
+	// from the step-level of: key; the prompt presents it as the subject.
+	Of string
 	// Provides is the derived provides schema the runner injected (ADR-033);
 	// nil when the step declares nothing.
 	Provides json.RawMessage
@@ -82,8 +93,8 @@ func parseConfig(raw map[string]any) (config, error) {
 	if strings.TrimSpace(c.Prompt) == "" {
 		return c, fmt.Errorf("config.prompt is required")
 	}
-	c.Engine, _ = raw["engine"].(string)
 	c.Model, _ = raw["model"].(string)
+	c.Of, _ = raw[adapters.OfConfigKey].(string)
 	switch v := raw["max_tokens"].(type) {
 	case float64:
 		c.MaxTokens = int(v)
@@ -129,10 +140,14 @@ type shape struct {
 
 // shapeFor resolves the session's output shape: the injected provides schema
 // when the step declared one, else the manifest's static shape (ai/compose's
-// first_line/ps_line; nothing for ai/filter).
+// first_line/ps_line; nothing for ai/filter). A review has no default: its
+// labels are what it declares (SPEC §10.3a), and the planner requires them.
 func (a *Adapter) shapeFor(cfg config) (shape, error) {
 	raw := cfg.Provides
 	if len(raw) == 0 {
+		if a.Mode == modeReview {
+			return shape{}, fmt.Errorf("%s: a review declares its labels — add provides: to the step (ADR-048)", a.id())
+		}
 		if a.Mode == modeCompose {
 			var doc struct {
 				Provides json.RawMessage `json:"provides"`
@@ -256,7 +271,7 @@ func (a *Adapter) Run(ctx context.Context, p adapters.Ports) error {
 	if engine == nil {
 		// p.Getenv, not os.Getenv: the runner injects credentials (including
 		// ~/.gtme/secrets) into the session env, never the process env.
-		e, resolved, err := ai.Resolve(cfg.Engine, cfg.Model, p.Getenv)
+		e, resolved, err := ai.Resolve(cfg.Model, p.Getenv)
 		if err != nil {
 			return err
 		}
@@ -413,8 +428,11 @@ func (a *Adapter) ask(ctx context.Context, engine ai.Engine, w *protocol.Writer,
 }
 
 func (a *Adapter) id() string {
-	if a.Mode == modeCompose {
+	switch a.Mode {
+	case modeCompose:
 		return ComposeID
+	case modeReview:
+		return ReviewID
 	}
 	return FilterID
 }
@@ -436,8 +454,21 @@ func (a *Adapter) systemPrompt(sh shape, cfg config) string {
 	}
 	var b strings.Builder
 	b.WriteString("You are one step in an automated data pipeline. You receive a batch of records as JSON and " +
-		"return a decision for every record.\n\n" +
-		"Respond with a JSON array and nothing else: no prose, no explanation, no markdown fences.\n" +
+		"return a decision for every record.\n\n")
+	if cfg.Of != "" {
+		// The referent (ADR-048): the value the step is about is presented as
+		// the subject; the other fields are context. A review labels the
+		// subject; an edit writes a new value of it.
+		switch a.Mode {
+		case modeReview:
+			fmt.Fprintf(&b, "Each record carries a subject — its %q value, shown after the record as `subject %s:` — and context fields. "+
+				"Judge the subject; the context is there to help you judge it.\n\n", cfg.Of, cfg.Of)
+		default:
+			fmt.Fprintf(&b, "Each record carries the value this step is about — its %q value, shown after the record as `subject %s:` — and context fields. "+
+				"What you return is about that value.\n\n", cfg.Of, cfg.Of)
+		}
+	}
+	b.WriteString("Respond with a JSON array and nothing else: no prose, no explanation, no markdown fences.\n" +
 		"Each element must be an object of exactly this shape:\n{" + strings.Join(parts, ", ") + "}\n\n")
 	if hasEnum {
 		b.WriteString("Where a field lists alternatives separated by |, its value must be exactly one of them, verbatim.\n")
@@ -598,9 +629,10 @@ func checkType(f ai.FieldShape, v any) error {
 }
 
 // emit turns validated answers into protocol messages: a RECORD carrying the
-// shape's fields (compose always; a filter only when it declared provides,
-// ADR-033), and for a filter the VERDICT that gates advancement — the RECORD
-// first, so the runner has the fields in hand when the verdict lands.
+// shape's fields (compose and review always; a filter only when it declared
+// provides, ADR-033), and for a filter the VERDICT that gates advancement —
+// the RECORD first, so the runner has the fields in hand when the verdict
+// lands. A review emits no VERDICT: it never gates (ADR-048).
 func (a *Adapter) emit(w *protocol.Writer, sh shape, records []record, answers map[string]map[string]any) error {
 	for _, rec := range records {
 		item := answers[rec.key.IdentityKey]
@@ -613,7 +645,7 @@ func (a *Adapter) emit(w *protocol.Writer, sh shape, records []record, answers m
 				return err
 			}
 		}
-		if a.Mode == modeCompose {
+		if a.Mode != modeFilter {
 			continue
 		}
 		pass, _ := item["pass"].(bool)

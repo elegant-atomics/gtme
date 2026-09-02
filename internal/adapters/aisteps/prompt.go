@@ -21,9 +21,9 @@ import (
 	"unicode/utf8"
 )
 
-// maxLine is the longest line the assembly emits. The claude-code engine's
-// file-reading path truncates lines well above this silently; the API has no
-// such limit, but one budget keeps the two engines' prompts identical.
+// maxLine is the longest line the assembly emits. The API has no such limit;
+// the budget exists so long values are wrapped at structural breaks (ADR-035)
+// rather than trusting whatever reads the prompt to keep a long line intact.
 const maxLine = 1500
 
 // Fence delimiters (internal — SPEC §10.3 states the properties, not the
@@ -57,7 +57,7 @@ func assemble(cfg config, records []record, validationErr string) (shared, paylo
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		b.WriteString(encodeRecord(rec, fetched))
+		b.WriteString(encodeRecord(rec, fetched, cfg.Of))
 	}
 
 	if validationErr != "" {
@@ -69,8 +69,10 @@ func assemble(cfg config, records []record, validationErr string) (shared, paylo
 }
 
 // encodeRecord renders one record: a compact JSON object of its inline
-// fields (identity_key first), then one fenced block per fetched field.
-func encodeRecord(rec record, fetched map[string]bool) string {
+// fields (identity_key first), then the subject line when the step declared
+// of: (ADR-048 — the value the step is about, set apart from its context),
+// then one fenced block per fetched field.
+func encodeRecord(rec record, fetched map[string]bool, of string) string {
 	names := make([]string, 0, len(rec.fields))
 	for k := range rec.fields {
 		if k != "identity_key" {
@@ -84,6 +86,9 @@ func encodeRecord(rec record, fetched map[string]bool) string {
 	inline.Write(compact(rec.key.IdentityKey))
 	var fenced []string
 	for _, k := range names {
+		if k == of {
+			continue // presented as the subject, below
+		}
 		if fetched[k] {
 			fenced = append(fenced, k)
 			continue
@@ -98,6 +103,17 @@ func encodeRecord(rec record, fetched map[string]bool) string {
 	var b strings.Builder
 	b.WriteString(wrapJSON(inline.String()))
 	b.WriteString("\n")
+	if of != "" {
+		if v, ok := rec.fields[of]; ok {
+			if fetched[of] {
+				b.WriteString(fence(of, rec.key.IdentityKey, v))
+			} else {
+				fmt.Fprintf(&b, "subject %s: %s\n", of, wrapJSON(string(compact(v))))
+			}
+		} else {
+			fmt.Fprintf(&b, "subject %s: (no value)\n", of)
+		}
+	}
 	for _, k := range fenced {
 		b.WriteString(fence(k, rec.key.IdentityKey, rec.fields[k]))
 	}

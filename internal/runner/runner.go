@@ -22,6 +22,7 @@ import (
 	"github.com/elegant-atomics/gtme/internal/binding"
 	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
+	participantpkg "github.com/elegant-atomics/gtme/internal/participant"
 	"github.com/elegant-atomics/gtme/internal/planner"
 	"github.com/elegant-atomics/gtme/internal/protocol"
 	"github.com/elegant-atomics/gtme/internal/registry"
@@ -46,6 +47,11 @@ type Options struct {
 	// resolved and receipted per record, but no deliver adapter is invoked and
 	// no deliveries row is written. Every other step runs normally.
 	DryRun bool
+	// Stdin and Interactive drive the in-run walk of a human/* step (SPEC
+	// §8, ADR-049): with Interactive (stdin is a terminal) and prompt: tty
+	// the run asks; otherwise the records wait in the ledger.
+	Stdin       io.Reader
+	Interactive bool
 	// Simulate executes the whole pipeline offline (SPEC §8, ADR-028):
 	// bindings serve their conformance fixtures, AI steps run on the fixture
 	// engine, credentialed process adapters are stubbed (a visible simulation
@@ -101,9 +107,15 @@ type StepStat struct {
 	Inconclusive []Attestation
 
 	// In flight (SPEC §8, ADR-038): records a PENDING left with the
-	// provider, and the tokens they are pending under.
+	// provider, and the tokens they are pending under. Awaiting names the
+	// participant adapter (human/review, agent/filter) when the records wait
+	// for `gtme answer` instead of a provider (ADR-049).
 	InFlight int
 	Tokens   []string
+	Awaiting string
+	// Answered counts the records a participant answered in this
+	// invocation — in-run at a terminal, or collected from the ledger.
+	Answered int
 
 	// Preflight (SPEC §8, ADR-040): the target's answer before anything
 	// sent — "" when the adapter does not preflight.
@@ -135,10 +147,14 @@ type RecordVariables struct {
 // Result is the outcome of a run.
 type Result struct {
 	RunID     string
+	Pipeline  string
 	Status    string
 	DryRun    bool
 	Simulated bool
 	Steps     []StepStat
+	// Interrupted marks a run whose in-run walk was cut short (Ctrl-C):
+	// the rest stayed pending (SPEC §8, ADR-049).
+	Interrupted bool
 
 	// TerminusGroup/TerminusAdded report the membership terminus (SPEC §8);
 	// TerminusWould counts what a dry/simulated run held back.
@@ -169,6 +185,9 @@ type runner struct {
 	runID    string
 	dry      bool
 	simulate bool
+	// stdin and interactive are the in-run walk's terminal (ADR-049).
+	stdin       io.Reader
+	interactive bool
 	// aiFixture is the synthesized $auto script injected into AI steps under
 	// --simulate when the operator has no recorded one (SPEC §8).
 	aiFixture string
@@ -213,6 +232,8 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		conc:         Concurrency(o.Concurrency),
 		dry:          o.DryRun || o.Simulate,
 		simulate:     o.Simulate,
+		stdin:        o.Stdin,
+		interactive:  o.Interactive && o.Stdin != nil,
 		reg:          reg,
 		deliverSteps: map[string]bool{},
 		fetchedCache: map[string]bool{},
@@ -276,6 +297,14 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 
 	runErr := r.execute(ctx)
 
+	// Ctrl-C during an in-run walk (ADR-049) is not a failure: the answered
+	// records are settled, the rest are pending, and the run ends pending —
+	// finished on a context the signal did not cancel.
+	interrupted := errors.Is(runErr, errInterrupted)
+	if interrupted {
+		runErr = nil
+		ctx = context.WithoutCancel(ctx)
+	}
 	status := ledger.StatusDone
 	if runErr != nil {
 		status = ledger.StatusFailed
@@ -288,8 +317,8 @@ func Execute(ctx context.Context, o Options) (*Result, error) {
 		runErr = err
 	}
 
-	return &Result{RunID: r.runID, Status: status, DryRun: r.dry && !r.simulate,
-		Simulated: r.simulate, Steps: r.collect(),
+	return &Result{RunID: r.runID, Pipeline: r.plan.Pipeline.Name, Status: status, DryRun: r.dry && !r.simulate,
+		Simulated: r.simulate, Steps: r.collect(), Interrupted: interrupted,
 		TerminusGroup: r.terminusGroup, TerminusAdded: r.terminusAdded,
 		TerminusWould: r.terminusWould}, runErr
 }
@@ -310,16 +339,29 @@ func writeAutoFixture() (string, error) {
 	return f.Name(), f.Close()
 }
 
-// isAIStep reports an operation-named AI step (ADR-026).
+// isAIStep reports a model-backed AI step (ADR-026): the one kind of
+// participant that runs on an engine.
 func isAIStep(st *planner.Step) bool {
 	return st.Manifest != nil && st.Manifest.IsAI()
 }
 
+// isParticipant reports a participant step of any kind (ADR-048/049): ai/*,
+// human/* or agent/*. Every predicate about the role — the judgment cache,
+// declared provides, fenced fields — keys on this; only engine selection and
+// model provenance key on isAIStep.
+func isParticipant(st *planner.Step) bool {
+	return st.Manifest != nil && st.Manifest.IsParticipant()
+}
+
 // stubbed reports whether a step is served nothing under --simulate: a binding
-// without fixtures, or a credentialed process adapter (network by declaration)
-// that is not an AI step. Stubbed steps are the simulation gaps the receipt
-// must surface (SPEC §8).
+// without fixtures, a credentialed process adapter (network by declaration)
+// that is not an AI step, or a human/agent step — there is no prompt to
+// script and no person to rehearse (ADR-049). Stubbed steps are the
+// simulation gaps the receipt must surface (SPEC §8).
 func (r *runner) stubbed(st *planner.Step) bool {
+	if r.simulate && st.RunnerOwned() {
+		return true
+	}
 	if !r.simulate || isAIStep(st) || st.IsDeliver || st.IsGroupSource || st.IsSQL {
 		return false
 	}
@@ -333,6 +375,11 @@ func (r *runner) stubbed(st *planner.Step) bool {
 	}
 	return st.Manifest != nil && len(st.Manifest.Credentials) > 0
 }
+
+// errInterrupted is the in-run walk cut short (SPEC §8, ADR-049): the run
+// stops here, pending, rather than carrying a cancelled context into the
+// next step.
+var errInterrupted = errors.New("runner: interrupted")
 
 func (r *runner) execute(ctx context.Context) error {
 	if err := r.runSource(ctx); err != nil {
@@ -487,10 +534,15 @@ func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 		pending = &protocol.PendingRef{Token: items[0].token}
 	}
 	fetched := fetchedFields(items)
-	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 {
-		config = make(map[string]any, len(st.Config)+3)
+	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 || st.Of != "" {
+		config = make(map[string]any, len(st.Config)+4)
 		for k, v := range st.Config {
 			config[k] = v
+		}
+		if st.Of != "" {
+			// The referent (ADR-048) rides in like the derived provides: the
+			// adapter presents it as the subject.
+			config[adapters.OfConfigKey] = st.Of
 		}
 		if len(st.Variables) > 0 {
 			config["variables"] = st.Variables
@@ -555,7 +607,7 @@ func (r *runner) fetchedSource(source string) bool {
 	if i := strings.IndexAny(id, "@ "); i >= 0 {
 		id = strings.TrimSpace(id[:i])
 	}
-	if id == "" || strings.HasPrefix(id, adapters.AIPrefix) || strings.HasPrefix(id, "sql/") {
+	if id == "" || adapters.ParticipantKind(id) != "" || strings.HasPrefix(id, "sql/") {
 		return false
 	}
 	r.mu.Lock()
@@ -835,20 +887,28 @@ func (r *runner) keepPayload(ctx context.Context, st *planner.Step, identityID s
 
 // source is the provenance string a step's writes carry. AI steps record the
 // engine's model identifier (SPEC §10a, ADR-026): the id says what kind of
-// fact, provenance says who produced it.
+// fact, provenance says who produced it. A human/agent step's provenance
+// names the participant instead, known only once someone has answered —
+// see participantSource.
 func (r *runner) source(st *planner.Step) string {
 	if st.Manifest == nil {
 		return st.Use // a group source writes no fields; this labels events only
 	}
 	if isAIStep(st) {
-		engine, _ := st.Config["engine"].(string)
 		model, _ := st.Config["model"].(string)
 		getenv := func(k string) string { return r.sessionEnv(st)[k] }
 		// The judgment signature rides in provenance (SPEC §10a, ADR-039):
 		// two prompts' outputs stay distinguishable.
-		return st.Manifest.ID + " @ " + ai.ProvenanceModel(engine, model, getenv) + "#" + r.judgmentSignature(st)
+		return st.Manifest.ID + " @ " + ai.ProvenanceModel(model, getenv) + "#" + r.judgmentSignature(st)
 	}
 	return st.Manifest.Source()
+}
+
+// participantSource is a human/agent step's provenance (SPEC §10a, ADR-049):
+// the adapter, the participant in the model's place, and the signature over
+// the step declaration — never the name.
+func (r *runner) participantSource(st *planner.Step, participant string) string {
+	return st.Manifest.ID + " @ " + participantpkg.Bare(participant) + "#" + r.judgmentSignature(st)
 }
 
 // checkRegistry is enforcement layer 2 (SPEC §4a): canonical fields in adapter

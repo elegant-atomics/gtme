@@ -87,6 +87,18 @@ type Step struct {
 	// (ADR-045): always | on_change | never.
 	RedeliverMode string
 
+	// Participant classifies a participant step (ADR-048/049): ai, human,
+	// agent, or "" for a provider step. Of is the referent field (ADR-048):
+	// the value a compose or review step is about, validated as one more
+	// uses: entry. RenderFields/RenderTemplate are a human/agent step's
+	// surface (ADR-049) and Prompt its policy — tty or never; an agent/*
+	// step is always never.
+	Participant    string
+	Of             string
+	RenderFields   []string
+	RenderTemplate string
+	Prompt         string
+
 	Credentials map[string]string
 	// MissingOptional are declared-optional credentials that did not resolve;
 	// the plan reports them as warnings, not errors.
@@ -136,7 +148,21 @@ type Plan struct {
 	// Warnings are plan-level observations that do not block (SPEC §7): the
 	// one-commit-point rule (ADR-032) is the first.
 	Warnings []string
+	// Notes are plan-level observations that are neither warnings nor
+	// problems: the cron note when a deliver step follows a human/agent step
+	// (ADR-049).
+	Notes []string
 }
+
+// RunnerOwned reports a human/* or agent/* step (ADR-049): no session is
+// opened; the runner asks, or waits in the ledger for `gtme answer`.
+func (s *Step) RunnerOwned() bool {
+	return s.Participant == adapters.KindHuman || s.Participant == adapters.KindAgent
+}
+
+// PendingToken is the runner-owned token a human/agent step's unanswered
+// records wait under (SPEC §8, ADR-049): <run-id>/<step-id>.
+func PendingToken(runID, stepID string) string { return runID + "/" + stepID }
 
 // GroupDeliverID is the runner-owned handoff step (SPEC §8, ADR-032).
 const GroupDeliverID = "group/deliver"
@@ -439,13 +465,45 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 		}
 		// AI steps remember by default — the judgment cache (ADR-039); the
 		// warning is for paid fetches with no window.
-		if (st.Role == adapters.RoleEnrich || st.Role == adapters.RoleVerify) && !st.Manifest.IsAI() && st.Cache <= 0 &&
+		if (st.Role == adapters.RoleEnrich || st.Role == adapters.RoleVerify) && !st.Manifest.IsParticipant() && st.Cache <= 0 &&
 			(len(st.Manifest.Credentials) > 0 || (st.CostEstimate != nil && *st.CostEstimate > 0)) {
 			st.Warnings = append(st.Warnings,
 				"respend: this paid step has no freshness window, so every run pays for every record again — set cache: Nd, or say respend: true (SPEC §7, ADR-038)")
 		}
 	}
 	_ = writes
+
+	// when: reads the filter role only (SPEC §9, ADR-048): a review labels a
+	// value and never gates, so gating on one is refused naming the fix.
+	for i := range plan.Steps {
+		st := &plan.Steps[i]
+		if st.WhenStep == "" {
+			continue
+		}
+		if ref := plan.StepByID(st.WhenStep); ref != nil && ref.Role == adapters.RoleReview {
+			problems = append(problems, Problem{Step: st.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("when: %s.passed reads the filter role only — %q is a review and never gates (ADR-048); add a sql/filter on its labels and gate on that", st.WhenStep, st.WhenStep)})
+		}
+	}
+
+	// The cron note (SPEC §7, ADR-049): a pipeline is run stage by stage, and
+	// a pending run is resumed rather than re-sourced, so a deliver step
+	// after a human/agent step means the pipeline waits for its person under
+	// cron and sources nothing new until answered. One note, naming the
+	// documented pattern.
+	var person *Step
+	for i := range plan.Steps {
+		st := &plan.Steps[i]
+		if st.RunnerOwned() && person == nil {
+			person = st
+		}
+		if st.IsDeliver && person != nil {
+			plan.Notes = append(plan.Notes, fmt.Sprintf(
+				"under cron this pipeline waits for a person: %q follows the %s step %q, and a pending run is resumed, not re-sourced, until every record is answered (ADR-049). The pattern: review into a group in one pipeline, send from the group in another (SPEC §8).",
+				st.ID, person.Use, person.ID))
+			break
+		}
+	}
 
 	plan.Available = keys(available)
 
@@ -530,20 +588,28 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 	}
 
-	// gateProvides rejects a step-level provides: declaration anywhere but an
-	// AI-backed filter/compose step (SPEC §9, ADR-033) — the uses: pattern,
-	// third instance. Called once the step's role is known.
-	gateProvides := func(isAI bool) {
+	// gateProvides rejects a step-level provides: declaration anywhere but a
+	// participant step in a participant role (SPEC §9, ADR-033/048) — the
+	// uses: pattern, third instance. Called once the step's role is known.
+	gateProvides := func(participant bool) {
 		if s.Provides == nil {
 			return
 		}
 		switch {
-		case ps.Role != adapters.RoleFilter && ps.Role != adapters.RoleCompose:
+		case !adapters.ParticipantRole(ps.Role):
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: fmt.Sprintf("provides: is only valid on AI-backed filter/compose steps (%s has role %q) — ADR-033", ps.Use, ps.Role)})
-		case !isAI:
+				Msg: fmt.Sprintf("provides: is only valid on filter/compose/review steps (%s has role %q) — ADR-033", ps.Use, ps.Role)})
+		case !participant:
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: fmt.Sprintf("provides: is only valid on AI steps (ai/filter, ai/compose); %s takes its outputs from its own contract, not from a step-level declaration — ADR-033", ps.Use)})
+				Msg: fmt.Sprintf("provides: is only valid on participant steps (ai/*, human/*, agent/*); %s takes its outputs from its own contract, not from a step-level declaration — ADR-033", ps.Use)})
+		}
+	}
+	// gateOf rejects of: on a step that is neither a compose nor a review
+	// (SPEC §9, ADR-048); the same pattern again.
+	gateOf := func() {
+		if strings.TrimSpace(s.Of) != "" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("of: is only valid on compose and review steps of a participant adapter (%s has role %q) — ADR-048", ps.Use, ps.Role)})
 		}
 	}
 
@@ -571,9 +637,10 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 		if len(s.Uses) > 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: fmt.Sprintf("uses: is only valid on filter/compose steps (%s has role %q)", s.Use, ps.Role)})
+				Msg: fmt.Sprintf("uses: is only valid on filter/compose/review steps (%s has role %q)", s.Use, ps.Role)})
 		}
 		gateProvides(false)
+		gateOf()
 		// Dynamic needs from variables:, no static floor (SPEC §6/§9).
 		ps.Variables = s.Variables
 		ps.Needs = variableFields(s.Variables)
@@ -665,6 +732,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 		gateDeliverKeys()
 		gateProvides(false)
+		gateOf()
 		return ps, problems
 	}
 
@@ -681,6 +749,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		ps.Wildcard = true
 		gateDeliverKeys()
 		gateProvides(false)
+		gateOf()
 		return ps, problems
 	}
 
@@ -693,11 +762,13 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	ps.Role = resolved.Manifest.Role
 	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
-	// An entity-agnostic manifest (SPEC §6, ADR-033 — the AI steps) takes
-	// the pipeline's entity type, so uses:/provides: and its static schemas
-	// validate against the registry the records actually belong to. A source
-	// has no pipeline type to take.
+	// An entity-agnostic manifest (SPEC §6, ADR-033 — the participant steps)
+	// takes the pipeline's entity type, so uses:/provides: and its static
+	// schemas validate against the registry the records actually belong to.
+	// A source has no pipeline type to take.
 	isAI := resolved.Manifest.IsAI()
+	participant := resolved.Manifest.IsParticipant()
+	ps.Participant = adapters.ParticipantKind(resolved.Manifest.ID)
 	if resolved.Manifest.EntityAgnostic() {
 		if isSource {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
@@ -734,7 +805,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	} else {
 		gateDeliverKeys()
 	}
-	gateProvides(isAI)
+	gateProvides(participant)
 
 	reg, regErr := registry.Load()
 	if regErr != nil {
@@ -744,7 +815,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	// Declared AI provides (SPEC §7, ADR-033): the step's effective provides
 	// derive from its provides: declaration — names namespaced by pipeline
 	// unless already namespaced — and replace the manifest's static shape.
-	if s.Provides != nil && isAI && ps.Role != adapters.RoleSource {
+	if s.Provides != nil && participant && ps.Role != adapters.RoleSource {
 		decl, err := s.ProvidesFields()
 		if err != nil {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
@@ -765,9 +836,19 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 			}
 		}
 	}
-	if _, ok := ps.Config["provides"]; ok && isAI {
+	if _, ok := ps.Config["provides"]; ok && participant {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 			Msg: "provides: is a step-level key, not a with: key — move it out of with: (SPEC §9, ADR-033)"})
+	}
+	if _, ok := ps.Config[adapters.OfConfigKey]; ok && participant {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: "of: is a step-level key, not a with: key — move it out of with: (SPEC §9, ADR-048)"})
+	}
+	// A review declares its labels (SPEC §10.3a, ADR-048): there is no
+	// default shape for "what is true of this value".
+	if participant && ps.Role == adapters.RoleReview && s.Provides == nil {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: fmt.Sprintf("%s is a review and declares its labels — add provides: (a grade enum, a yes/no, notes; ADR-048)", s.Use)})
 	}
 
 	// uses: (ADR-004) narrows an AI-backed step's needs-all wildcard to an
@@ -775,22 +856,58 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	// needs entirely for projection and validation — see planner.Step.Needs's
 	// doc and runner.prepare, which project exactly this list once it is set.
 	if len(s.Uses) > 0 {
-		if ps.Role != adapters.RoleFilter && ps.Role != adapters.RoleCompose {
+		if !adapters.ParticipantRole(ps.Role) {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
-				Msg: fmt.Sprintf("uses: is only valid on filter/compose steps (%s has role %q)", s.Use, ps.Role)})
+				Msg: fmt.Sprintf("uses: is only valid on filter/compose/review steps (%s has role %q)", s.Use, ps.Role)})
 		}
 		ps.Needs = append([]string(nil), s.Uses...)
 		ps.Required = append([]string(nil), s.Uses...)
 		ps.NeedsAll = false
 	}
 
-	// Dynamic needs (SPEC §6, ADR-019): a dynamic filter/compose step with no
+	// Dynamic needs (SPEC §6, ADR-019): a dynamic participant step with no
 	// uses: falls back to needs-all; a dynamic deliver step derives its needs
 	// from variables: on top of its static floor.
 	dynamic := resolved.Manifest.NeedsDynamic()
-	if dynamic && len(s.Uses) == 0 &&
-		(ps.Role == adapters.RoleFilter || ps.Role == adapters.RoleCompose) {
+	if dynamic && len(s.Uses) == 0 && adapters.ParticipantRole(ps.Role) {
 		ps.NeedsAll = true
+	}
+
+	// The referent (SPEC §7/§9, ADR-048): of: names the value a compose or
+	// review step is about — required on a review — and is validated exactly
+	// as one more uses: entry. A human/agent step's render: fields are
+	// validated the same way (ADR-049). Neither narrows a needs-all
+	// projection: a compose with of: and no uses: still sees everything.
+	if of := strings.TrimSpace(s.Of); of != "" {
+		switch {
+		case !participant || (ps.Role != adapters.RoleCompose && ps.Role != adapters.RoleReview):
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: fmt.Sprintf("of: is only valid on compose and review steps of a participant adapter (%s has role %q) — ADR-048", ps.Use, ps.Role)})
+		default:
+			ps.Of = of
+			ps.Needs = appendMissing(ps.Needs, of)
+			ps.Required = appendMissing(ps.Required, of)
+		}
+	} else if participant && ps.Role == adapters.RoleReview {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: fmt.Sprintf("%s is a review and needs of: — the field whose value it judges (ADR-048)", s.Use)})
+	}
+	if resolved.Manifest.RunnerOwned() {
+		if render, ok := ps.Config["render"].(map[string]any); ok {
+			ps.RenderFields = configStrings(render["fields"])
+			ps.RenderTemplate, _ = render["template"].(string)
+			for _, f := range ps.RenderFields {
+				ps.Needs = appendMissing(ps.Needs, f)
+				ps.Required = appendMissing(ps.Required, f)
+			}
+		}
+		ps.Prompt, _ = ps.Config["prompt"].(string)
+		switch {
+		case ps.Participant == adapters.KindAgent:
+			ps.Prompt = "never" // an agent/* step never prompts (ADR-049)
+		case ps.Prompt == "":
+			ps.Prompt = "tty"
+		}
 	}
 	// A dynamic enrich step (http/enrich, SPEC §10a) derives its needs from
 	// the {{record.<field>}} placeholders its config templates reference.
@@ -833,6 +950,16 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		for _, name := range s.Uses {
 			if err := reg.ValidateName(ps.EntityType, name); err != nil {
 				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "uses: " + err.Error()})
+			}
+		}
+		if ps.Of != "" {
+			if err := reg.ValidateName(ps.EntityType, ps.Of); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "of: " + err.Error()})
+			}
+		}
+		for _, name := range ps.RenderFields {
+			if err := reg.ValidateName(ps.EntityType, name); err != nil {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "render.fields: " + err.Error()})
 			}
 		}
 		for _, field := range variableFields(s.Variables) {
@@ -888,9 +1015,25 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 			Msg: fmt.Sprintf("%s is a source adapter and can only be the pipeline source", s.Use)})
 	}
 
+	// engine: is not a key (SPEC §2/§9, ADR-050): the API is the only model
+	// engine, the fixture engine is selected by environment, and the retired
+	// claude-code shell-out's replacement is named — an agent/* step the
+	// agent answers itself. Checked before config validation so the fix,
+	// not "additional property", is what the operator reads.
+	config := ps.Config
+	if _, ok := ps.Config["engine"]; ok && participant {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: "engine: is not a key (ADR-050) — the API is the only model engine (the fixture engine is selected by GTME_AI_ENGINE, never in YAML); for engine: claude-code, make this an agent/* step (agent/filter, agent/compose, agent/review) and answer it with `gtme answer --as claude-code`"})
+		config = make(map[string]any, len(ps.Config))
+		for k, v := range ps.Config {
+			if k != "engine" {
+				config[k] = v
+			}
+		}
+	}
 	// limit is the engine's on a source binding (ADR-047): validated only
 	// when the binding declares it, capped by the engine either way.
-	if err := resolved.Manifest.ValidateConfig(withoutReservedKeys(resolved, ps.Config)); err != nil {
+	if err := resolved.Manifest.ValidateConfig(withoutReservedKeys(resolved, config)); err != nil {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig, Msg: err.Error()})
 	}
 
@@ -909,19 +1052,15 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	}
 
 	ps.Respend = s.Respend
-	// cache: 0d on an AI step is the judgment cache switched off (SPEC §7,
-	// ADR-039) — the same thing respend: true says.
-	if isAI && strings.TrimSpace(s.Cache) == "0d" {
+	// cache: 0d on a participant step is the judgment cache switched off
+	// (SPEC §7, ADR-039) — the same thing respend: true says.
+	if participant && strings.TrimSpace(s.Cache) == "0d" {
 		ps.Respend = true
 	}
 	// Deferred (ADR-038): adapter config on an AI step; the last-step rule
 	// is checked by Build, which knows the position.
 	if v, ok := ps.Config["deferred"].(bool); ok && v && isAI {
 		ps.Deferred = true
-		if engine, _ := ps.Config["engine"].(string); engine == "claude-code" {
-			ps.Warnings = append(ps.Warnings,
-				"deferred: true has no effect on engine claude-code — it has no batch surface; the step answers synchronously (ADR-038)")
-		}
 	}
 
 	// Cache window: step override, else config freshness_days (http/enrich's
@@ -1306,6 +1445,14 @@ func identityPath(entityType string, fields []string) (strong, weak bool) {
 		return true, true
 	}
 	return strong, weak
+}
+
+// appendMissing adds s to list unless it is already there.
+func appendMissing(list []string, s string) []string {
+	if containsStr(list, s) {
+		return list
+	}
+	return append(list, s)
 }
 
 func containsStr(list []string, s string) bool {

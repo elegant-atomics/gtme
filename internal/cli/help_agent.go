@@ -19,12 +19,13 @@ import (
 // (needs/provides/config_schema/credentials) is here, not just names.
 func cmdHelpAgent(env Env) error {
 	doc := agentDoc{
-		Verbs:    agentVerbs,
-		Adapters: agentAdapters(),
-		SQLSteps: agentSQLSteps,
-		Examples: agentExamples,
-		Ledger:   agentLedger(),
-		Bindings: agentBindingsPointer,
+		Verbs:        agentVerbs,
+		Adapters:     agentAdapters(),
+		SQLSteps:     agentSQLSteps,
+		Examples:     agentExamples,
+		Ledger:       agentLedger(),
+		Bindings:     agentBindingsPointer,
+		Participants: agentParticipantDoc,
 	}
 	enc := json.NewEncoder(env.Stdout)
 	if err := enc.Encode(doc); err != nil {
@@ -50,6 +51,37 @@ type agentDoc struct {
 	// the binding contract (ADR-041): the contract itself lives in
 	// `gtme help --bindings`, so the pipeline document stays short.
 	Bindings agentPointer `json:"bindings"`
+	// Participants is the answer rhythm and its consequences (ADR-049) —
+	// the one part of the surface an agent drives rather than declares.
+	Participants agentParticipants `json:"participants"`
+}
+
+// agentParticipants documents how an agent answers a step addressed to it.
+type agentParticipants struct {
+	Note     string   `json:"note"`
+	Rhythm   []string `json:"rhythm"`
+	KnowAlso []string `json:"know_also"`
+}
+
+// agentParticipantDoc is the rhythm an agent follows when a pipeline hands it
+// a judgment, and the nuances each of which someone will otherwise trip on
+// (ADR-049's consequences).
+var agentParticipantDoc = agentParticipants{
+	Note: "A human/* or agent/* step is a participant step: it opens no adapter session, and its answer is yours to record. Use agent/* for a step you answer yourself and human/* for one a person answers; the pipeline file says whose work it is, and `gtme runs` says who is awaited. Under `--simulate` a participant step is a simulation gap — there is no prompt to script and no person to rehearse.",
+	Rhythm: []string{
+		"1. `gtme run pipeline.yaml` — the step pends every record it reaches and the run ends `pending`; the receipt names the count, the participant and this verb.",
+		"2. `gtme show --run last --pending [STEP]` — read the waiting records and the surface each is shown. stdout is NDJSON: identity_key, surface, outputs.",
+		"3. `gtme answer last [STEP] <identity-key> --set field=value` — once per record, validated on the spot. Add `--as <name>` under an agent/* step so the ledger names you, `--cost` if you spent anything, `--note` for why.",
+		"4. `gtme run pipeline.yaml` again — collection reads your answers instead of opening a session, and the records continue to the next stage. Unanswered records stay pending and the run stays pending.",
+	},
+	KnowAlso: []string{
+		"A cron pipeline with a participant step stalls until it is answered: a pending run is resumed, not re-sourced, so nothing new is picked up meanwhile. The pattern that avoids it is two pipelines — the reviewing one a person runs, ending in a group:; the cron one sourcing from that group (see the `human-review-then-cron` example).",
+		"Ctrl-C during an in-run walk leaves the rest pending; the run ends pending, not failed.",
+		"Answers are idempotent per (run, step, record): answering again before collection replaces the earlier answer, and the latest one wins.",
+		"A judgment is remembered like a model's: an unchanged value is not asked again, whoever answers next. `cache: 0d` or `respend: true` ask again on purpose.",
+		"A review labels one value and never gates — `when: <review>.passed` fails plan. Use a filter to gate.",
+		"`of:` names the value a review or an edit is about; its current value is part of the cache key, so a rewritten draft comes back and an unchanged one does not.",
+	},
 }
 
 // agentPointer names another surface and what it is for.
@@ -79,6 +111,8 @@ var agentVerbs = []agentVerb{
 	{"gtme query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
 	{"gtme show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},
 	{"gtme show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
+	{"gtme show --run RUN_ID|last --pending [STEP]", "the records awaiting a participant with the surface each is shown, as text on stderr and NDJSON on stdout — what an agent reads before it answers (ADR-049)"},
+	{"gtme answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set field=value ...] [--as NAME] [--cost USD [--measured]] [--note TEXT]", "record a participant's answer for one pending human/* or agent/* step: a filter takes pass=true|false and reason, a compose or review its declared fields; the value is validated against the step's declared outputs and refused naming them otherwise. Writes an `answered` event and nothing else — it never sends. STEP may be omitted when one step is pending; with no identity key and a terminal it walks the pending records. --as names the participant (default the OS user; the human/ or agent/ prefix follows the adapter), --cost records what the participant spent (estimated unless --measured), --note is free text kept with the answer (never part of a cache key)"},
 	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
 	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
 	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
@@ -217,6 +251,53 @@ steps:
       first_name: first_name
       personalization: first_line
       ps_line: ps_line
+    idempotency: email
+`,
+	},
+	{
+		Name:        "human-review-then-cron",
+		Description: "The routing pattern for a participant step (ADR-049). A pipeline with a human step waits for its person, so keep the waiting out of cron: the reviewing pipeline is one a person runs and it ends in a group:, and the scheduled pipeline sources from that group and never waits. Two files, shown in order.",
+		Yaml: `# review.yaml — run by a person; ends in a group, nothing scheduled.
+name: review
+version: 1
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: draft
+    use: ai/compose
+    uses: [full_name, title]
+    provides: [first_line]
+    with:
+      prompt: Write one opening line.
+  - id: grade
+    use: human/review
+    of: review.first_line
+    provides:
+      grade: {enum: [A, B, C, D, F]}
+    with:
+      render:
+        template: "{{full_name}} ({{title}})\n{{review.first_line}}"
+  - id: approved
+    use: group/deliver
+    with:
+      group: approved
+    idempotency: email
+---
+# send.yaml — the scheduled half; sources the group, waits for nobody.
+name: send
+version: 1
+source:
+  group: approved
+steps:
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: "Q3 reviewed"
+    variables:
+      first_name: full_name
+      personalization: review.first_line
     idempotency: email
 `,
 	},

@@ -289,13 +289,13 @@ steps:
 		{"enrich adapter", `  - id: score
     use: mock-enrich-py
     provides: [note]
-`, `step "score": provides: is only valid on AI-backed filter/compose steps (mock-enrich-py has role "enrich")`},
+`, `step "score": provides: is only valid on filter/compose/review steps (mock-enrich-py has role "enrich")`},
 		{"sql filter", `  - id: keep
     use: sql/filter
     provides: [note]
     with:
       query: SELECT id AS identity_id FROM identities
-`, `step "keep": provides: is only valid on AI steps (ai/filter, ai/compose)`},
+`, `step "keep": provides: is only valid on participant steps (ai/*, human/*, agent/*)`},
 		{"inside with", `  - id: judge
     use: ai/filter
     with:

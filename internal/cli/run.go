@@ -131,6 +131,11 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 		ResumeRunID: runID,
 		DryRun:      *dryRun,
 		Simulate:    *simulate,
+		// The in-run walk of a human/* step needs someone to ask (SPEC §8,
+		// ADR-049): with a terminal on stdin the run asks, otherwise the
+		// records wait in the ledger for `gtme answer`.
+		Stdin:       env.Stdin,
+		Interactive: stdinIsTerminal(env),
 	})
 	if res != nil {
 		runner.PrintReceipt(env.Stderr, res)

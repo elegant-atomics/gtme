@@ -36,8 +36,8 @@ func TestPriceKnownAndUnknownModels(t *testing.T) {
 }
 
 func TestResolveRejectsUnknownEngine(t *testing.T) {
-	t.Setenv("GTME_AI_ENGINE", "")
-	if _, _, err := Resolve("telepathy", "", nil); err == nil {
+	t.Setenv("GTME_AI_ENGINE", "telepathy")
+	if _, _, err := Resolve("", nil); err == nil {
 		t.Fatal("want an error for an unknown engine")
 	}
 }
@@ -47,7 +47,7 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 	t.Setenv("GTME_AI_ENGINE", EngineFixture)
 	t.Setenv("GTME_AI_FIXTURE", fixture)
 
-	engine, model, err := Resolve("api", "", nil) // env overrides the configured engine
+	engine, model, err := Resolve("", nil) // the env selects the fixture engine
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -59,13 +59,13 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 	}
 
 	t.Setenv("GTME_AI_MODEL", "claude-haiku-4-5")
-	if _, model, err = Resolve("", "", nil); err != nil {
+	if _, model, err = Resolve("", nil); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if model != "claude-haiku-4-5" {
 		t.Errorf("model = %q, want the env override", model)
 	}
-	if _, model, err = Resolve("", "claude-opus-5", nil); err != nil {
+	if _, model, err = Resolve("claude-opus-5", nil); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if model != "claude-opus-5" {
@@ -76,7 +76,7 @@ func TestResolveDefaultsModelAndHonoursEnv(t *testing.T) {
 func TestAPIEngineNeedsAKey(t *testing.T) {
 	t.Setenv("GTME_AI_ENGINE", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	_, _, err := Resolve(EngineAPI, "", nil)
+	_, _, err := Resolve("", nil)
 	if err == nil {
 		t.Fatal("want an error when ANTHROPIC_API_KEY is unset")
 	}
@@ -90,7 +90,7 @@ func TestFixtureEngineReplaysScriptThenRepeatsLast(t *testing.T) {
 	t.Setenv("GTME_AI_ENGINE", EngineFixture)
 	t.Setenv("GTME_AI_FIXTURE", fixture)
 
-	engine, _, err := Resolve("", "", nil)
+	engine, _, err := Resolve("", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 	t.Setenv("GTME_AI_ENGINE", EngineFixture)
 	t.Setenv("GTME_AI_FIXTURE", fixture)
 
-	engine, _, err := Resolve("", "", nil)
+	engine, _, err := Resolve("", nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -176,11 +176,11 @@ func TestFixtureEngineAutoAnswers(t *testing.T) {
 func TestFixtureEngineNeedsAScript(t *testing.T) {
 	t.Setenv("GTME_AI_ENGINE", EngineFixture)
 	t.Setenv("GTME_AI_FIXTURE", "")
-	if _, _, err := Resolve("", "", nil); err == nil {
+	if _, _, err := Resolve("", nil); err == nil {
 		t.Fatal("want an error without GTME_AI_FIXTURE")
 	}
 	t.Setenv("GTME_AI_FIXTURE", writeFixture(t, `{"not":"an array"}`))
-	if _, _, err := Resolve("", "", nil); err == nil {
+	if _, _, err := Resolve("", nil); err == nil {
 		t.Fatal("want an error for a malformed script")
 	}
 }
@@ -217,36 +217,10 @@ func TestResolveUsesCallerEnvForAPIKey(t *testing.T) {
 		}
 		return ""
 	}
-	if _, _, err := Resolve(EngineAPI, "", getenv); err != nil {
+	if _, _, err := Resolve("", getenv); err != nil {
 		t.Fatalf("Resolve must see the session-injected key: %v", err)
 	}
-	if _, _, err := Resolve(EngineAPI, "", nil); err == nil {
+	if _, _, err := Resolve("", nil); err == nil {
 		t.Fatal("nil getenv with an empty process env should fail")
-	}
-}
-
-// ADR-046: the claude CLI's total_cost_usd is vendor-reported cost metadata,
-// so a response carrying it is measured; one without it is priced from our
-// own table, which is an estimate however exact the token counts are.
-func TestClaudeCodeCostBasis(t *testing.T) {
-	measured, err := parseClaudeCodeOutput([]byte(`{"result":"ok","model":"claude-sonnet-5","total_cost_usd":0.0123,"usage":{"input_tokens":10,"output_tokens":5}}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !measured.Measured || measured.CostUSD != 0.0123 || !measured.Priced {
-		t.Errorf("reported cost: measured=%v cost=%v priced=%v, want measured 0.0123", measured.Measured, measured.CostUSD, measured.Priced)
-	}
-	estimated, err := parseClaudeCodeOutput([]byte(`{"result":"ok","model":"claude-sonnet-5","usage":{"input_tokens":1000,"output_tokens":500}}`), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if estimated.Measured {
-		t.Error("a table-priced response must not claim measured")
-	}
-	if !estimated.Priced || estimated.CostUSD == 0 {
-		t.Errorf("table pricing: cost=%v priced=%v, want a priced estimate", estimated.CostUSD, estimated.Priced)
-	}
-	if d := measured.Detail(); d["basis"] != "measured" {
-		t.Errorf("detail basis = %v, want measured", d["basis"])
 	}
 }

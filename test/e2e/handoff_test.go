@@ -261,8 +261,8 @@ steps:
 	for _, want := range []string{
 		"group/deliver needs with.group",
 		`group/deliver takes only with.group (got "campaign")`,
-		`uses: is only valid on filter/compose steps (group/deliver has role "deliver")`,
-		`provides: is only valid on AI-backed filter/compose steps (group/deliver has role "deliver")`,
+		`uses: is only valid on filter/compose/review steps (group/deliver has role "deliver")`,
+		`provides: is only valid on filter/compose/review steps (group/deliver has role "deliver")`,
 	} {
 		contains(t, res.stderr, want, "stderr")
 	}

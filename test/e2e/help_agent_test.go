@@ -40,9 +40,16 @@ func TestHelpAgentSurface(t *testing.T) {
 	contains(t, res.stdout, "sql/filter", "help --agent sql_steps")
 	contains(t, res.stdout, "sql/transform", "help --agent sql_steps")
 
-	if len(doc.Examples) != 3 {
-		t.Errorf("examples = %d, want exactly 3", len(doc.Examples))
+	if len(doc.Examples) != 4 {
+		t.Errorf("examples = %d, want exactly 4", len(doc.Examples))
 	}
+
+	// The answer rhythm is the one part of the surface an agent drives
+	// rather than declares (ADR-049), so it is in the document by name.
+	contains(t, res.stdout, "gtme answer", "help --agent answer verb")
+	contains(t, res.stdout, "--pending", "help --agent pending verb")
+	contains(t, res.stdout, "human-review-then-cron", "help --agent routing pattern example")
+	contains(t, res.stdout, "waits for its person", "help --agent cron consequence")
 
 	haveVerb := map[string]bool{}
 	for _, v := range doc.Verbs {

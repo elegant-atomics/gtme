@@ -31,13 +31,6 @@
         "type": "integer",
         "minimum": 1
       },
-      "engine": {
-        "type": "string",
-        "enum": [
-          "api",
-          "claude-code"
-        ]
-      },
       "model": {
         "type": "string"
       },
@@ -55,6 +48,10 @@
       "provides": {
         "type": "object",
         "description": "The step's derived provides schema (ADR-033). Injected by the runner from the step-level provides: key \u2014 never authored inside with:."
+      },
+      "of": {
+        "type": "string",
+        "description": "The referent (ADR-048): the field whose value this step is about, presented to the model as the subject. Injected by the runner from the step-level of: key \u2014 never authored inside with:."
       },
       "fence": {
         "type": "boolean",

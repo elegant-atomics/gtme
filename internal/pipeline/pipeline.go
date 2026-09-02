@@ -66,6 +66,13 @@ type Step struct {
 	// AI-backed filter/compose steps; the planner enforces that, as with Uses.
 	// Kept as decoded YAML here; ProvidesFields is the parsed form.
 	Provides any `yaml:"provides,omitempty" json:"provides,omitempty"`
+	// Of is the referent (SPEC §7, §9, ADR-048): the field whose value a
+	// compose or review step is about — required on a review, an edit on a
+	// compose. The planner validates it exactly as one more uses: entry; the
+	// runtime hashes its current value into the judgment cache key and
+	// records its field_values.id on everything the step writes. Valid only
+	// on compose/review steps; the planner enforces that.
+	Of string `yaml:"of,omitempty" json:"of,omitempty"`
 	// Variables is a deliver step's egress mapping (SPEC §9, ADR-018/019):
 	// target merge-field name → canonical or namespaced ledger field. Its
 	// values are the step's dynamic needs. Valid only on deliver steps.

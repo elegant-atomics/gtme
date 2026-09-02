@@ -11,11 +11,17 @@ import (
 
 // Value is one resolved field value with its provenance.
 type Value struct {
+	// ID is the field_values row that won — what a review or edit of this
+	// value records as its referent (ADR-048).
+	ID         string
 	Raw        json.RawMessage
 	Source     string
 	Confidence float64
 	RunID      string
-	CreatedAt  time.Time
+	// Referent is the field_values.id this value was about, when the step
+	// that wrote it declared of: (SPEC §3); "" otherwise.
+	Referent  string
+	CreatedAt time.Time
 }
 
 // Decode unmarshals the stored JSON value into v.
@@ -98,16 +104,18 @@ func (l *Ledger) Project(ctx context.Context, identityID string, p Projection) (
 	}
 
 	q := strings.Builder{}
-	q.WriteString(`SELECT field, value, source, confidence, COALESCE(run_id, ''), created_at
-	               FROM field_value_ranks WHERE identity_id = ?`)
+	// The ranking view carries no referent (it is SPEC §3's view verbatim);
+	// the row's own referent is read back through its id.
+	q.WriteString(`SELECT r.id, r.field, r.value, r.source, r.confidence, COALESCE(r.run_id, ''), COALESCE(fv.referent, ''), r.created_at
+	               FROM field_value_ranks r JOIN field_values fv ON fv.id = r.id WHERE r.identity_id = ?`)
 	args := []any{identityID}
 	if len(p.Fields) > 0 {
-		q.WriteString(" AND field IN (" + placeholders(len(p.Fields)) + ")")
+		q.WriteString(" AND r.field IN (" + placeholders(len(p.Fields)) + ")")
 		for _, f := range p.Fields {
 			args = append(args, f)
 		}
 	}
-	q.WriteString(" ORDER BY field ASC, rank ASC")
+	q.WriteString(" ORDER BY r.field ASC, r.rank ASC")
 
 	rows, err := l.db.QueryContext(ctx, q.String(), args...)
 	if err != nil {
@@ -123,10 +131,10 @@ func (l *Ledger) Project(ctx context.Context, identityID string, p Projection) (
 	out := Record{Identity: ident, Values: map[string]Value{}}
 	for rows.Next() {
 		var (
-			field, raw, source, runID, createdAt string
-			confidence                           float64
+			id, field, raw, source, runID, referent, createdAt string
+			confidence                                         float64
 		)
-		if err := rows.Scan(&field, &raw, &source, &confidence, &runID, &createdAt); err != nil {
+		if err := rows.Scan(&id, &field, &raw, &source, &confidence, &runID, &referent, &createdAt); err != nil {
 			return Record{}, fmt.Errorf("ledger: projecting record: %w", err)
 		}
 		if _, done := out.Values[field]; done {
@@ -140,10 +148,12 @@ func (l *Ledger) Project(ctx context.Context, identityID string, p Projection) (
 			continue // stale: outside this field's freshness window; try the next rank
 		}
 		out.Values[field] = Value{
+			ID:         id,
 			Raw:        json.RawMessage(raw),
 			Source:     source,
 			Confidence: confidence,
 			RunID:      runID,
+			Referent:   referent,
 			CreatedAt:  created,
 		}
 	}

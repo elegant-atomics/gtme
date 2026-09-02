@@ -20,8 +20,16 @@ const (
 	RoleEnrich  = "enrich"
 	RoleVerify  = "verify"
 	RoleCompose = "compose"
+	RoleReview  = "review"
 	RoleDeliver = "deliver"
 )
+
+// ParticipantRole reports one of the three participant roles (SPEC §6,
+// ADR-048): filter gates, compose writes, review labels one value and never
+// gates. Any participant — model, person, agent — fills any of them.
+func ParticipantRole(role string) bool {
+	return role == RoleFilter || role == RoleCompose || role == RoleReview
+}
 
 // Manifest is an adapter's contract.
 type Manifest struct {
@@ -76,13 +84,25 @@ type Manifest struct {
 func (m *Manifest) Source() string { return fmt.Sprintf("%s@%d", m.ID, m.Version) }
 
 // AIPrefix names the operation-named AI steps (ADR-026): the adapters whose
-// judgment comes from a model rather than a provider.
-const AIPrefix = "ai/"
+// judgment comes from a model rather than a provider. HumanPrefix and
+// AgentPrefix name the other two participant kinds (ADR-049): a person at a
+// terminal (or answering later through `gtme answer`) and an agent driving
+// gtme — the same runner-owned adapters under a name that says who answers.
+const (
+	AIPrefix    = "ai/"
+	HumanPrefix = "human/"
+	AgentPrefix = "agent/"
+)
 
 // ProvidesConfigKey is the OPEN config key the runner injects an AI step's
 // derived provides schema under (SPEC §7, ADR-033) — the `variables` pattern,
 // second instance: never authored inside with:.
 const ProvidesConfigKey = "provides"
+
+// OfConfigKey is the OPEN config key the runner injects a participant step's
+// referent field under (SPEC §9, ADR-048) — the step-level of: key, never
+// authored inside with:.
+const OfConfigKey = "of"
 
 // FetchedConfigKey is the OPEN config key the runner injects the names of
 // externally fetched fields under (SPEC §10.3, ADR-035), computed from the
@@ -90,9 +110,45 @@ const ProvidesConfigKey = "provides"
 // inside with:.
 const FetchedConfigKey = "fetched"
 
-// IsAI reports an AI step (ADR-026): the adapters that derive their provides
-// from a step-level declaration (SPEC §7, ADR-033).
+// IsAI reports a model-backed AI step (ADR-026): the adapters that answer
+// through the API engine (or the fixture engine under test).
 func (m *Manifest) IsAI() bool { return strings.HasPrefix(m.ID, AIPrefix) }
+
+// IsParticipant reports a participant adapter (ADR-048/049): ai/*, human/*
+// or agent/* — the steps that declare their outputs (`provides:`, ADR-033),
+// narrow their needs with `uses:`, name a referent with `of:`, and whose
+// answers the judgment cache remembers (ADR-039). Every "AI step" predicate
+// that is about the role, not the engine, keys on this.
+func (m *Manifest) IsParticipant() bool { return ParticipantKind(m.ID) != "" }
+
+// RunnerOwned reports a human/* or agent/* adapter (ADR-049): no protocol
+// session is ever opened — the runner asks at a terminal or waits in the
+// ledger for `gtme answer`.
+func (m *Manifest) RunnerOwned() bool {
+	k := ParticipantKind(m.ID)
+	return k == KindHuman || k == KindAgent
+}
+
+// Participant kinds, by adapter id prefix.
+const (
+	KindAI    = "ai"
+	KindHuman = "human"
+	KindAgent = "agent"
+)
+
+// ParticipantKind classifies an adapter id: ai, human, agent, or "" for a
+// provider adapter.
+func ParticipantKind(id string) string {
+	switch {
+	case strings.HasPrefix(id, AIPrefix):
+		return KindAI
+	case strings.HasPrefix(id, HumanPrefix):
+		return KindHuman
+	case strings.HasPrefix(id, AgentPrefix):
+		return KindAgent
+	}
+	return ""
+}
 
 // EntityAny is the entity_type an entity-agnostic manifest declares
 // (SPEC §6, ADR-033): its steps take the pipeline's entity type.
@@ -142,7 +198,7 @@ func (m *Manifest) compile() error {
 		return fmt.Errorf("adapters: %s: version must be >= 1", m.ID)
 	}
 	switch m.Role {
-	case RoleSource, RoleFilter, RoleEnrich, RoleVerify, RoleCompose, RoleDeliver:
+	case RoleSource, RoleFilter, RoleEnrich, RoleVerify, RoleCompose, RoleReview, RoleDeliver:
 	default:
 		return fmt.Errorf("adapters: %s: unknown role %q", m.ID, m.Role)
 	}

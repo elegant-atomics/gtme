@@ -176,7 +176,7 @@ steps:
 	}
 	contains(t, res.stderr, `step "judge": deferred: true is valid only on the pipeline's last step — land this step's output in a group`, "stderr")
 
-	// --dry-run on a deferred pipeline warns; claude-code + deferred warns at plan.
+	// --dry-run on a deferred pipeline warns.
 	h.write("cc.yaml", `name: cc
 source:
   use: csv/source
@@ -187,16 +187,34 @@ steps:
     use: ai/filter
     with:
       prompt: Judge.
-      engine: claude-code
       deferred: true
 `)
 	plan := h.mustRun("plan", "cc.yaml")
-	contains(t, plan.stderr, "warning:   deferred: true has no effect on engine claude-code", "plan warning")
 	// AI steps no longer warn about respend: the judgment cache remembers
 	// by default (ADR-039).
 	if strings.Contains(plan.stderr, "respend:") {
 		t.Errorf("an AI step must not warn about respend:\n%s", plan.stderr)
 	}
+	// engine: retired with the shell-out (ADR-050): the plan names the
+	// replacement rather than quietly ignoring the key.
+	h.write("engine.yaml", `name: engine
+source:
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: judge
+    use: ai/filter
+    with:
+      prompt: Judge.
+      engine: claude-code
+`)
+	eng := h.run("plan", "engine.yaml")
+	if eng.code != 2 {
+		t.Fatalf("engine: exit = %d, want 2\nstderr:\n%s", eng.code, eng.stderr)
+	}
+	contains(t, eng.stderr, "engine: is not a key (ADR-050)", "engine refusal")
+	contains(t, eng.stderr, "make this an agent/* step", "engine refusal names agent/*")
 	env := h.fixtureScript("ai.json", "$auto")
 	dry := h.runWithEnv(env, "", "run", "cc.yaml", "--dry-run")
 	if dry.code != 0 {

@@ -30,6 +30,7 @@ CREATE TABLE field_values (
   source      TEXT NOT NULL,              -- adapter id, e.g. 'harvest/profile@1'
   confidence  REAL NOT NULL DEFAULT 1.0,  -- 0.0–1.0
   run_id      TEXT,                       -- provenance; nullable for imports
+  referent    TEXT,                       -- was-about: field_values.id of the value a review or edit concerned (ADR-048); null unless the step declared of:
   created_at  TEXT NOT NULL
 );
 CREATE INDEX ix_fv_lookup ON field_values(identity_id, field, created_at DESC);
@@ -66,7 +67,7 @@ CREATE TABLE step_events (
   run_id      TEXT NOT NULL,
   step_id     TEXT NOT NULL,
   identity_id TEXT,                       -- null for step-level events
-  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)
+  event       TEXT NOT NULL,              -- claimed|done|failed|skipped_cache|pending|collected (ADR-038)|answered (ADR-049: a participant's answer awaiting collection)
   detail      TEXT,                       -- JSON
   created_at  TEXT NOT NULL
 );

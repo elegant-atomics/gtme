@@ -187,12 +187,51 @@ always-current surface:
 |---|---|
 | **In** | `csv/source` · `webhook/source` · group-as-source · `apollo/search` *(binding)* |
 | **Enrich** | `harvest/profile` · `http/enrich` (any URL → markdown or JSON) · `sql/transform` |
-| **Judge** | `ai/filter` · `sql/filter` |
+| **Judge** | `ai/filter` · `sql/filter` · `ai/review` |
 | **Write** | `ai/compose` |
+| **Ask** | `human/filter` · `human/compose` · `human/review` · `agent/*` (the same three, answered by an agent) |
 | **Out** | `instantly/add-to-campaign` · `attio/assert` *(binding)* · `http/deliver` (any URL) · `csv/deliver` · `group/deliver` (the next stage) |
 
 Adding your own doesn't require touching this repo: drop a `binding.yaml`
 into `~/.gtme/adapters/<name>/` and the id resolves immediately.
+
+### Steps a person answers
+
+A `human/*` step puts judgment in the pipeline without pretending a model
+made it. At a terminal `gtme run` walks the records and asks; anywhere
+else — cron, CI, a pipe — every record waits in the ledger, and `gtme
+answer` records the verdict later. Either way the answer lands as a fact
+with the person's name in its provenance, and the run collects it exactly
+as it collects a deferred batch.
+
+```bash
+gtme run review.yaml                      # ends "pending — 12 awaiting human/review"
+gtme show --run last --pending            # read what is waiting
+gtme answer last jane@acme.com --set grade=B --note "too generic"
+gtme run review.yaml                      # collects the answers, continues
+```
+
+`agent/*` is the same three steps for an agent that answers with its own
+judgment rather than a person's; it never prompts, and `--as` puts its
+name in the ledger.
+
+Five things worth knowing before you put one in a pipeline:
+
+- **Under cron, a pipeline with a participant step waits.** A pending run
+  is resumed, not re-sourced, so nothing new is picked up until someone
+  answers. The pattern that avoids it is two pipelines: the reviewing one
+  a person runs, ending in a `group:`, and the scheduled one sourcing from
+  that group. `gtme plan` prints a note when a deliver step follows a
+  person.
+- **Ctrl-C mid-walk is safe.** The records you answered are settled, the
+  rest stay pending, and the run ends pending rather than failed.
+- **The latest answer before collection wins.** Answers are ledger state,
+  idempotent per record; answering again replaces the earlier one.
+- **An unchanged value is not asked twice.** A person's judgment is cached
+  like a model's: rewrite the draft and it comes back, leave it alone and
+  it does not. `cache: 0d` or `respend: true` ask again on purpose.
+- **A review labels; it never gates.** `when: <review>.passed` fails plan.
+  Use a filter when the answer should stop a record.
 
 ## A campaign is a folder
 

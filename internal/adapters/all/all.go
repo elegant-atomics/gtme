@@ -15,6 +15,7 @@ import (
 	_ "github.com/elegant-atomics/gtme/internal/adapters/csvsource"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/harvest"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/instantly"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/participants"
 )
 
 func init() {
