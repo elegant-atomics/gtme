@@ -2864,10 +2864,15 @@ its current value in the record's input hash (ADR-039) — a rewritten
 draft is re-reviewed, an unchanged one is not — and records its
 `field_values.id` on every fact the step writes: `field_values` gains
 `referent TEXT NULL` (*was-about*), shown by `gtme show --provenance`.
-One nullable column; no relation, no table. (4) **`ai/review` joins
-`ai/filter` and `ai/compose`** as the model's review role (same adapter
-code, a manifest and a prompt shape); `ai/filter` and `ai/compose` may
-carry `of:` and are otherwise unchanged. (5) **The arm gate is not a
+One nullable column; no relation, no table. (4) **`review` is a manifest role** (§6, beside filter and compose): the
+runner treats it as compose-shaped — records advance on RECORD, no
+VERDICT is expected — and the planner requires `of:` on it and refuses
+`when: <review>.passed`. **`ai/review` joins `ai/filter` and
+`ai/compose`** under that role (same adapter code, a manifest and a prompt
+shape); `ai/filter` and `ai/compose` may carry `of:` and are otherwise
+unchanged. (Validated against the code 2026-09-02: a filter-role step
+that returns no verdict fails the record, so review could not ride the
+filter role.) (5) **The arm gate is not a
 role** — dry-vs-armed stays a property of the run (ADR-019, ADR-031),
 never a step, so nothing this ADR admits can compose it away. (6)
 **Routing stays a pattern.** A `route:` key is declined on the record: a
@@ -2966,13 +2971,15 @@ that group. `gtme plan` prints one note when a deliver step follows a
 `human/*` step: "under cron this pipeline waits for a person." (8)
 **Provenance and the cache:** `field_values.source` takes ADR-026's form
 with the participant in the model's place — `human/review @ trevor#<sig>`,
-`agent/filter @ claude-code#<sig>` — and the ADR-039 judgment signature
-for these adapters is over the step declaration (`render:`, the declared
-outputs, `uses:`, `of:`) plus the participant name: a person's answer on
-the same value is remembered like a model's, and `cache: 0d` /
-`respend: true` ask again on purpose. An agent that changes how it judges
-changes the name it answers under; nothing it does internally is signed,
-because the runner cannot attest to it.
+`agent/filter @ claude-code#<sig>`. The ADR-039 judgment signature for
+these adapters is over the step declaration alone — the adapter id,
+`render:`, the declared outputs, `uses:`, `of:` — **never the participant
+name**: the cache is checked at dispatch, before anyone has answered
+(validated against the code 2026-09-02), so the name cannot be in the
+key. A person's answer on the same value is remembered like a model's,
+whoever answers next; `cache: 0d` / `respend: true` ask again on purpose.
+Nothing an agent does internally is signed, because the runner cannot
+attest to it.
 **Consequences:** The human review ROADMAP.md named becomes three small
 adapters and one verb, with no new grammar beyond `render:` and `prompt:`;
 the agent case is the same code under a name that says so. Guidance to
@@ -2982,10 +2989,16 @@ answered; Ctrl-C mid-walk leaves the rest pending; the latest answer
 before collection wins; an unchanged value is not re-asked; a review
 never gates by itself. Multi-pass agent workflows need nothing here —
 they answer under an `agent/*` step like any agent — and stay in
-ROADMAP.md only as the question of whether a signed workflow identity is
-ever worth more than a name.
+ROADMAP.md only as the question of whether a signed workflow identity
+should ever enter the cache key. Under `--simulate` a `human/*`/`agent/*`
+step is a simulation gap (§8): records pass through untouched, counted in
+the receipt — there is no prompt to script and no person to rehearse. A
+build note: every "AI step" predicate in the runner and planner (the
+cache, `provides:` gating, entity-agnosticism, the simulate exemption,
+the respend warning) keys on the `ai/` id prefix; it becomes "participant
+adapter" (`ai/`, `human/`, `agent/`), spec-invisible.
 **Spec impact:** AMEND (this packet's second commit) — §3
-(`step_events.event` gains `answered`), §7 (`render:` fields validated as
+(`step_events.event` gains `answered`), §6 (`review` role), §7 (`render:` fields validated as
 `uses:`; the cron note), §8 (`gtme answer`, `gtme show --run --pending`,
 the participants subsection, receipt and `gtme runs` wording), §9
 (`render:`, `prompt:`), §10 (the `human/*` and `agent/*` adapters), §10a

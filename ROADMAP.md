@@ -366,10 +366,11 @@ APIs; a terminal walk is an API with a little more latency).
 
 Still open, deliberately: **agent workflows.** A multi-pass agent (review
 then verify, several perspectives) answers under an `agent/*` step like
-any agent, and its judgment signature is the step declaration plus the
-name it answers under; whether a signed workflow identity is ever worth
-more than a name is the question, and it waits for a real multi-pass
-agent to have been used.
+any agent; its name is provenance, and the judgment signature is the step
+declaration alone (the cache is checked before anyone answers). Whether a
+declared workflow identity should ever enter the cache key — so a changed
+process re-judges without `respend:` — is the question, and it waits for
+a real multi-pass agent to have been used.
 
 ## Object ontology — beyond person and company
 

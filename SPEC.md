@@ -638,7 +638,7 @@ beside it. The canonical schema for this file is
 {
   "id": "harvest/profile",
   "version": 1,
-  "role": "enrich",              // source|filter|enrich|verify|compose|deliver
+  "role": "enrich",              // source|filter|enrich|verify|compose|review|deliver (review: ADR-048 — compose-shaped, of: required, never gates)
   "entity_type": "person",
   "needs": {
     "type": "object",
@@ -1154,8 +1154,9 @@ stage-by-stage model's: a pending run is resumed, not re-sourced, so a
 pipeline with a human step waits for its person and sources nothing new
 until answered. The documented pattern: the reviewing pipeline is one a
 person runs and ends in a `group:`; the cron pipeline sources from that
-group. `--simulate` answers a `human/*`/`agent/*` step from the fixture
-engine and says so.
+group. Under `--simulate` a `human/*`/`agent/*` step is a simulation gap
+(below): records pass through untouched and the receipt counts them —
+there is no prompt to script and no person to rehearse.
 
 ### deliver idempotency
 
@@ -1625,11 +1626,11 @@ contract, pure YAML.
    Message Batches API under `custom_id` = identity key and ends the
    session with PENDING (§5, §8); the fixture engine answers
    synchronously. `of:` (ADR-048) names a value the step is about.
-3a. **`ai/review`** (review, ADR-048) — same adapter code as item 3 with
-   the review role's contract: `of:` required, the prompt presents that
-   value as the subject and the `uses:` fields as context, the output is
-   the declared labels (a grade, a yes/no, notes); emits RECORDs only,
-   never a VERDICT — a review does not gate. Prompt assembly and
+3a. **`ai/review`** (role `review`, ADR-048) — same adapter code as item
+   3 under the review role: `of:` required, the prompt presents that value
+   as the subject and the `uses:` fields as context, the output is the
+   declared labels (a grade, a yes/no, notes); emits RECORDs only, never a
+   VERDICT — a review does not gate. Prompt assembly and
    entity-agnosticism as item 3.
 3b. **`human/filter`, `human/compose`, `human/review`** and their
    **`agent/*`** aliases (ADR-049) — runner-owned; no protocol session, no
@@ -1786,8 +1787,9 @@ outputs are distinguishable in provenance, and COST attributes spend per
 model. A `human/*` or `agent/*` step (ADR-049) takes the same form with
 the participant in the model's place — `human/review @ trevor#<sig>`,
 `agent/filter @ claude-code#<sig>` — the signature over the step
-declaration (`render:`, the declared outputs, `uses:`, `of:`) plus that
-name. The `done` step event for an AI judgment carries `signature` and
+declaration alone (adapter id, `render:`, the declared outputs, `uses:`,
+`of:`), never the name: the cache is checked at dispatch, before anyone
+has answered. The `done` step event for an AI judgment carries `signature` and
 `input` in its detail (§3) — the cache entry the runner reads back.
 
 ### `http/enrich` — generic fetch enricher (ADR-024; built in M11)
@@ -2155,8 +2157,9 @@ decided contract, not shipped behavior.
   lands `agent/claude-code` provenance and a measured cost row; a
   pseudo-TTY run walks the records in-run and Ctrl-C leaves the rest
   pending; `engine: claude-code` fails plan naming `agent/*`; a deliver
-  step after a `human/*` step plans with the cron note; `--simulate`
-  answers from the fixture engine.
+  step after a `human/*` step plans with the cron note; `when:
+  <review>.passed` fails plan; `--simulate` counts the step as a
+  simulation gap.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
   §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
   rebuilds `costs` with `basis` (backfill `estimated`); the COST message
@@ -2406,7 +2409,8 @@ pass that produced them.
 ### v0.34 — 2026-09-02 (ADR-048..050 packet: participants — PROPOSED, not yet accepted)
 **Changed (proposed):** §2 (API is the only model engine; `engine:`
 removed; `claude-code` retired); §3 `field_values.referent`,
-`step_events` `answered`; §6 the `credentials_optional` example; §7
+`step_events` `answered`; §6 the `review` role and the
+`credentials_optional` example; §7
 `of:`/`render:` validation, the cron note; §8 `gtme answer`, `gtme show
 --run --pending`, the "People and agents answer" subsection,
 `--provenance` shows the referent and note, the verb set; §9 `of:`,
