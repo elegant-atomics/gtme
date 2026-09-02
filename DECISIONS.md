@@ -2817,3 +2817,208 @@ into requests.
 **Spec impact:** AMEND (this packet's second commit) — §10a (the source
 role's reserved key); §11 (folded into milestone M23). `gtme help
 --bindings` and CONTRIBUTING ride the build.
+
+### ADR-048: Three roles, any participant — filter, compose, review; and the referent
+**Status:** Proposed (2026-09-02 — drafted by the M23 session from
+ROADMAP.md "Participants — humans and AI in the pipeline" and "Interactive
+review step", then reshaped in conversation with the human on 2026-09-01/02;
+merging this packet is the acceptance)
+**Context:** Judgment and writing in a pipeline are done today by one kind
+of participant — an API model behind `ai/filter` and `ai/compose` — and
+every other kind is either absent (a person reviewing records, an agent
+judging with its own model) or bolted on as a subprocess (the `claude-code`
+engine, §2). Before any of those grows its own step kind, the roles
+themselves need stating, because the first draft of this packet confused
+them: it framed "review" as a third kind of step and "engine" as who
+answers, and neither survived a plain reading. In the ledger's model a
+participant does exactly one thing — write facts about a record (ADR-003)
+— and what differs between roles is what the facts are *for*: whether
+they gate, whether they are the value or an opinion about a value. One
+mechanical gap exists for opinions: `field_values` cannot say which value
+a judgment was about, only which identity, so a second draft of a line
+cannot be told apart from the first in the review's provenance, and the
+judgment cache (ADR-039) cannot know a revised draft deserves a fresh look.
+**Decision:** (1) **Three roles, distinguished by what goes in, what comes
+out, and what it is for — and nothing else:**
+
+| Role | In | Out | Gates? | Purpose |
+|---|---|---|---|---|
+| **filter** | the record's fields (`uses:`) | `pass: true\|false` + `reason` (VERDICT), optional declared fields | yes — a fail freezes the record | decide which records continue |
+| **compose** | the record's fields | new field values (declared `provides:`, or the adapter's default) | no | write something new; with `of:` (below) it is an edit — a new value of the field named |
+| **review** | one value (`of:`, required) + context (`uses:`) | labels about that value — a grade, a yes/no, notes — as declared fields | no, never | judge a specific value, for tuning, reporting, or a later `sql/filter` |
+
+Whether "looks good / doesn't" or "A–F", a review differs only in its
+declared vocabulary; an edit is a compose, not a fourth role. A verdict
+on the wire stays a boolean and in `run_records.verdicts` stays
+`pass|fail`; `when: <step>.passed` reads the filter role only. (2) **Any
+participant fills any role under one contract:** the output is validated
+against the step's declared (or default) output schema, written as facts
+with provenance naming the participant, and consumed downstream by what
+already exists (`when:`, `sql/filter`, groups) — never control flow.
+Participants are adapters named for who answers (ADR-026's rule, applied
+honestly): `ai/*` (the API), `human/*` and `agent/*` (ADR-049). No
+`engine:` key (ADR-050). (3) **The referent.** `of: <field>` in a
+compose or review step's config names the value the step is about. The
+planner validates it as one more `uses:` entry (§7); the runtime includes
+its current value in the record's input hash (ADR-039) — a rewritten
+draft is re-reviewed, an unchanged one is not — and records its
+`field_values.id` on every fact the step writes: `field_values` gains
+`referent TEXT NULL` (*was-about*), shown by `gtme show --provenance`.
+One nullable column; no relation, no table. (4) **`ai/review` joins
+`ai/filter` and `ai/compose`** as the model's review role (same adapter
+code, a manifest and a prompt shape); `ai/filter` and `ai/compose` may
+carry `of:` and are otherwise unchanged. (5) **The arm gate is not a
+role** — dry-vs-armed stays a property of the run (ADR-019, ADR-031),
+never a step, so nothing this ADR admits can compose it away. (6)
+**Routing stays a pattern.** A `route:` key is declined on the record: a
+verdict fact, a per-branch `sql/filter` and `group/deliver` route N ways
+today, and "rejected → nurture" is a second pipeline reading the verdict;
+`gtme help --agent` gains the example.
+**Consequences:** The vocabulary is three words with a table behind each,
+and adding a participant kind is a naming and surface question, never a
+grammar one. Review gains the one thing it lacked (a referent) for one
+nullable column, and the cache becomes correct for reviews and edits
+without a new rule. The cost of "review never gates" is one extra step
+when a review should gate (a `sql/filter` on the grade) — deliberately,
+so a grade stays a fact and a gate stays a filter.
+**Spec impact:** AMEND (this packet's second commit) — §3
+(`field_values.referent`), §7 (`of:` validated as `uses:`), §8 (`gtme show
+--provenance` shows the referent; the routing example in `help --agent`),
+§9 (`of:` grammar), §10 items 3, 5 and a new `ai/review`; §11 milestone
+M24 with ADR-049/050. `spec/ledger.sql` and the manifest schema ride the
+build.
+
+### ADR-049: People and agents are adapters — `human/*`, `agent/*`, and `gtme answer`
+**Status:** Proposed (2026-09-02 — drafted with ADR-048; merging this
+packet is the acceptance)
+**Context:** A person reviewing records was named in ROADMAP.md as "an
+`ai/filter` with a human behind the contract" and an agent judging on its
+own as a "session" engine. Both put *who answers* in a config switch under
+a name that says someone else answers, which reads as a contradiction the
+moment it is written down. A person's step also has a genuinely different
+contract from a model's: its config is what to show and whether to wait,
+not a prompt and a batch size; its runtime is a terminal or nothing; its
+cost is nothing. The rule "no waiting stays in the runner" (ADR-038) was
+written for batch APIs and cron, and applying it absolutely to a person at
+a terminal turned the simplest case — sit down, review twelve drafts —
+into three commands. What was missing underneath was a write path: no verb
+lets a participant that is not an adapter put a validated judgment into
+the ledger.
+**Decision:** (1) **`human/filter`, `human/compose`, `human/review`** are
+runner-owned adapters (no subprocess, no protocol session) filling the
+three roles of ADR-048 for a person. Config: `render: {fields: [..],
+template: ".."}` — what the person is shown (default: the `uses:` fields,
+or the `of:` value alone) — and `prompt: tty | never` (default `tty`).
+(2) **At a terminal the run asks; otherwise it waits in the ledger.** With
+`prompt: tty` and a TTY, the step walks its records inside `gtme run`: for
+each, the rendered record, then the declared outputs as a menu (an enum)
+or a field to fill, validated on the spot; Ctrl-C leaves the rest pending.
+With no TTY, or `prompt: never`, every unanswered record ends `pending`
+under the runner-owned token `<run-id>/<step-id>`, the run finishes
+`pending` exactly as a deferred step does (ADR-038), and the receipt names
+the count, the participant, and the verb that answers. (3) **`agent/*`
+are aliases of `human/*`** — one implementation, three more manifests —
+for a step whose judgment an agent driving gtme supplies itself (its own
+model, its own reasoning, or a person relayed through a conversation):
+`prompt: never` always, provenance prefix `agent/`. They exist for
+legibility only: the pipeline file says whose work a step is, and `gtme
+runs` says who is awaited. (4) **`gtme answer` is the write path** — one
+verb, for every pending `human/*`/`agent/*` step in every role: `gtme
+answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set field=value
+...] [--as NAME] [--cost USD [--measured]] [--note TEXT]`. The run is a
+`RUN_ID`, `last`, or a pipeline name or path (the most recent pending run
+of that pipeline — the lookup collect-first already makes); `STEP` may be
+omitted when one step is pending. With a key and `--set`, it records that
+participant's answer as an `answered` step event (§3; detail: the fields,
+the participant, the note, the cost), validated against the step's
+declared or default outputs — a filter takes `pass=true|false` and
+`reason`, a compose the declared fields, a review the declared labels; a
+value outside an enum is refused naming the allowed values; a record not
+pending under that step is refused. With no key and a TTY it walks the
+pending records interactively — the same code the in-run walk uses. `--as`
+names the participant (`human/<name>`, default the OS user; an agent
+passes `--as <name>` under an `agent/*` step and the prefix follows the
+adapter); `--cost` records what the participant spent, `estimated` unless
+`--measured` (ADR-046); `--note` is free text kept in the event and shown
+by `gtme show --provenance`, never part of any cache key. Answers are
+ledger state, idempotent per (run, step, identity), the latest before
+collection wins. `gtme answer` writes only `answered` events, never sends,
+and never appears in `gtme freeze` output. (5) **`gtme show --run RUN_ID
+--pending [STEP]`** prints the pending records with their rendered surface
+as text and as JSON — what an agent reads before it answers. (6) **`gtme
+run` collects answers as it collects batches:** when a pending step is
+`human/*`/`agent/*`, collection reads the `answered` events instead of
+opening a session; each answered record completes the step (VERDICT for
+a filter, fields for the rest, provenance `human/<name>` or
+`agent/<name>`, the referent when `of:` was declared, COST under the run)
+and continues to the next stage with the others; unanswered records stay
+pending and the run stays `pending`. (7) **A human or agent step may sit
+anywhere.** ADR-038's last-step rule stays for deferred batches and is
+not applied here: an unanswered record never reaches a later step, and the
+person answering *is* the review. The consequence to know: a pipeline is
+run stage by stage (every record through step N before step N+1), so a
+human step is a slow stage, and under cron a pending run is resumed, not
+re-sourced (ADR-038 collect-first) — the pipeline waits for its person
+and sources nothing new until answered. That is the intended shape, and
+the documented pattern is the project's own: the reviewing pipeline is
+one a person runs and ends in a group; the cron pipeline sources from
+that group. `gtme plan` prints one note when a deliver step follows a
+`human/*` step: "under cron this pipeline waits for a person." (8)
+**Provenance and the cache:** `field_values.source` takes ADR-026's form
+with the participant in the model's place — `human/review @ trevor#<sig>`,
+`agent/filter @ claude-code#<sig>` — and the ADR-039 judgment signature
+for these adapters is over the step declaration (`render:`, the declared
+outputs, `uses:`, `of:`) plus the participant name: a person's answer on
+the same value is remembered like a model's, and `cache: 0d` /
+`respend: true` ask again on purpose. An agent that changes how it judges
+changes the name it answers under; nothing it does internally is signed,
+because the runner cannot attest to it.
+**Consequences:** The human review ROADMAP.md named becomes three small
+adapters and one verb, with no new grammar beyond `render:` and `prompt:`;
+the agent case is the same code under a name that says so. Guidance to
+carry into `help --agent` and the README, because each is a nuance
+someone will trip on: a cron pipeline with a human step stalls until
+answered; Ctrl-C mid-walk leaves the rest pending; the latest answer
+before collection wins; an unchanged value is not re-asked; a review
+never gates by itself. Multi-pass agent workflows need nothing here —
+they answer under an `agent/*` step like any agent — and stay in
+ROADMAP.md only as the question of whether a signed workflow identity is
+ever worth more than a name.
+**Spec impact:** AMEND (this packet's second commit) — §3
+(`step_events.event` gains `answered`), §7 (`render:` fields validated as
+`uses:`; the cron note), §8 (`gtme answer`, `gtme show --run --pending`,
+the participants subsection, receipt and `gtme runs` wording), §9
+(`render:`, `prompt:`), §10 (the `human/*` and `agent/*` adapters), §10a
+(provenance form), §11 milestone M24; `spec/schemas/pipeline.schema.json`
+and the manifests ride the build.
+
+### ADR-050: The `claude-code` shell-out and the `engine:` key retire
+**Status:** Proposed (2026-09-02 — drafted with ADR-048; merging this
+packet is the acceptance)
+**Context:** The `claude-code` engine (§2) runs one `claude -p` subprocess
+per batch so an operator with Claude Code authenticated need not hold an
+API key. It blocks the runner on a process it does not control, has no
+batch surface (ADR-038), truncates long prompt lines (ADR-035's finding),
+and inverts the relationship the project actually has with agents: Claude
+Code drives gtme — it runs pipelines, reads receipts, queries the ledger —
+it is not a service the CLI calls. With `agent/*` steps and `gtme answer`
+(ADR-049), an agent that wants its own judgment in the ledger records it
+as the driver, on its own trigger, with provenance that says so. That
+leaves `engine:` with one legal value (`api`; the fixture engine is
+test-only and chosen by environment, never in YAML).
+**Decision:** (1) The `claude-code` engine is deleted: §2 names the API as
+the only model engine; the `claude` binary is no longer looked for. (2)
+The `engine:` config key is removed from the AI manifests and the pipeline
+grammar; `engine:` anywhere is a plan error, and `engine: claude-code`
+names the replacement (`agent/*` + `gtme answer`). (3) The fixture engine
+is unchanged: `GTME_AI_ENGINE=fixture` and `--simulate` select it.
+**Consequences:** One fewer way to block the runner; the vocabulary loses
+"engine" entirely (adapters run steps, participants answer them). Any
+pipeline naming `claude-code` breaks at plan with the fix named; no
+shipped example uses it. The only built-in that emitted a *measured* cost
+(ADR-046: the CLI's reported `total_cost_usd`) goes with it — an agent
+reports its own spend through `gtme answer --cost --measured`, and
+everything else stays honestly `estimated`.
+**Spec impact:** AMEND (this packet's second commit) — §2, §6 (the
+`credentials_optional` example), §9, §10 item 3; `spec/schemas/`
+manifests ride the build.

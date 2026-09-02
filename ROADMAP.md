@@ -334,73 +334,42 @@ then a small change to how the runner chunks, not a new step.
 
 ## Participants — humans and AI in the pipeline
 
-A governing perspective (2026-09-01), named ahead of any single feature:
-filters, reviews, and content creation should accept any participant — a
-person at a terminal, a person reached through an agent conversation, an
-API model, an agent session or workflow — under one contract: **a
-participant's output is a ledger fact** (a verdict, a score, a field, a
-group membership), written with provenance, never control flow. Three
-roles cover the space:
+A governing perspective (2026-09-01), named ahead of any single feature
+and distilled into a session packet the next day, after a conversation
+that overturned its first draft: **a participant's output is a ledger
+fact** (a verdict, a value, a label), written with provenance, never
+control flow — whether the participant is a model, a person, or an agent
+driving gtme. The positions are now proposed ADRs (accepted when the
+packet merges):
 
-- **filter** — closed verdict plus reason (`ai/filter` is the built
-  instance);
-- **create** — new content fields (`ai/compose`; a human writing or
-  editing outgoing copy is the same role on a different engine);
-- **review** — filter and create *fused*: one step emitting a closed
-  verdict and, optionally, free text or revised content. Open-ended
-  review is creation anchored to a referent, which exposes the one
-  mechanical gap in the ledger today: provenance cannot record
-  *was-a-review-of* (a referent link), which pure creation never needed.
+- **ADR-048** — three roles by what goes in, what comes out, and what
+  for: *filter* (pass/fail, the only role that gates), *compose* (writes
+  values; with `of:` an edit), *review* (labels about one value, never
+  gates); any participant fills any role; the referent (`of:`,
+  `field_values.referent`); `ai/review`; the arm gate stays a run
+  property; `route:` declined on the record.
+- **ADR-049** — people and agents are adapters: `human/{filter,compose,
+  review}` with `render:` and `prompt: tty | never`, `agent/*` as aliases
+  that never prompt; `gtme answer` as the one write path; a human step
+  may sit anywhere, with the cron consequence stated as a pattern.
+- **ADR-050** — the `claude-code` shell-out and the `engine:` key retire;
+  an agent is the driver, never a service the CLI calls.
 
-The arm gate is deliberately absent from that list: dry-vs-armed is a
-property of the run, not a step in the graph, precisely so it cannot be
-composed away.
+What the first draft got wrong, kept here so it is not re-proposed: an
+`engine: human` switch under an `ai/*` name (who answers is the adapter's
+name, not a config key); "review" as a third kind of step (it is a role
+defined by its output — labels about a value — and it never gates); a
+`session/*` participant distinct from a person (an agent answering is
+`agent/*`, same code); and applying ADR-038's "nothing waits in the
+runner" to a person at a terminal (the rule exists for cron and batch
+APIs; a terminal walk is an API with a little more latency).
 
-Positions this entry holds, each wanting an ADR before it is real:
-
-- **One declaration, any engine.** A step's declared output schema
-  (ADR-033) *is* its verdict vocabulary: the same enum constrains an API
-  model's output, an agent session's judgment, and the choice menu a
-  human is shown. Surfaces render from the declaration.
-- **Pending/collect is the universal out-of-band surface.** ADR-038's
-  shape — the run ends `pending` with the work described in ledger
-  state, and a later plain run collects — generalizes past the batch
-  API: an agent session that picks up the ledger, judges the pending
-  records through the CLI, and leaves results for the next run to
-  collect is the same mechanism, and a human answering through an agent
-  conversation is too. One collection surface for every participant
-  that is not synchronous.
-- **Retire the shell-out.** The `claude-code` engine (§2) blocks the
-  runner on a subprocess, which the pending/collect shape above makes
-  unnecessary — a session picking up the ledger on its own trigger is
-  strictly better aligned with "no waiting stays in the runner."
-  Spec-visible; wants its own ADR.
-- **Agent workflows are a candidate engine, not a new concept** —
-  useful where judgment outgrows one prompt (review-then-verify passes,
-  competing perspectives). The open question with teeth: ADR-039 caches
-  a judgment on a signature over prompt, model, and inputs; what is the
-  signature of a workflow?
-- **Routing is a pattern, not a key.** A verdict fact, a per-branch
-  `sql/filter`, and `group/deliver` already route N ways (the M14
-  acceptance runs the two-way case). A `route:` key is the
-  mechanism-shaped version; the signal for revisiting is operators
-  repeatedly failing to compose the assembly, not the assembly merely
-  existing.
-
-The engine landscape this entry governs:
-
-| Engine | Roles | Status | Timing shape |
-|---|---|---|---|
-| Human, in-band (terminal) | filter, review, create | named below ("Interactive review step"), unspecified | sync, per-record, blocking — needs defined non-interactive behavior |
-| Human, out-of-band | arm (run mode, not a role) | built (dry-run → arm, ADR-019/031) | whole-run, nothing waits |
-| Human, agent-mediated | filter, review, create | named, unspecified | async via pending/collect |
-| API model step | filter, create, review | built (ADR-004/033; cache ADR-039; batch ADR-038) | sync, or deferred → collect |
-| Agent session on the ledger | filter, create, review | position above; replaces the shell-out | async via pending/collect, own trigger |
-| Agent workflow | filter, review, create; multi-pass | candidate engine, unnamed elsewhere | async, long-running |
-| Cron / unattended | none — the forcing function | built | every row above must state its behavior here |
-
-The "Interactive review step" entry below predates this one and is its
-human-engine case; its open questions stand.
+Still open, deliberately: **agent workflows.** A multi-pass agent (review
+then verify, several perspectives) answers under an `agent/*` step like
+any agent, and its judgment signature is the step declaration plus the
+name it answers under; whether a signed workflow identity is ever worth
+more than a name is the question, and it waits for a real multi-pass
+agent to have been used.
 
 ## Object ontology — beyond person and company
 
@@ -460,41 +429,14 @@ and probably takes the form of the adapter-builder skill named under
 
 ## Interactive review step
 
-Named 2026-08-31, not specified. A per-record human review: the pipeline
-stops a record at a review step, shows the operator a configured rendering of
-it, and takes a decision from a configured response set. Design position
-(leaning, not ADR'd): **the verdict is a fact, not a branch.** The reviewer's
-answer is a recorded judgment — provenance, judgment cache, asked once per
-scope — that downstream steps consume through the machinery that already
-exists (`sql/filter` on the verdict field, group membership). Per-response
-control flow inside the pipeline is declined: routing on responses is an
-expression language by another name, the same mechanism shape "Groups,
-option C" refused. "Rejected → nurture" is a second pipeline reading the
-verdict, and that idiom is a pattern to document, not syntax to add.
-
-The step is structurally `ai/filter` with a human behind the contract —
-`engine: human` rather than a new step kind. It inherits declared output
-schemas (ADR-033): the **response set is the declared output enum**, so the
-pipeline author configures the verdict vocabulary the same way an AI step
-declares its shape. The author also configures the per-record rendering —
-which fields the reviewer sees and how the message is presented — in the
-step's config, so the review surface is authored in the pipeline file like
-everything else.
-
-Collection reuses ADR-038's pending machinery: a run with unanswered reviews
-ends `pending`, the receipt says what is awaited, and a later plain `gtme
-run` collects. No TTY block as the primitive, no daemon, no new verb —
-"waiting of any kind stays out" holds because the pending state is ledger
-state, not a live process.
-
-Open question: the collection *surface*. At least two are real — a terminal
-prompt (gtme itself asks, record by record, when a human runs it) and an
-agent-mediated review (the run is pending; a Claude Code session presents
-each record to the human in conversation and records verdicts through the
-CLI). Whether those are two engines behind one contract (the AI steps'
-`api` / `claude-code` precedent) or two adapters is undecided; the contract —
-configured rendering in, enum verdict out, judgment recorded — should not
-differ between them.
+Named 2026-08-31; folded into the participants packet 2026-09-02 as the
+`human/*` adapters (ADR-049). Its open question — terminal prompt versus
+agent-mediated review — is answered there: both are `human/*` steps, the
+terminal walk happens inside `gtme run` (or `gtme answer` interactively),
+and an agent relaying a person's decisions answers with `gtme answer
+--as`. What stays deferred: an in-place *editor* for outgoing copy (a
+compose with `of:` accepts a revised value; a richer editing surface is a
+UI, §13) and any consequence routing (declined, ADR-048).
 
 ## Registry-maintained cost declarations
 
