@@ -3,6 +3,7 @@ package planner
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/elegant-atomics/gtme/internal/adapters"
@@ -157,7 +158,7 @@ func fitFields(v []string, avail int) string {
 // in/out say whether the spine enters from above and leaves below, so the
 // frame can be joined to it rather than floating over it.
 func vizBox(s *Step, n int, in, out bool) []string {
-	head := fmt.Sprintf("%s%s %d  %-10s %s", executorGlyph(s), roleGlyph(s), n, vizRole(s), s.Use)
+	head := fmt.Sprintf("%s%s %-3d %-10s %s", executorGlyph(s), roleGlyph(s), n, vizRole(s), s.Use)
 	if s.Manifest != nil {
 		head += fmt.Sprintf("@%d", s.Manifest.Version)
 	}
@@ -179,7 +180,8 @@ func vizHeadRight(s *Step) string {
 		return "unset"
 	case s.CostEstimate != nil:
 		return fmt.Sprintf("$%.4f/rec", *s.CostEstimate)
-	case s.IsSQL:
+	case s.IsSQL, s.IsGroupSource, s.IsGroupDeliver:
+		// Runner-owned and ledger-local: no vendor to bill it.
 		return "$0.0000"
 	}
 	return "$ ?"
@@ -189,6 +191,10 @@ func vizHeadRight(s *Step) string {
 // bounds the step's work.
 func vizGate(s *Step) (left, right string) {
 	switch {
+	case s.IsGroupSource:
+		left = "members of " + s.SourceGroup
+	case s.IsGroupDeliver:
+		left = "→ group " + strconv.Quote(s.TargetGroup)
 	case s.When != "":
 		left = "when " + s.When
 	case s.IsDeliver && s.Idempotency != "":
@@ -203,6 +209,10 @@ func vizGate(s *Step) (left, right string) {
 		left = "offline · reads the ledger"
 	}
 	switch {
+	case s.IsGroupSource && s.Limit > 0:
+		right = fmt.Sprintf("limit %d, oldest first", s.Limit)
+	case s.IsGroupDeliver:
+		right = "handoff · no network"
 	case s.IsDeliver && s.RecordGroup != "":
 		right = "touch → " + s.RecordGroup
 	case s.Cache > 0:
@@ -211,8 +221,11 @@ func vizGate(s *Step) (left, right string) {
 		right = "⏳ ends in flight"
 	case s.Batch:
 		right = fmt.Sprintf("batch %d", s.BatchSize)
-	case s.RunnerOwned():
+	case s.Participant == adapters.KindHuman:
 		right = "waits for a person"
+	case s.Participant == adapters.KindAgent:
+		// ADR-049: an agent/* step never prompts — it waits in the ledger.
+		right = "waits for an agent"
 	}
 	return left, right
 }

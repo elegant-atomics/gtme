@@ -318,3 +318,80 @@ func TestVizDeltaPrefersCanonicalFields(t *testing.T) {
 	}
 	t.Fatal("no delta label rendered")
 }
+
+// A two-digit step index must not shift the columns beside it.
+func TestVizIndexPaddingHoldsTheColumns(t *testing.T) {
+	p := vizPlan()
+	for i := 0; i < 4; i++ { // grow past nine steps
+		p.Steps = append(p.Steps, p.Steps[2])
+	}
+	out := viz(t, p)
+	var col int
+	for _, l := range strings.Split(out, "\n") {
+		i := strings.Index(l, " source ")
+		if i < 0 {
+			i = strings.Index(l, " enrich ")
+		}
+		if i < 0 {
+			continue
+		}
+		if col == 0 {
+			col = i
+		} else if i != col {
+			t.Errorf("role column moved from %d to %d:\n%s", col, i, l)
+		}
+	}
+}
+
+// ADR-049: an agent/* step never prompts, so it does not wait for a person.
+func TestVizAgentDoesNotWaitForAPerson(t *testing.T) {
+	p := vizPlan()
+	p.Steps[6].Use = "agent/review"
+	p.Steps[6].Participant = adapters.KindAgent
+	out := viz(t, p)
+	if strings.Contains(out, "waits for a person") {
+		t.Errorf("agent step claims to wait for a person:\n%s", out)
+	}
+	if !strings.Contains(out, "waits for an agent") {
+		t.Errorf("agent step does not say what it waits for:\n%s", out)
+	}
+}
+
+// A group handoff crosses no network and spends nothing, and its target is
+// the point of it (ADR-032).
+func TestVizGroupDeliverShowsTargetAndCostsNothing(t *testing.T) {
+	p := vizPlan()
+	p.Steps[7] = Step{ID: "handoff", Use: "group/deliver", Role: adapters.RoleDeliver,
+		IsDeliver: true, IsGroupDeliver: true, TargetGroup: "approved",
+		EntityType: "person", RecordGroup: "every-role", Idempotency: "email"}
+	out := viz(t, p)
+	var row string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "group/deliver") {
+			row = l
+		}
+	}
+	if row == "" {
+		t.Fatal("handoff not rendered")
+	}
+	if strings.Contains(row, "$ ?") {
+		t.Errorf("handoff priced as unknown; it spends nothing:\n%s", row)
+	}
+	if !strings.Contains(out, "approved") {
+		t.Errorf("handoff hides its target group:\n%s", out)
+	}
+}
+
+// A group source draws from the ledger: which group, and how many.
+func TestVizGroupSourceShowsGroupAndLimit(t *testing.T) {
+	p := vizPlan()
+	p.Steps[0] = Step{ID: "members", Use: "group/source", Role: adapters.RoleSource,
+		IsSource: true, IsGroupSource: true, SourceGroup: "warm-leads", Limit: 200,
+		EntityType: "person"}
+	out := viz(t, p)
+	for _, want := range []string{"warm-leads", "200"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("group source omits %q:\n%s", want, out)
+		}
+	}
+}
