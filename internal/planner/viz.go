@@ -19,11 +19,22 @@ import (
 // The frame is fixed: no colour, no TTY detection, no terminal-width
 // autodetection, so the bytes are deterministic and golden-testable.
 const (
+	vizGutter  = 3  // the step-index column, left of the frame
 	vizWidth   = 64 // box width, borders included
-	vizIndent  = 2
+	vizIndent  = vizGutter + 2
 	vizSpine   = vizIndent + vizWidth/2 // the connector column
 	vizMaxLine = 78                     // widest line, inside an 80-column terminal
 )
+
+// gutter is the fixed index column. The index is a reference handle, like a
+// line number, so it holds one column whatever the frame beside it is doing —
+// including a tapered one, whose own rows step inward per row.
+func gutter(n int) string {
+	if n == 0 {
+		return strings.Repeat(" ", vizGutter)
+	}
+	return fmt.Sprintf("%2d ", n)
+}
 
 // Viz writes the diagram for p.
 func Viz(w io.Writer, p *Plan) {
@@ -179,12 +190,12 @@ func fitFields(v []string, avail int) string {
 // in/out say whether the spine enters from above and leaves below, so the
 // frame can be joined to it rather than floating over it.
 func vizBox(s *Step, n int, in, out bool) []string {
-	head := fmt.Sprintf("%s%s %-3d %-8s %s", executorGlyph(s), roleGlyph(s), n, strings.ToUpper(vizRole(s)), s.Use)
+	head := fmt.Sprintf("%s%s %-8s %s", executorGlyph(s), roleGlyph(s), strings.ToUpper(vizRole(s)), s.Use)
 	if s.Manifest != nil {
 		head += fmt.Sprintf("@%d", s.Manifest.Version)
 	}
 	rows := append([][2]string{{head, vizHeadRight(s)}}, vizGates(s)...)
-	return vizFrame(s, rows, in, out)
+	return vizFrame(s, rows, in, out, n)
 }
 
 // vizHeadRight is the top row's right column: the entity a source mints, and
@@ -199,7 +210,7 @@ func vizHeadRight(s *Step) string {
 		// Runner-owned and ledger-local: no vendor to bill it.
 		return "$0.0000/rec"
 	}
-	return "$ ?"
+	return "$?/rec"
 }
 
 // vizGates are the rows under the head: what admits a record to this step,
@@ -343,7 +354,7 @@ func roleGlyph(s *Step) string {
 // each side, so their diagonals stack into a continuous line; a single-step
 // diagonal kinks against the rule it meets. Every row stays centred on the
 // same axis, so the two sides taper in step.
-func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
+func vizFrame(s *Step, rows [][2]string, in, out bool, n int) []string {
 	rail, fill := "│", "─"
 	tl, tr, bl, br := "┌", "┐", "└", "┘"
 	up, down := "┴", "┬"
@@ -389,7 +400,8 @@ func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 	width := vizWidth - 2*(indent-vizIndent)
 
 	line := func(left, right, f, joint string, joined bool) string {
-		return strings.Repeat(" ", indent) + left + spineRule(f, joint, joined, indent, width) + right
+		return gutter(0) + strings.Repeat(" ", indent-vizGutter) + left +
+			spineRule(f, joint, joined, indent, width) + right
 	}
 	advance := func() {
 		indent += taper
@@ -397,7 +409,7 @@ func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 	}
 
 	out2 := []string{line(tl, tr, fill, up, in)}
-	for _, r := range rows {
+	for i, r := range rows {
 		advance()
 		lRail, rRail := rail, rail
 		if taper > 0 {
@@ -405,7 +417,13 @@ func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 		} else if taper < 0 {
 			lRail, rRail = "╱", "╲"
 		}
-		out2 = append(out2, strings.Repeat(" ", indent)+lRail+vizRow(r[0], r[1], width-2)+rRail)
+		// Only the head row is indexed; the gate rows below it continue it.
+		idx := 0
+		if i == 0 {
+			idx = n
+		}
+		out2 = append(out2, gutter(idx)+strings.Repeat(" ", indent-vizGutter)+
+			lRail+vizRow(r[0], r[1], width-2)+rRail)
 	}
 	advance()
 	return append(out2, line(bl, br, botFill, down, out))

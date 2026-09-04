@@ -1,6 +1,7 @@
 package planner
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -69,17 +70,82 @@ func isBoxRow(line string) bool {
 	if len(r) < 2 {
 		return false
 	}
-	const rails = "│┃║╲╱"
+	const rails = "│┃║╲╱┊"
 	return strings.ContainsRune(rails, r[0]) && strings.ContainsRune(rails, r[len(r)-1])
 }
 
-func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
+// frame drops the fixed index gutter, so geometry is measured on the box.
+func frame(line string) string {
+	r := []rune(line)
+	if len(r) < vizGutter {
+		return ""
+	}
+	return string(r[vizGutter:])
+}
+
+func indentOf(line string) int {
+	f := frame(line)
+	return len(f) - len(strings.TrimLeft(f, " "))
+}
+
+// The index is a reference handle, like a line number: it sits in one column
+// whatever the frame beside it is doing, including a tapered one.
+func TestVizIndexSitsInAFixedGutter(t *testing.T) {
+	seen := 0
+	for _, l := range strings.Split(viz(t, vizPlan()), "\n") {
+		g := []rune(l)
+		if len(g) < vizGutter {
+			continue
+		}
+		if !isBoxRow(frame(l)) {
+			continue
+		}
+		gut := strings.TrimSpace(string(g[:vizGutter]))
+		if gut == "" {
+			continue
+		}
+		seen++
+		if _, err := strconv.Atoi(gut); err != nil {
+			t.Errorf("gutter holds %q, want a step index", gut)
+		}
+	}
+	if seen != 8 {
+		t.Errorf("indexed rows = %d, want one per step (8)", seen)
+	}
+}
+
+// The index left the frame, so the head row opens on the glyph pair.
+func TestVizHeadRowOpensOnTheGlyphPair(t *testing.T) {
+	for _, l := range strings.Split(viz(t, vizPlan()), "\n") {
+		if !strings.Contains(l, "apollo/search") {
+			continue
+		}
+		body := strings.TrimLeft(frame(l), " ")
+		if !strings.HasPrefix(body, "\u2502 \U0001F310\U0001F4E5 SOURCE") {
+			t.Errorf("head row should open on the glyph pair, got %q", body)
+		}
+		return
+	}
+	t.Fatal("no source row rendered")
+}
+
+// An unknown price keeps the column's shape: every other entry is $N/rec.
+func TestVizUnknownCostKeepsTheColumnShape(t *testing.T) {
+	out := viz(t, vizPlan())
+	if strings.Contains(out, "$ ?") {
+		t.Errorf("unknown cost renders as a broken format string:\n%s", out)
+	}
+	if !strings.Contains(out, "$?/rec") {
+		t.Errorf("unknown cost should read $?/rec:\n%s", out)
+	}
+}
 
 // A tapered box's rows are deliberately not all the same width — that is what
 // draws the funnel. What must hold is that every row stays centred on the same
 // axis, so the two sides taper in step and neither rail wanders.
 func TestVizBoxRowsShareOneAxis(t *testing.T) {
-	const axis = 2*vizIndent + vizWidth
+	// Indent is measured past the gutter, so the axis is too.
+	const axis = 2*(vizIndent-vizGutter) + vizWidth
 	rows := 0
 	for _, line := range strings.Split(viz(t, vizPlan()), "\n") {
 		if !isBoxRow(line) {
@@ -108,7 +174,7 @@ func TestVizReviewDoesNotTaper(t *testing.T) {
 		if !strings.Contains(l, "┊") {
 			t.Errorf("review should carry the paused rail:\n%s", l)
 		}
-		if indentOf(l) != vizIndent || indentOf(lines[i-1]) != vizIndent {
+		if indentOf(l) != vizIndent-vizGutter || indentOf(lines[i-1]) != vizIndent-vizGutter {
 			t.Errorf("review tapers; it is 1:1 and must not:\n%s\n%s", lines[i-1], l)
 		}
 		return
@@ -122,7 +188,7 @@ func TestVizFunnelTapersOneColumnPerRow(t *testing.T) {
 	lines := strings.Split(viz(t, vizPlan()), "\n")
 	var run []int
 	for _, l := range lines {
-		trimmed := strings.TrimLeft(l, " ")
+		trimmed := strings.TrimLeft(frame(l), " ")
 		if trimmed == "" {
 			continue
 		}
@@ -222,7 +288,7 @@ func TestVizTruncatesRatherThanOverflowing(t *testing.T) {
 		t.Errorf("long adapter name not truncated:\n%s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if isBoxRow(line) && 2*indentOf(line)+displayWidth(strings.TrimLeft(line, " ")) != 2*vizIndent+vizWidth {
+		if isBoxRow(frame(line)) && 2*indentOf(line)+displayWidth(strings.TrimLeft(frame(line), " ")) != 2*(vizIndent-vizGutter)+vizWidth {
 			t.Errorf("truncation broke the frame:\n%s", line)
 		}
 	}
