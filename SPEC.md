@@ -1552,6 +1552,35 @@ group: q3-qualified         # terminus: records completing the run are added
 - A group source MAY carry `limit: N` (ADR-032, §8): at most N members,
   oldest-added first. `use: group/deliver` with `with: {group: <name>}`
   is a deliver step targeting a group (§8).
+- A group source MAY carry `once: true` (ADR-052, §8): select only members
+  this pipeline has not already finished, so a bounded consumer advances
+  instead of replaying its first batch. Opt-in; a source without it is
+  unchanged.
+
+**Bounded group consumers — `once:` (ADR-052).** A group source with
+`once: true` selects, among the group's current members, only those this
+pipeline has not **finished** — oldest-added first, at most `limit` when
+one is set. A record is finished when it completed the pipeline's final
+step, or when a filter's fail verdict stopped it; both are outcomes the
+pipeline reached deliberately. A record that **failed** a step is NOT
+finished and MUST be selected again, so a transient provider error is
+retried rather than silently dropping the record; a record left `pending`
+is NOT finished either, and collect-first (above) resumes its run rather
+than re-sourcing it. The scope is the pipeline's name. `once:` changes
+what a source selects and never what a group contains: no membership is
+added, removed or touched by it, so the group remains the reviewed
+decision ADR-021 made it and an operator MAY re-run the whole set by
+removing the key. `gtme plan` MUST print the eligible count beside the
+selection, since how much work remains is the fact a scheduled run turns
+on and it is knowable before anything is spent:
+
+```
+source   group "candidates" — 481 member(s), 471 not yet worked, sourcing 10 (oldest first)
+```
+
+A dry or simulated run finishes nothing, because neither writes durable
+run state (below); a rehearsal therefore repeats rather than advancing the
+queue.
 
 **Config values from the ledger (ADR-037).** Any value under `with:` MAY
 be `{query: <SQL>}` or `{segment: <name>}`; the planner resolves it
@@ -2179,6 +2208,24 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
+- **M26 — bounded group consumers (ADR-052; §8, §9). Queued.** A group
+  source gains `once: true`: selection skips members this pipeline has
+  finished — completed the final step, or stopped by a filter verdict —
+  oldest-added first within `limit`, with failed and pending records
+  deliberately still eligible. Scope is the pipeline name; nothing new is
+  persisted and there is no migration. `gtme plan` prints the eligible
+  count beside the selection; a dry or simulated run advances nothing.
+  `spec/schemas/pipeline.schema.json` rides the build.
+  Acceptance, offline: a three-member group with `limit: 2` and
+  `once: true` sources members 1–2, then 3 on the next run, then nothing;
+  the same pipeline without `once:` still replays 1–2 forever (the
+  reported behavior, unchanged when the key is absent); a record a filter
+  froze counts as finished and is not re-offered, while a record whose
+  step failed IS re-offered on the next run; a group whose members were
+  all finished sources zero records and the run ends without a step; the
+  group's membership is byte-identical before and after (no added,
+  removed or touched events from `once:`); `gtme plan` names the eligible
+  count; a `--dry-run` followed by an armed run sources the same members.
 - **M25 — plan visualization (ADR-051; §7, §8, §13). Built 2026-09-04
   (changelog v0.37).**
   `gtme plan --viz` appends a diagram of the resolved plan to the default
@@ -2447,6 +2494,19 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.38 (proposed) — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
+**Changed:** §8 gains the `once:` selection rule (finished = completed or
+filter-stopped; failed and pending stay eligible), the plan line carrying
+the eligible count, and the dry-run rule; §9 gains `once:` in the group
+source grammar; §11 gains M26. `spec/schemas/pipeline.schema.json` rides
+the build.
+**Not changed:** §3 — by ADR-052 (4) the scope is the pipeline name and
+nothing new is persisted, so this milestone carries no migration. A group
+source without `once:` behaves exactly as before, so no shipped pipeline
+changes meaning.
+**Status:** proposed, not accepted — no code is written against this
+until a human merges the packet.
 
 ### v0.37 — 2026-09-04 (M25 build: plan visualization, built)
 **Changed:** §11 M25 marked built. No normative text changed beyond that
