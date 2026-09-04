@@ -3088,3 +3088,112 @@ everything else stays honestly `estimated`.
 **Spec impact:** AMEND (this packet's second commit) — §2, §6 (the
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
+
+### ADR-051: `gtme plan --viz` — the resolved plan as a picture
+**Status:** Accepted (2026-09-03 — drafted in a design session;
+human-approved 2026-09-04 by merging the packet)
+**Context:** `gtme plan` prints the resolved plan as a linear listing: one
+block per step, every §7.4 fact spelled out. It is complete and it is the
+right default. But the two questions an operator actually asks before
+arming a campaign — *where does this spend money and send mail*, and *how
+does step N come to have the field it needs* — are answered by facts
+scattered across the whole listing. ADR-031 already conceded half of this
+by pulling the send surface into a summary block, on the reasoning that
+with delivers as ordinary steps, plan output is where the send points must
+be obvious at a glance. The field-availability walk (§7 step 2) has no
+such summary; it is reconstructed by reading every `provides:` line in
+order.
+
+A picture answers both at once, and gtme's pipelines are unusually easy to
+draw: §13 bars DAG/branching beyond `when:`, and §7 executes steps strictly
+in order, so the shape is a single spine. That is a smaller and more
+tractable thing than "render an arbitrary workflow graph" — the reason this
+is worth building now and would not be if pipelines branched.
+
+**Decision:**
+
+1. **Two flags, no new verb.** `gtme plan p.yaml --viz` appends the diagram
+   after the existing listing; `--viz-only` prints the diagram in place of
+   it. §8's verb set stays closed (ADR-005); this is a rendering option on
+   an existing verb, not a new command. Both go to stderr with everything
+   else plan prints, and neither performs network calls, spends, or changes
+   what plan accepts or exits with.
+
+2. **The default output is unchanged and stays normative.** The §7.4
+   MUST-print items live in the listing. The diagram is a second view of
+   the same `Plan` and MUST NOT be the only place a §7 fact appears — a
+   fact that exists only in the picture is a spec bug. A second
+   implementation MUST print the listing and MAY render the diagram
+   however it likes, or not at all.
+
+3. **Shape carries role.** The seven roles get seven silhouettes, so the
+   vocabulary survives without color:
+
+   | Role | Shape |
+   |---|---|
+   | `source` | rounded box — terminator, records enter |
+   | `filter` | funnel: full-width top, vertical sides, outlet inset one column |
+   | `enrich` | light rectangle |
+   | `verify` | rectangle with doubled rails — a process that adds no fields |
+   | `compose` | rectangle with a wavy floor — document |
+   | `review` | trapezoid, narrow lid — manual operation |
+   | `deliver` | heavy border + uppercase label — it spends and leaves the machine |
+
+   Angled edges inset by exactly one column so corners meet the vertical
+   rails; the outline angles once, never per row, so a step carrying four
+   gate lines does not taper to nothing.
+
+4. **A two-slot emoji column: executor, then role.** The executor slot is
+   the orthogonal dimension the role alone cannot say — a `sql/transform`
+   and an `apollo/enrich` are both role `enrich`, but one is free and
+   offline and the other spends per record.
+
+   Executor: 🌐 vendor · 💻 ai · 💾 sql · 🧑 human · 🤖 agent
+   Role: 📥 source · 🤏 filter · 💎 enrich · 👌 verify · ✍️ compose · 👀 review · 🚀 deliver
+   Structural: 👥 group source · 📂 group deliver · ⏳ deferred (ADR-038)
+
+   Review is 👀 rather than a person glyph because the executor slot
+   already distinguishes 🧑 from 🤖.
+
+5. **Edges carry the available-set delta.** Each arrow is labelled with the
+   fields that step added — §7 step 2's walk made visible. Long lists
+   truncate to `+N`.
+
+6. **Deterministic bytes.** Fixed 60-column frame, no color, no TTY
+   detection, no terminal-width autodetection, no animation. The output is
+   golden-testable and pipes into a file or a PR comment unchanged.
+
+7. **Width is measured, not counted.** Emoji are two columns wide and
+   `len()` says one; padding MUST use display width or every box edge on an
+   emoji row shifts. The table is hand-rolled (~20 lines) rather than taken
+   as a dependency, so §2's list is untouched. ✍️ MUST be emitted as
+   `U+270D U+FE0F`: bare `U+270D` defaults to text presentation and renders
+   one column wide, which is the exact raggedness this rule prevents.
+
+**Consequences:** The picture is the fastest way to see the send surface
+and the money column, and the only way to see the field walk without
+reading every step. Cost: a second renderer over `Plan` to keep in step
+with the first — bounded by (2), since the diagram is never the sole home
+of a fact, so a fact added to §7 obliges the listing and not the diagram.
+The 60-column frame truncates long adapter names and field lists in a way
+the listing does not; truncation is always visible (`…`, `+N`). ✍️ is the
+one variation-selector glyph in the set, so a terminal that draws it one
+column wide ragged its row's right rail and nothing else. Skin-tone
+modifiers and ZWJ sequences are excluded from the vocabulary outright:
+both are multi-codepoint and would blow the frame on any font missing the
+composed glyph.
+
+**Rejected:** *Replacing the listing* (§7.4's MUST-print items would have
+to fit a width budget; information loss where the spec requires
+completeness). *A new verb* — §8's set is closed by ADR-005 and this is a
+rendering of an existing one. *Color* — breaks deterministic bytes and
+dies on redirect. *Terminal-width autodetection* — makes output
+environment-dependent and golden tests unwritable. *An executor emoji for
+every adapter namespace* — the box already prints `apollo/enrich@1` next
+to `$0.0100/rec`; one generic 🌐 for all vendor-namespaced adapters says
+what the picture needs and no more.
+
+**Spec impact:** AMEND (this packet's second commit) — §7 (a paragraph
+after step 4), §8 (verb table line + the closing paragraph), §11 (M25),
+§13 (a parenthetical on the "dashboards or any UI" non-goal), Changelog
+(v0.36). No schema, no ledger, no wire, no exit-code change.
