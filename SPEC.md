@@ -755,6 +755,20 @@ beside it. The canonical schema for this file is
    set no rate) prints `est/record: unset`, never `$0.0000` (ADR-046) —
    the gap is visible before anything is spent.
 
+**Plan rendering — `--viz` (ADR-051):** `gtme plan --viz` appends a diagram
+of the resolved plan to the output above; `--viz-only` prints the diagram in
+place of it. Both are renderings of the same resolved plan: same validation,
+same stderr stream, no network calls and no spend, and neither changes what
+`gtme plan` accepts nor what it exits with. The default output — no flag —
+is unchanged and remains the normative surface: everything item 4 above
+requires MUST appear there, and a fact that appears only in the diagram is a
+defect. A second implementation MUST print the default output and MAY render
+the diagram in any form, or not at all. The diagram's vocabulary (one
+silhouette per role, an executor-and-role glyph pair, and edges labelled
+with the fields each step adds to the available set) is recorded in ADR-051,
+not here, precisely because it is not something a second implementation must
+match to interoperate.
+
 **AI-step needs (ADR-004):** an AI-role step's config MAY declare
 `uses: [field, ...]` (see §9). When present, the planner MUST treat `uses`
 exactly as it treats `needs.required` for step 2 above: every field named in
@@ -930,7 +944,7 @@ At execution time, per step, per record:
 ```
 gtme init                          # create ledger + ~/.gtme
 gtme secret set KEY [VALUE]        # VALUE omitted → prompt, no echo
-gtme plan pipeline.yaml            # validate + print plan, no execution
+gtme plan pipeline.yaml [--viz|--viz-only]   # validate + print plan, no execution; --viz appends the diagram, --viz-only prints it alone
 gtme run  pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]
 gtme query "SQL"                   # read-only SQL against the ledger
 gtme query --save NAME "SQL"       # saved segment
@@ -953,7 +967,8 @@ gtme adapters update ID [@ref]     # re-fetch at a newer ref, explicitly
 
 This is the entire v0 verb set (ADR-005, extended by ADR-021's `gtme
 groups` in M9, ADR-030's `gtme vacuum` in M11, ADR-042's `gtme adapters`
-in M19, and ADR-049's `gtme answer`).
+in M19, and ADR-049's `gtme answer`). ADR-051 adds no verb: `--viz` and
+`--viz-only` are rendering options on `gtme plan`.
 
 ### Payload eviction — `gtme vacuum` (ADR-030; built in M11)
 
@@ -2164,6 +2179,23 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
+- **M25 — plan visualization (ADR-051; §7, §8, §13). Queued.**
+  `gtme plan --viz` appends a diagram of the resolved plan to the default
+  output; `--viz-only` prints it instead. One renderer over the existing
+  resolved plan — no planner change, no network, no spend, stderr like the
+  rest of plan's human-facing output. Shape carries role (rounded source,
+  funnel filter, light-rect enrich, doubled-rail verify, wavy-floor
+  compose, trapezoid review, heavy deliver); a two-slot glyph pair carries
+  executor then role, so a free offline `sql/transform` and a paid
+  `apollo/enrich` are distinguishable at a glance though both are role
+  `enrich`; each edge is labelled with the fields its step added to the
+  available set, making §7 step 2's walk visible. Fixed-width frame, no
+  colour, no TTY or terminal-width detection, so the bytes are
+  deterministic and golden-testable; padding measures display width rather
+  than counting runes (emoji are two columns wide) via a hand-rolled table,
+  leaving §2's dependency list untouched. Acceptance: both shipped examples
+  render under `--viz` and `--viz-only`; the default output is byte-identical
+  with no flag; every §7 fact still appears in the listing.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
   §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
   rebuilds `costs` with `basis` (backfill `estimated`); the COST message
@@ -2300,7 +2332,9 @@ contents (this section does not duplicate it, to avoid the two drifting).
 ## 13. Non-goals for v0 (do not build)
 
 Scheduler/daemon (answered instead by the webhook/source + cron spool
-recipe, §8), dashboards or any UI, DAG/branching beyond
+recipe, §8), dashboards or any UI (a one-shot static render such as
+`gtme plan --viz` is not one: no process, no interaction, no retained
+state — see ADR-051), DAG/branching beyond
 `when:`, `waterfall:` execution (parse-and-reject only), email waterfall
 providers, company-pipeline fan-out verbs (the relations table exists; no
 verbs over it — see ROADMAP.md's `expand` role for the deferred version),
@@ -2409,6 +2443,20 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.36 — 2026-09-03 (ADR-051: plan visualization)
+**Added:** §7 — `gtme plan --viz` appends a diagram of the resolved plan to
+the default output, `--viz-only` prints it instead. Both render the same
+resolved plan on stderr with no network and no spend; the default output is
+unchanged and stays the normative surface for §7's MUST-print items, so a
+fact appearing only in the diagram is a defect. §8's verb table gains the
+flags and states that no verb is added. §13's "dashboards or any UI"
+non-goal gains a parenthetical placing a one-shot static render outside it.
+§11 gains M25. The shape and glyph vocabulary lives in ADR-051,
+deliberately not in the spec: a second implementation must print the
+listing, and is free to draw or skip the picture. No schema, ledger, wire,
+or exit-code change. Build queued as M25 (until it lands, decided contract,
+not shipped behavior).
 
 ### v0.35 — 2026-09-02 (M24 build: participants, built)
 **Changed:** §11 M24 marked built. No normative text changed beyond that
