@@ -276,3 +276,24 @@ re-confirmed here, not re-litigated.
    (`<campaign-id>|<email>`, per-campaign dedupe) or §10.6 states the
    global-per-adapter guarantee in words an operator will find. Queued
    for a session packet; not applied.
+
+## (a) Code bug found 2026-09-04 (M25 build) — open
+
+- **`examples/demo.yaml` does not pass `gtme plan`.** README.md:299 offers
+  `gtme plan examples/demo.yaml` as the second rung of the zero-key ladder,
+  and the file's own header comment repeats it. It exits 2 with four
+  problems: steps `fit` and `lines` need `full_name` (and `fit` also
+  `company_domain`), and `send` needs `email` and `full_name` — none of
+  which the Apollo *source* provides. The planner names the fix itself
+  (`full_name ← apollo/enrich`, `email ← apollo/enrich`), so the pipeline is
+  missing the `apollo/enrich` reveal step that `examples/apollo-to-instantly.yaml`
+  has. `--simulate` is unaffected (it is the documented zero-key path and
+  runs from fixtures), which is presumably why this went unnoticed.
+
+  Found while checking M25's acceptance criteria against both shipped
+  examples; it predates ADR-051 and reproduces identically on the commit
+  before it, so it is not a regression from the viz work. Not fixed here —
+  adding a step to a shipped example changes what that example teaches, and
+  that is an editorial call, not an audit fix. M25's acceptance criterion
+  was rewritten to name a role-complete pipeline rather than "both shipped
+  examples", so nothing in §11 now asserts the broken state.

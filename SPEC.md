@@ -2193,9 +2193,11 @@ decided contract, not shipped behavior.
   colour, no TTY or terminal-width detection, so the bytes are
   deterministic and golden-testable; padding measures display width rather
   than counting runes (emoji are two columns wide) via a hand-rolled table,
-  leaving §2's dependency list untouched. Acceptance: both shipped examples
-  render under `--viz` and `--viz-only`; the default output is byte-identical
-  with no flag; every §7 fact still appears in the listing.
+  leaving §2's dependency list untouched. Acceptance: a pipeline exercising
+  every role renders under `--viz` and `--viz-only`, with every box row the
+  same display width; the default output is byte-identical with no flag;
+  every §7 fact still appears in the listing; `--viz` with `--viz-only` is a
+  validation error.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
   §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
   rebuilds `costs` with `basis` (backfill `estimated`); the COST message

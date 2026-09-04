@@ -1,0 +1,394 @@
+package planner
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/elegant-atomics/gtme/internal/pipeline"
+)
+
+// Plan visualization (SPEC §7, ADR-051). Viz renders the resolved plan as a
+// diagram: one silhouette per role, an executor-and-role glyph pair, and edges
+// labelled with the fields each step adds to the available set — §7 step 2's
+// walk made visible. It is a second view of what Print already writes, never
+// the only home of a §7 fact, and it neither calls the network nor spends.
+//
+// The frame is fixed: no colour, no TTY detection, no terminal-width
+// autodetection, so the bytes are deterministic and golden-testable.
+const (
+	vizWidth  = 64 // box width, borders included
+	vizIndent = 2
+	vizSpine  = vizIndent + vizWidth/2 // the connector column
+)
+
+// Viz writes the diagram for p.
+func Viz(w io.Writer, p *Plan) {
+	fmt.Fprintf(w, "pipeline %s (version %d)\n", p.Pipeline.Name, p.Pipeline.Version)
+	fmt.Fprintln(w, vizHeadline(p))
+	fmt.Fprintln(w)
+
+	// The available set as the walk sees it, so each edge can name what its
+	// step contributed rather than repeating the whole set.
+	seen := map[string]bool{}
+	for i := range p.Steps {
+		s := &p.Steps[i]
+		for _, line := range vizBox(s, i+1) {
+			fmt.Fprintln(w, line)
+		}
+		if i == len(p.Steps)-1 {
+			break
+		}
+		// The arrow leaving a step says what is now available — which is what
+		// that step just contributed, not what the next one will.
+		forked := s.Role == adapters.RoleFilter
+		if forked {
+			vizFork(w)
+		}
+		vizEdge(w, delta(s, seen), forked)
+	}
+
+	fmt.Fprintln(w)
+	for _, note := range p.Notes {
+		fmt.Fprintf(w, "note     %s\n", note)
+	}
+	for _, warning := range p.Warnings {
+		fmt.Fprintf(w, "warning  %s\n", warning)
+	}
+}
+
+// vizHeadline is the one-line summary: size, send count, and the per-record
+// estimate with its gap visible (ADR-046 — unpriced steps are counted, never
+// silently treated as zero).
+func vizHeadline(p *Plan) string {
+	var sends, unpriced int
+	var est float64
+	for i := range p.Steps {
+		s := &p.Steps[i]
+		if s.IsDeliver {
+			sends++
+		}
+		switch {
+		case s.CostEstimate != nil:
+			est += *s.CostEstimate
+		case !s.IsSource && !s.IsSQL:
+			unpriced++
+		}
+	}
+	head := fmt.Sprintf("%s · %s · est $%.4f/record",
+		plural(len(p.Steps), "step"), plural(sends, "send"), est)
+	if unpriced > 0 {
+		head += fmt.Sprintf(" (%s unpriced)", plural(unpriced, "step"))
+	}
+	return head
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// delta is what this step adds to the available set, and advances it.
+func delta(s *Step, seen map[string]bool) []string {
+	var added []string
+	for _, f := range s.Provides {
+		if !seen[f] {
+			seen[f] = true
+			added = append(added, f)
+		}
+	}
+	return added
+}
+
+// vizEdge draws the connector, labelled with the step's contribution to the
+// available set. After a fork the `│ pass` line is already the connector, so an
+// unlabelled edge adds nothing and is skipped.
+func vizEdge(w io.Writer, added []string, forked bool) {
+	pad := strings.Repeat(" ", vizSpine)
+	switch {
+	case len(added) > 0:
+		fmt.Fprintf(w, "%s│  + %s\n", pad, joinCapped(added, 4))
+	case !forked:
+		fmt.Fprintln(w, pad+"│")
+	}
+	fmt.Fprintln(w, pad+"▼")
+}
+
+// vizFork is the filter's two outcomes: SPEC §7 freezes a failing record at
+// the step rather than dropping it, so both branches are named.
+func vizFork(w io.Writer) {
+	pad := strings.Repeat(" ", vizSpine)
+	fmt.Fprintln(w, pad+"├───╴ fail: record freezes here")
+	fmt.Fprintln(w, pad+"│ pass")
+}
+
+// joinCapped lists at most n fields, summarising the rest as "+N".
+func joinCapped(v []string, n int) string {
+	if len(v) <= n {
+		return strings.Join(v, ", ")
+	}
+	return fmt.Sprintf("%s, +%d", strings.Join(v[:n], ", "), len(v)-n)
+}
+
+// vizBox renders one step. Shape carries role; the rows carry the facts.
+func vizBox(s *Step, n int) []string {
+	head := fmt.Sprintf("%s%s %d  %-10s %s", executorGlyph(s), roleGlyph(s), n, vizRole(s), s.Use)
+	if s.Manifest != nil {
+		head += fmt.Sprintf("@%d", s.Manifest.Version)
+	}
+	rows := [][2]string{{head, vizHeadRight(s)}}
+	if l, r := vizGate(s); l != "" || r != "" {
+		rows = append(rows, [2]string{"      " + l, r})
+	}
+	return vizFrame(s, rows)
+}
+
+// vizHeadRight is the top row's right column: the entity a source mints, and
+// the price of everything downstream of it.
+func vizHeadRight(s *Step) string {
+	if s.IsSource {
+		return s.EntityType
+	}
+	switch {
+	case s.CostUnset:
+		return "unset"
+	case s.CostEstimate != nil:
+		return fmt.Sprintf("$%.4f/rec", *s.CostEstimate)
+	case s.IsSQL:
+		return "$0.0000"
+	}
+	return "$ ?"
+}
+
+// vizGate is the second row: what admits a record to this step, and what
+// bounds the step's work.
+func vizGate(s *Step) (left, right string) {
+	switch {
+	case s.When != "":
+		left = "when " + s.When
+	case s.IsDeliver && s.Idempotency != "":
+		left = "keyed on " + s.Idempotency
+	case len(s.Require) > 0:
+		left = "members of " + strings.Join(s.Require, ", ")
+	case s.Of != "":
+		left = "of " + s.Of
+	case len(s.Required) > 0:
+		left = "requires " + joinCapped(s.Required, 3)
+	case s.IsSQL:
+		left = "offline · reads the ledger"
+	}
+	switch {
+	case s.IsDeliver && s.RecordGroup != "":
+		right = "touch → " + s.RecordGroup
+	case s.Cache > 0:
+		right = "cache " + pipeline.FormatCache(s.Cache)
+	case s.Deferred:
+		right = "⏳ ends in flight"
+	case s.Batch:
+		right = fmt.Sprintf("batch %d", s.BatchSize)
+	case s.RunnerOwned():
+		right = "waits for a person"
+	}
+	return left, right
+}
+
+func vizRole(s *Step) string {
+	switch {
+	case s.IsSource:
+		return "source"
+	case s.IsDeliver:
+		return "DELIVER"
+	}
+	return s.Role
+}
+
+// executorGlyph names who runs the step — the dimension the role cannot say.
+// A sql/transform and an apollo/enrich are both role enrich, but one is free
+// and offline and the other spends per record.
+func executorGlyph(s *Step) string {
+	switch {
+	case s.IsGroupSource:
+		return "👥"
+	case s.IsGroupDeliver:
+		return "📂"
+	case s.IsSQL:
+		return "💾"
+	}
+	switch s.Participant {
+	case adapters.KindHuman:
+		return "🧑"
+	case adapters.KindAgent:
+		return "🤖"
+	case "ai":
+		return "💻"
+	}
+	return "🌐"
+}
+
+// roleGlyph names what the step does to the record. ✍️ carries an explicit
+// U+FE0F: bare U+270D defaults to text presentation and renders one column
+// wide, which is the raggedness the fixed frame exists to prevent.
+func roleGlyph(s *Step) string {
+	switch {
+	case s.IsSource:
+		return "📥"
+	case s.IsDeliver:
+		return "🚀"
+	}
+	switch s.Role {
+	case adapters.RoleFilter:
+		return "🤏"
+	case adapters.RoleVerify:
+		return "👌"
+	case adapters.RoleCompose:
+		return "✍️"
+	case adapters.RoleReview:
+		return "👀"
+	}
+	return "💎"
+}
+
+// vizFrame draws rows inside the silhouette for s. Angled edges inset by
+// exactly one column so their corners meet the vertical rails, and the outline
+// angles once rather than per row — a step carrying four gate lines does not
+// taper away.
+func vizFrame(s *Step, rows [][2]string) []string {
+	rail, fill := "│", "─"
+	top := "┌" + strings.Repeat(fill, vizWidth-2) + "┐"
+	bottom := "└" + strings.Repeat(fill, vizWidth-2) + "┘"
+	indentTop, indentBottom := vizIndent, vizIndent
+
+	switch {
+	case s.IsSource:
+		top = "╭" + strings.Repeat(fill, vizWidth-2) + "╮"
+		bottom = "╰" + strings.Repeat(fill, vizWidth-2) + "╯"
+	case s.IsDeliver:
+		rail, fill = "┃", "━"
+		top = "┏" + strings.Repeat(fill, vizWidth-2) + "┓"
+		bottom = "┗" + strings.Repeat(fill, vizWidth-2) + "┛"
+	case s.Role == adapters.RoleFilter: // funnel: full-width top, narrowed outlet
+		bottom = "╲" + strings.Repeat(fill, vizWidth-4) + "╱"
+		indentBottom = vizIndent + 1
+	case s.Role == adapters.RoleReview: // manual operation: narrow lid
+		top = "╱" + strings.Repeat(fill, vizWidth-4) + "╲"
+		indentTop = vizIndent + 1
+	case s.Role == adapters.RoleVerify: // adds no fields: doubled rails
+		rail = "║"
+		top = "╓" + strings.Repeat(fill, vizWidth-2) + "╖"
+		bottom = "╙" + strings.Repeat(fill, vizWidth-2) + "╜"
+	case s.Role == adapters.RoleCompose: // document: wavy floor
+		bottom = "╰" + strings.Repeat("~", vizWidth-2) + "╯"
+	}
+
+	out := []string{strings.Repeat(" ", indentTop) + top}
+	for _, r := range rows {
+		out = append(out, strings.Repeat(" ", vizIndent)+rail+vizRow(r[0], r[1])+rail)
+	}
+	return append(out, strings.Repeat(" ", indentBottom)+bottom)
+}
+
+// vizRow lays one row's left and right text into the frame's inner width,
+// truncating the left rather than letting it overflow.
+func vizRow(left, right string) string {
+	inner := vizWidth - 2
+	left = clipWidth(left, inner-3-displayWidth(right))
+	gap := inner - 2 - displayWidth(left) - displayWidth(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return " " + left + strings.Repeat(" ", gap) + right + " "
+}
+
+func clipWidth(s string, max int) string {
+	if displayWidth(s) <= max {
+		return s
+	}
+	var b strings.Builder
+	w := 0
+	for _, r := range s {
+		rw := runeWidth(r)
+		if w+rw > max-1 {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
+	}
+	return b.String() + "…"
+}
+
+// displayWidth is the terminal column count of s. Emoji occupy two columns
+// while len() and the rune count both say one, so padding must measure rather
+// than count — otherwise every box edge on an emoji row shifts.
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+func runeWidth(r rune) int {
+	switch {
+	case r == 0xFE0F:
+		// Variation selector-16 promotes the preceding rune to emoji
+		// presentation: it was counted narrow, and emoji presentation is wide.
+		return 1
+	case r == 0xFE0E, r == 0x200D, r >= 0x200B && r <= 0x200F:
+		// Text selector, zero-width joiner, and the bidi marks take no columns.
+		return 0
+	case isWide(r):
+		return 2
+	}
+	return 1
+}
+
+// isWide reports the East Asian Wide and Fullwidth ranges, which is where
+// every emoji this vocabulary uses lives.
+func isWide(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115F, // Hangul Jamo
+		r >= 0x231A && r <= 0x231B, // watch, hourglass
+		r >= 0x23E9 && r <= 0x23F3, // media controls, ⏳
+		r >= 0x25FD && r <= 0x25FE,
+		r >= 0x2614 && r <= 0x2615,
+		r >= 0x2648 && r <= 0x2653,
+		r == 0x267F, r == 0x2693, r == 0x26A1,
+		r >= 0x26AA && r <= 0x26AB,
+		r >= 0x26BD && r <= 0x26BE,
+		r >= 0x26C4 && r <= 0x26C5,
+		r == 0x26CE, r == 0x26D4, r == 0x26EA,
+		r >= 0x26F2 && r <= 0x26F3,
+		r == 0x26F5, r == 0x26FA, r == 0x26FD,
+		r == 0x2705,
+		r >= 0x270A && r <= 0x270B, // raised fist/hand — wide without a selector
+		r == 0x2728, r == 0x274C, r == 0x274E,
+		r >= 0x2753 && r <= 0x2755,
+		r == 0x2757,
+		r >= 0x2795 && r <= 0x2797,
+		r == 0x27B0, r == 0x27BF,
+		r >= 0x2B1B && r <= 0x2B1C,
+		r == 0x2B50, r == 0x2B55,
+		r >= 0x2E80 && r <= 0x303E, // CJK radicals through symbols
+		r >= 0x3041 && r <= 0x33FF,
+		r >= 0x3400 && r <= 0x4DBF,
+		r >= 0x4E00 && r <= 0x9FFF,
+		r >= 0xA000 && r <= 0xA4CF,
+		r >= 0xAC00 && r <= 0xD7A3,
+		r >= 0xF900 && r <= 0xFAFF,
+		r >= 0xFE10 && r <= 0xFE19,
+		r >= 0xFE30 && r <= 0xFE6F,
+		r >= 0xFF00 && r <= 0xFF60,
+		r >= 0xFFE0 && r <= 0xFFE6,
+		r >= 0x1F300 && r <= 0x1F64F, // symbols, pictographs, emoticons
+		r >= 0x1F680 && r <= 0x1F6FF, // transport
+		r >= 0x1F7E0 && r <= 0x1F7EB,
+		r >= 0x1F900 && r <= 0x1F9FF, // supplemental pictographs
+		r >= 0x1FA70 && r <= 0x1FAFF,
+		r >= 0x20000 && r <= 0x3FFFD:
+		return true
+	}
+	return false
+}

@@ -55,7 +55,8 @@ func TestHelpAgentSurface(t *testing.T) {
 	for _, v := range doc.Verbs {
 		haveVerb[v.Usage] = true
 	}
-	for _, want := range []string{"gtme init", "gtme plan pipeline.yaml"} {
+	// ADR-051 added the rendering flags to plan's usage string (SPEC §8).
+	for _, want := range []string{"gtme init", "gtme plan pipeline.yaml [--viz|--viz-only]"} {
 		found := false
 		for u := range haveVerb {
 			if u == want {
@@ -125,4 +126,14 @@ func TestHelpAgentExamplesPassPlan(t *testing.T) {
 			t.Errorf("example %q failed gtme plan (exit %d):\n%s", ex.Name, plan.code, plan.stderr)
 		}
 	}
+}
+
+// TestHelpAgentCarriesTheVizFlags: §8 requires help --agent to be the full CLI
+// surface, regenerated from the live verb table. ADR-051 added two flags to
+// `gtme plan`, so an agent reading this document must see them.
+func TestHelpAgentCarriesTheVizFlags(t *testing.T) {
+	h := newHarness(t)
+	res := h.mustRun("help", "--agent")
+	contains(t, res.stdout, "--viz", "help --agent plan verb")
+	contains(t, res.stdout, "--viz-only", "help --agent plan verb")
 }
