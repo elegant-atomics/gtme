@@ -236,7 +236,7 @@ func TestVizGlyphPairIsExecutorThenRole(t *testing.T) {
 		"💾💎",  // sql enrich — same role, different executor
 		"🌐👌",  // vendor verify
 		"💻✍️", // ai compose
-		"🧑👀",  // human review
+		"🙋👀",  // human review
 		"🌐🚀",  // vendor deliver
 	} {
 		if !strings.Contains(out, want) {
@@ -275,7 +275,7 @@ func TestVizAgentExecutorDiffersFromHuman(t *testing.T) {
 	if !strings.Contains(out, "🤖👀") {
 		t.Errorf("agent review not marked 🤖:\n%s", out)
 	}
-	if strings.Contains(out, "🧑👀") {
+	if strings.Contains(out, "🙋👀") {
 		t.Errorf("agent review still marked as human:\n%s", out)
 	}
 }

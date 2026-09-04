@@ -3194,7 +3194,7 @@ is worth building now and would not be if pipelines branched.
    and an `apollo/enrich` are both role `enrich`, but one is free and
    offline and the other spends per record.
 
-   Executor: 🌐 vendor · 💻 ai · 💾 sql · 🧑 human · 🤖 agent
+   Executor: 🌐 vendor · 💻 ai · 💾 sql · 🙋 human · 🤖 agent
    Role: 📥 source · 🤏 filter · 💎 enrich · 👌 verify · ✍️ compose · 👀 review · 🚀 deliver
    Structural: 👥 group, either direction · ⏳ deferred (ADR-038)
 
@@ -3204,7 +3204,7 @@ is worth building now and would not be if pipelines branched.
    restated the direction and hid the shared mechanism.
 
    Review is 👀 rather than a person glyph because the executor slot
-   already distinguishes 🧑 from 🤖. An unrecognised role renders ❔, never
+   already distinguishes 🙋 from 🤖. An unrecognised role renders ❔, never
    the enrich glyph: a default that lies is worse than one that admits
    ignorance.
 

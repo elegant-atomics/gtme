@@ -324,7 +324,7 @@ func executorGlyph(s *Step) string {
 	}
 	switch s.Participant {
 	case adapters.KindHuman:
-		return "🧑"
+		return "🙋"
 	case adapters.KindAgent:
 		return "🤖"
 	case "ai":
