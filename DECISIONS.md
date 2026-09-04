@@ -3136,12 +3136,20 @@ is worth building now and would not be if pipelines branched.
    | `enrich` | light rectangle |
    | `verify` | rectangle with doubled rails — a process that adds no fields |
    | `compose` | rectangle with a wavy floor — document |
-   | `review` | trapezoid, narrow lid — manual operation |
+   | `review` | broken rails — the run pauses here |
    | `deliver` | heavy border + uppercase label — it spends and leaves the machine |
 
-   Angled edges inset by exactly one column so corners meet the vertical
-   rails; the outline angles once, never per row, so a step carrying four
-   gate lines does not taper to nothing.
+   A tapered side steps one column per row, so its diagonals stack into a
+   continuous line; a single-step diagonal kinks against the rule it meets.
+
+   Only the filter tapers, and its taper means what it looks like — fewer
+   records leave than arrived. A review was drawn as a widening trapezoid
+   first, on the flowchart convention where that shape means "manual
+   operation" and the taper is decorative. In a diagram that has given taper
+   a meaning it cannot also be decoration: a review writes fields and cannot
+   reject (`when: <review>.passed` is refused), so it is strictly 1:1, and a
+   widening shape claimed a cardinality it does not have. Broken rails say
+   the true thing instead — the run pauses there.
 
 4. **A two-slot emoji column: executor, then role.** The executor slot is
    the orthogonal dimension the role alone cannot say — a `sql/transform`

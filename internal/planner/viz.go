@@ -312,8 +312,11 @@ func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 		rail, bl, br = "╲", "╲", "╱" // funnel: narrows toward the outlet
 		taper = 1
 	case s.Role == adapters.RoleReview:
-		rail, tl, tr = "╱", "╱", "╲" // manual operation: widens from a narrow lid
-		taper = -1
+		// Broken rails: the run pauses here. Not a taper — a review writes
+		// fields and cannot reject (`when: <review>.passed` is refused), so it
+		// is strictly 1:1, and in a diagram where the funnel's taper means
+		// "fewer records out" a tapered review would claim what is not true.
+		rail = "┊"
 	case s.Role == adapters.RoleVerify:
 		rail = "║" // adds no fields
 		tl, tr, bl, br = "╓", "╖", "╙", "╜"

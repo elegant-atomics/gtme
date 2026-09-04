@@ -95,6 +95,27 @@ func TestVizBoxRowsShareOneAxis(t *testing.T) {
 	}
 }
 
+// A review is strictly 1:1 — it writes fields, and `when: <review>.passed` is
+// refused, so it cannot even reject. In a diagram where the funnel's taper
+// means "fewer records out", a tapered review would claim a cardinality it
+// does not have; broken rails say what is true, that the run pauses there.
+func TestVizReviewDoesNotTaper(t *testing.T) {
+	lines := strings.Split(viz(t, vizPlan()), "\n")
+	for i, l := range lines {
+		if !strings.Contains(l, "human/review") {
+			continue
+		}
+		if !strings.Contains(l, "┊") {
+			t.Errorf("review should carry the paused rail:\n%s", l)
+		}
+		if indentOf(l) != vizIndent || indentOf(lines[i-1]) != vizIndent {
+			t.Errorf("review tapers; it is 1:1 and must not:\n%s\n%s", lines[i-1], l)
+		}
+		return
+	}
+	t.Fatal("no review step rendered")
+}
+
 // A funnel's sides descend one column per row, so the diagonals stack into a
 // continuous line rather than kinking at a single step.
 func TestVizFunnelTapersOneColumnPerRow(t *testing.T) {
