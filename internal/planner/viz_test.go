@@ -430,3 +430,24 @@ func TestVizGroupSourceShowsGroupAndLimit(t *testing.T) {
 		}
 	}
 }
+
+// A group is one mechanism — the ledger's membership tables, runner-owned,
+// no network — so it carries one executor glyph in both directions. The role
+// slot already says which way the records are moving.
+func TestVizGroupUsesOneGlyphBothDirections(t *testing.T) {
+	p := vizPlan()
+	p.Steps[0] = Step{ID: "members", Use: "group/source", Role: adapters.RoleSource,
+		IsSource: true, IsGroupSource: true, SourceGroup: "warm", EntityType: "person"}
+	p.Steps[7] = Step{ID: "handoff", Use: "group/deliver", Role: adapters.RoleDeliver,
+		IsDeliver: true, IsGroupDeliver: true, TargetGroup: "approved",
+		EntityType: "person", RecordGroup: "every-role"}
+	out := viz(t, p)
+	for _, want := range []string{"👥📥", "👥🚀"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "📂") {
+		t.Errorf("group deliver still carries a second glyph:\n%s", out)
+	}
+}

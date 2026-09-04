@@ -3158,7 +3158,12 @@ is worth building now and would not be if pipelines branched.
 
    Executor: 🌐 vendor · 💻 ai · 💾 sql · 🧑 human · 🤖 agent
    Role: 📥 source · 🤏 filter · 💎 enrich · 👌 verify · ✍️ compose · 👀 review · 🚀 deliver
-   Structural: 👥 group source · 📂 group deliver · ⏳ deferred (ADR-038)
+   Structural: 👥 group, either direction · ⏳ deferred (ADR-038)
+
+   A group carries one glyph whichever way records move: it is a single
+   mechanism — the ledger's membership tables, runner-owned, no network —
+   and the role slot beside it already says source or deliver. Two glyphs
+   restated the direction and hid the shared mechanism.
 
    Review is 👀 rather than a person glyph because the executor slot
    already distinguishes 🧑 from 🤖.

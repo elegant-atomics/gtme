@@ -245,10 +245,10 @@ func vizRole(s *Step) string {
 // and offline and the other spends per record.
 func executorGlyph(s *Step) string {
 	switch {
-	case s.IsGroupSource:
+	case s.IsGroupSource, s.IsGroupDeliver:
+		// One mechanism in both directions — the ledger's membership tables,
+		// runner-owned, no network. The role glyph says which way records go.
 		return "👥"
-	case s.IsGroupDeliver:
-		return "📂"
 	case s.IsSQL:
 		return "💾"
 	}
