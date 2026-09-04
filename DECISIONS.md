@@ -3088,3 +3088,165 @@ everything else stays honestly `estimated`.
 **Spec impact:** AMEND (this packet's second commit) — §2, §6 (the
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
+
+### ADR-051: `gtme plan --viz` — the resolved plan as a picture
+**Status:** Accepted (2026-09-03 — drafted in a design session;
+human-approved 2026-09-04 by merging the packet)
+**Context:** `gtme plan` prints the resolved plan as a linear listing: one
+block per step, every §7.4 fact spelled out. It is complete and it is the
+right default. But the two questions an operator actually asks before
+arming a campaign — *where does this spend money and send mail*, and *how
+does step N come to have the field it needs* — are answered by facts
+scattered across the whole listing. ADR-031 already conceded half of this
+by pulling the send surface into a summary block, on the reasoning that
+with delivers as ordinary steps, plan output is where the send points must
+be obvious at a glance. The field-availability walk (§7 step 2) has no
+such summary; it is reconstructed by reading every `provides:` line in
+order.
+
+A picture answers both at once, and gtme's pipelines are unusually easy to
+draw: §13 bars DAG/branching beyond `when:`, and §7 executes steps strictly
+in order, so the shape is a single spine. That is a smaller and more
+tractable thing than "render an arbitrary workflow graph" — the reason this
+is worth building now and would not be if pipelines branched.
+
+**Decision:**
+
+1. **Two flags, no new verb.** `gtme plan p.yaml --viz` appends the diagram
+   after the existing listing; `--viz-only` prints the diagram in place of
+   it. §8's verb set stays closed (ADR-005); this is a rendering option on
+   an existing verb, not a new command. Both go to stderr with everything
+   else plan prints, and neither performs network calls, spends, or changes
+   what plan accepts or exits with.
+
+2. **The default output is unchanged and stays normative.** The §7.4
+   MUST-print items live in the listing. The diagram is a second view of
+   the same `Plan` and MUST NOT be the only place a §7 fact appears — a
+   fact that exists only in the picture is a spec bug. A second
+   implementation MUST print the listing and MAY render the diagram
+   however it likes, or not at all.
+
+3. **Shape carries role.** The seven roles get seven silhouettes, so the
+   vocabulary survives without color:
+
+   | Role | Shape |
+   |---|---|
+   | `source` | rounded box — terminator, records enter |
+   | `filter` | funnel: full-width top, vertical sides, outlet inset one column |
+   | `enrich` | light rectangle |
+   | `verify` | rectangle with doubled rails — a process that adds no fields |
+   | `compose` | rectangle with a wavy floor — document |
+   | `review` | broken rails — the run pauses here |
+   | `deliver` | heavy border + uppercase label — it spends and leaves the machine |
+
+   A tapered side steps one column per row, so its diagonals stack into a
+   continuous line; a single-step diagonal kinks against the rule it meets.
+
+   Only the filter tapers, and its taper means what it looks like — fewer
+   records leave than arrived. A review was drawn as a widening trapezoid
+   first, on the flowchart convention where that shape means "manual
+   operation" and the taper is decorative. In a diagram that has given taper
+   a meaning it cannot also be decoration: a review writes fields and cannot
+   reject (`when: <review>.passed` is refused), so it is strictly 1:1, and a
+   widening shape claimed a cardinality it does not have. Broken rails say
+   the true thing instead — the run pauses there.
+
+4. **The step index sits in a fixed gutter, left of the frame.** It is a
+   reference handle — "step 3 is the expensive one" — so it behaves like a
+   line number and holds one column whatever the frame beside it is doing.
+   Inside the box it drifted with the funnel's taper, one column per row,
+   which defeated the point of an index.
+
+5. **The price column distinguishes five states, and none of them lies.**
+   `$0.0100/rec` known and billable; `$0.0000/rec` known and free (sql,
+   group, a free vendor call); `$?/rec` a vendor will charge but the amount
+   is unknowable at plan time (an AI step is token-metered); `unset` the
+   ADR-046 case, a rate templating from config the operator never set; and
+   `--` for a participant step, where nothing can bill you at all — it is
+   runner-owned, opens no session, and reaches no vendor (ADR-049). `$?/rec`
+   on a `human/*` step would have claimed a vendor charge of unknown size,
+   which is a different and false thing; what a participant actually spent
+   arrives afterwards through `gtme answer --cost`, which is measurement,
+   not a plan-time gap. For the same reason such steps do not inflate the
+   header's unpriced count, which exists to flag spend you cannot see.
+   `$ ?` became `$?/rec` so the unknown keeps the column's shape: the value
+   is unknown, the unit is not. SPEC §7.4 mandates the `?`, not how it is
+   set, and the listing keeps printing its bare `?`.
+
+6. **The role word is a scannable column.** All caps, every role, so the
+   left edge reads vertically as an index of what each step is. It overlaps
+   the shape and the glyph deliberately: a reader who has not learned the
+   silhouettes still has a word, and a reader who has can skip it.
+
+7. **One column, one meaning.** The right column is the per-record price on
+   every row — a source has one too, and showing its entity type there
+   instead made one column mean two things. Entity type is a property of the
+   run rather than of a step, so it moved to the header.
+
+8. **Every gate gets a row.** `when:`, `require:`, `exclude:`, `suppress:`,
+   `of:`, `requires` and a deliver's idempotency key each print. An earlier
+   draft picked the first match from a priority list, which silently dropped
+   the rest — and a gate decides whether a record reaches a paid step, so
+   hiding one made the diagram assert something untrue.
+
+9. **A two-slot emoji column: executor, then role.** The executor slot is
+   the orthogonal dimension the role alone cannot say — a `sql/transform`
+   and an `apollo/enrich` are both role `enrich`, but one is free and
+   offline and the other spends per record.
+
+   Executor: 🌐 vendor · 💻 ai · 💾 sql · 🙋 human · 🤖 agent
+   Role: 📥 source · 🤏 filter · 💎 enrich · 👌 verify · ✍️ compose · 👀 review · 🚀 deliver
+   Structural: 👥 group, either direction · ⏳ deferred (ADR-038)
+
+   A group carries one glyph whichever way records move: it is a single
+   mechanism — the ledger's membership tables, runner-owned, no network —
+   and the role slot beside it already says source or deliver. Two glyphs
+   restated the direction and hid the shared mechanism.
+
+   Review is 👀 rather than a person glyph because the executor slot
+   already distinguishes 🙋 from 🤖. An unrecognised role renders ❔, never
+   the enrich glyph: a default that lies is worse than one that admits
+   ignorance.
+
+10. **Edges carry the available-set delta.** Each arrow is labelled with the
+   fields that step added — §7 step 2's walk made visible. Long lists
+   truncate to `+N`.
+
+11. **Deterministic bytes.** Fixed 64-column frame, no color, no TTY
+   detection, no terminal-width autodetection, no animation. The output is
+   golden-testable and pipes into a file or a PR comment unchanged.
+
+12. **Width is measured, not counted.** Emoji are two columns wide and
+   `len()` says one; padding MUST use display width or every box edge on an
+   emoji row shifts. The table is hand-rolled (~20 lines) rather than taken
+   as a dependency, so §2's list is untouched. ✍️ MUST be emitted as
+   `U+270D U+FE0F`: bare `U+270D` defaults to text presentation and renders
+   one column wide, which is the exact raggedness this rule prevents.
+
+**Consequences:** The picture is the fastest way to see the send surface
+and the money column, and the only way to see the field walk without
+reading every step. Cost: a second renderer over `Plan` to keep in step
+with the first — bounded by (2), since the diagram is never the sole home
+of a fact, so a fact added to §7 obliges the listing and not the diagram.
+The 60-column frame truncates long adapter names and field lists in a way
+the listing does not; truncation is always visible (`…`, `+N`). ✍️ is the
+one variation-selector glyph in the set, so a terminal that draws it one
+column wide ragged its row's right rail and nothing else. Skin-tone
+modifiers and ZWJ sequences are excluded from the vocabulary outright:
+both are multi-codepoint and would blow the frame on any font missing the
+composed glyph.
+
+**Rejected:** *Replacing the listing* (§7.4's MUST-print items would have
+to fit a width budget; information loss where the spec requires
+completeness). *A new verb* — §8's set is closed by ADR-005 and this is a
+rendering of an existing one. *Color* — breaks deterministic bytes and
+dies on redirect. *Terminal-width autodetection* — makes output
+environment-dependent and golden tests unwritable. *An executor emoji for
+every adapter namespace* — the box already prints `apollo/enrich@1` next
+to `$0.0100/rec`; one generic 🌐 for all vendor-namespaced adapters says
+what the picture needs and no more.
+
+**Spec impact:** AMEND (this packet's second commit) — §7 (a paragraph
+after step 4), §8 (verb table line + the closing paragraph), §11 (M25),
+§13 (a parenthetical on the "dashboards or any UI" non-goal), Changelog
+(v0.36). No schema, no ledger, no wire, no exit-code change.

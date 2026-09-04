@@ -106,7 +106,7 @@ type agentVerb struct {
 var agentVerbs = []agentVerb{
 	{"gtme init", "create ~/.gtme and the ledger"},
 	{"gtme secret set KEY [VALUE]", "store a credential in ~/.gtme/secrets (VALUE omitted = prompt, no echo)"},
-	{"gtme plan pipeline.yaml", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend"},
+	{"gtme plan pipeline.yaml [--viz|--viz-only]", "resolve adapters, validate every step's needs/uses and credentials, print the plan — no network, no spend; --viz appends a diagram of the resolved plan to the listing and --viz-only prints it alone (ADR-051), both renderings of the same plan and neither changing what plan accepts or exits with"},
 	{"gtme run pipeline.yaml [--resume RUN_ID] [--dry-run] [--simulate]", "execute a pipeline; --resume continues a run that stopped partway; --dry-run holds deliver steps back and receipts their resolved variables instead of sending; --simulate executes everything offline from fixtures (no network, no spend, nothing persists)"},
 	{"gtme query \"SQL\" [--save NAME] [--name NAME] [--list] [--format ndjson|table|csv] [--limit N]", "read-only SQL against the ledger; --save stores it as a named segment"},
 	{"gtme show <identity-key> [--fields a,b] [--provenance]", "print the current-value projection for one identity"},

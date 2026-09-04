@@ -155,12 +155,18 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 func cmdPlan(ctx context.Context, env Env, args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
+	// ADR-051: two renderings of the same resolved plan, never a second plan.
+	viz := fs.Bool("viz", false, "append a diagram of the resolved plan")
+	vizOnly := fs.Bool("viz-only", false, "print the diagram in place of the listing")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(positional) != 1 {
-		return fail(ExitValidation, "usage: gtme plan pipeline.yaml")
+		return fail(ExitValidation, "usage: gtme plan pipeline.yaml [--viz|--viz-only]")
+	}
+	if *viz && *vizOnly {
+		return fail(ExitValidation, "--viz and --viz-only contradict each other: --viz appends the diagram to the listing, --viz-only prints it alone")
 	}
 
 	p, err := pipeline.Load(positional[0])
@@ -185,7 +191,17 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 			return planFailure(err)
 		}
 	}
-	planner.Print(env.Stderr, plan)
+	// The listing is the normative surface (SPEC §7): the diagram never
+	// replaces it unless asked, and never carries a fact it does not.
+	if !*vizOnly {
+		planner.Print(env.Stderr, plan)
+	}
+	if *viz || *vizOnly {
+		if *viz {
+			fmt.Fprintln(env.Stderr)
+		}
+		planner.Viz(env.Stderr, plan)
+	}
 	return nil
 }
 
