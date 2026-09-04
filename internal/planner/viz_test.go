@@ -451,3 +451,80 @@ func TestVizGroupUsesOneGlyphBothDirections(t *testing.T) {
 		t.Errorf("group deliver still carries a second glyph:\n%s", out)
 	}
 }
+
+// The role word is a column you scan vertically, so it is uniform: all caps,
+// every role, not just the one that shouts.
+func TestVizRoleWordsAreAllCaps(t *testing.T) {
+	out := viz(t, vizPlan())
+	for _, want := range []string{"SOURCE", "FILTER", "ENRICH", "VERIFY", "COMPOSE", "REVIEW", "DELIVER"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("role word %q not rendered in caps:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{" source ", " filter ", " enrich ", " compose "} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("lowercase role word %q survives", unwanted)
+		}
+	}
+}
+
+// One column, one meaning: the right column is the price on every row. A
+// source has a price too, and hiding it behind the entity type made the
+// column mean two different things.
+func TestVizRightColumnIsAlwaysCost(t *testing.T) {
+	p := vizPlan()
+	zero := 0.0
+	p.Steps[0].CostEstimate = &zero
+	out := viz(t, p)
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.Contains(l, "apollo/search") {
+			continue
+		}
+		if !strings.Contains(l, "$0.0000/rec") {
+			t.Errorf("source row does not carry its cost:\n%s", l)
+		}
+		if strings.Contains(l, "person") {
+			t.Errorf("entity type still occupies the cost column:\n%s", l)
+		}
+		return
+	}
+	t.Fatal("no source row rendered")
+}
+
+func TestVizHeaderCarriesTheEntityType(t *testing.T) {
+	out := viz(t, vizPlan())
+	if !strings.Contains(strings.SplitN(out, "\n", 3)[1], "person") {
+		t.Errorf("header does not name the entity type:\n%s", out)
+	}
+}
+
+// A gate decides whether a record reaches a paid step. Showing one and
+// silently dropping the rest is the diagram asserting something untrue.
+func TestVizShowsEveryGateNotJustTheFirst(t *testing.T) {
+	p := vizPlan()
+	p.Steps[2].When = "icp.passed"
+	p.Steps[2].Require = []string{"customers"}
+	p.Steps[2].Exclude = []string{"suppressed"}
+	out := viz(t, p)
+	for _, want := range []string{"icp.passed", "customers", "suppressed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gate %q silently dropped:\n%s", want, out)
+		}
+	}
+}
+
+// A default that lies is worse than one that admits ignorance: an
+// unrecognised role must not render as enrich.
+func TestVizUnknownRoleIsNotDisguisedAsEnrich(t *testing.T) {
+	p := vizPlan()
+	p.Steps[2].Role = "teleport"
+	out := viz(t, p)
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "apollo/enrich") && strings.Contains(l, "💎") {
+			t.Errorf("unknown role rendered as enrich:\n%s", l)
+		}
+	}
+	if !strings.Contains(out, "❔") {
+		t.Errorf("unknown role not marked as unknown:\n%s", out)
+	}
+}

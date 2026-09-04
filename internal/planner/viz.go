@@ -83,7 +83,28 @@ func vizHeadline(p *Plan) string {
 	if unpriced > 0 {
 		head += fmt.Sprintf(" (%s unpriced)", plural(unpriced, "step"))
 	}
+	// The entity type is a property of the run, not of any one step, so it
+	// belongs here rather than in a column that otherwise means price.
+	if kinds := entityTypes(p); kinds != "" {
+		head += " · " + kinds
+	}
 	return head
+}
+
+// entityTypes lists the entity types the plan's steps carry, in first-seen
+// order — one for every pipeline v0 can express (§13 defers expand).
+func entityTypes(p *Plan) string {
+	var kinds []string
+	seen := map[string]bool{}
+	for i := range p.Steps {
+		k := p.Steps[i].EntityType
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		kinds = append(kinds, k)
+	}
+	return strings.Join(kinds, ", ")
 }
 
 func plural(n int, noun string) string {
@@ -158,23 +179,17 @@ func fitFields(v []string, avail int) string {
 // in/out say whether the spine enters from above and leaves below, so the
 // frame can be joined to it rather than floating over it.
 func vizBox(s *Step, n int, in, out bool) []string {
-	head := fmt.Sprintf("%s%s %-3d %-10s %s", executorGlyph(s), roleGlyph(s), n, vizRole(s), s.Use)
+	head := fmt.Sprintf("%s%s %-3d %-8s %s", executorGlyph(s), roleGlyph(s), n, strings.ToUpper(vizRole(s)), s.Use)
 	if s.Manifest != nil {
 		head += fmt.Sprintf("@%d", s.Manifest.Version)
 	}
-	rows := [][2]string{{head, vizHeadRight(s)}}
-	if l, r := vizGate(s); l != "" || r != "" {
-		rows = append(rows, [2]string{"      " + l, r})
-	}
+	rows := append([][2]string{{head, vizHeadRight(s)}}, vizGates(s)...)
 	return vizFrame(s, rows, in, out)
 }
 
 // vizHeadRight is the top row's right column: the entity a source mints, and
 // the price of everything downstream of it.
 func vizHeadRight(s *Step) string {
-	if s.IsSource {
-		return s.EntityType
-	}
 	switch {
 	case s.CostUnset:
 		return "unset"
@@ -182,52 +197,87 @@ func vizHeadRight(s *Step) string {
 		return fmt.Sprintf("$%.4f/rec", *s.CostEstimate)
 	case s.IsSQL, s.IsGroupSource, s.IsGroupDeliver:
 		// Runner-owned and ledger-local: no vendor to bill it.
-		return "$0.0000"
+		return "$0.0000/rec"
 	}
 	return "$ ?"
 }
 
-// vizGate is the second row: what admits a record to this step, and what
-// bounds the step's work.
-func vizGate(s *Step) (left, right string) {
-	switch {
-	case s.IsGroupSource:
-		left = "members of " + s.SourceGroup
-	case s.IsGroupDeliver:
-		left = "→ group " + strconv.Quote(s.TargetGroup)
-	case s.When != "":
-		left = "when " + s.When
-	case s.IsDeliver && s.Idempotency != "":
-		left = "keyed on " + s.Idempotency
-	case len(s.Require) > 0:
-		left = "members of " + strings.Join(s.Require, ", ")
-	case s.Of != "":
-		left = "of " + s.Of
-	case len(s.Required) > 0:
-		left = "requires " + joinCapped(s.Required, 3)
-	case s.IsSQL:
-		left = "offline · reads the ledger"
+// vizGates are the rows under the head: what admits a record to this step,
+// and what bounds the step's work. Every gate gets a row — a gate decides
+// whether a record reaches a paid step, so showing one and dropping the rest
+// would make the diagram assert something untrue.
+func vizGates(s *Step) [][2]string {
+	var left []string
+	if s.IsGroupSource {
+		left = append(left, "members of "+s.SourceGroup)
 	}
+	if s.IsGroupDeliver {
+		left = append(left, "→ group "+strconv.Quote(s.TargetGroup))
+	}
+	if s.When != "" {
+		left = append(left, "when "+s.When)
+	}
+	if len(s.Require) > 0 {
+		left = append(left, "members of "+joinCapped(s.Require, 2))
+	}
+	if len(s.Exclude) > 0 {
+		left = append(left, "not in "+joinCapped(s.Exclude, 2))
+	}
+	if s.SuppressGroup != "" {
+		left = append(left, fmt.Sprintf("untouched in %s for %s",
+			s.SuppressGroup, pipeline.FormatCache(s.SuppressWithin)))
+	}
+	if s.IsDeliver && s.Idempotency != "" {
+		left = append(left, "keyed on "+s.Idempotency)
+	}
+	if s.Of != "" {
+		left = append(left, "of "+s.Of)
+	}
+	if len(s.Required) > 0 {
+		left = append(left, "requires "+joinCapped(s.Required, 3))
+	}
+	if s.IsSQL {
+		left = append(left, "offline · reads the ledger")
+	}
+
+	var right []string
 	switch {
 	case s.IsGroupSource && s.Limit > 0:
-		right = fmt.Sprintf("limit %d, oldest first", s.Limit)
+		right = append(right, fmt.Sprintf("limit %d, oldest first", s.Limit))
 	case s.IsGroupDeliver:
-		right = "handoff · no network"
+		right = append(right, "handoff · no network")
 	case s.IsDeliver && s.RecordGroup != "":
-		right = "touch → " + s.RecordGroup
-	case s.Cache > 0:
-		right = "cache " + pipeline.FormatCache(s.Cache)
-	case s.Deferred:
-		right = "⏳ ends in flight"
-	case s.Batch:
-		right = fmt.Sprintf("batch %d", s.BatchSize)
-	case s.Participant == adapters.KindHuman:
-		right = "waits for a person"
-	case s.Participant == adapters.KindAgent:
-		// ADR-049: an agent/* step never prompts — it waits in the ledger.
-		right = "waits for an agent"
+		right = append(right, "touch → "+s.RecordGroup)
 	}
-	return left, right
+	if s.Cache > 0 {
+		right = append(right, "cache "+pipeline.FormatCache(s.Cache))
+	}
+	if s.Deferred {
+		right = append(right, "⏳ ends in flight")
+	}
+	if s.Batch {
+		right = append(right, fmt.Sprintf("batch %d", s.BatchSize))
+	}
+	switch s.Participant {
+	case adapters.KindHuman:
+		right = append(right, "waits for a person")
+	case adapters.KindAgent:
+		// ADR-049: an agent/* step never prompts — it waits in the ledger.
+		right = append(right, "waits for an agent")
+	}
+
+	rows := make([][2]string, 0, max(len(left), len(right)))
+	for i := 0; i < len(left) || i < len(right); i++ {
+		var l, r string
+		if i < len(left) {
+			l = "      " + left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		rows = append(rows, [2]string{l, r})
+	}
+	return rows
 }
 
 func vizRole(s *Step) string {
@@ -235,7 +285,7 @@ func vizRole(s *Step) string {
 	case s.IsSource:
 		return "source"
 	case s.IsDeliver:
-		return "DELIVER"
+		return "deliver"
 	}
 	return s.Role
 }
@@ -282,8 +332,10 @@ func roleGlyph(s *Step) string {
 		return "✍️"
 	case adapters.RoleReview:
 		return "👀"
+	case adapters.RoleEnrich:
+		return "💎"
 	}
-	return "💎"
+	return "❔"
 }
 
 // vizFrame draws rows inside the silhouette for s. The tapered shapes — the

@@ -3151,7 +3151,23 @@ is worth building now and would not be if pipelines branched.
    widening shape claimed a cardinality it does not have. Broken rails say
    the true thing instead — the run pauses there.
 
-4. **A two-slot emoji column: executor, then role.** The executor slot is
+4. **The role word is a scannable column.** All caps, every role, so the
+   left edge reads vertically as an index of what each step is. It overlaps
+   the shape and the glyph deliberately: a reader who has not learned the
+   silhouettes still has a word, and a reader who has can skip it.
+
+5. **One column, one meaning.** The right column is the per-record price on
+   every row — a source has one too, and showing its entity type there
+   instead made one column mean two things. Entity type is a property of the
+   run rather than of a step, so it moved to the header.
+
+6. **Every gate gets a row.** `when:`, `require:`, `exclude:`, `suppress:`,
+   `of:`, `requires` and a deliver's idempotency key each print. An earlier
+   draft picked the first match from a priority list, which silently dropped
+   the rest — and a gate decides whether a record reaches a paid step, so
+   hiding one made the diagram assert something untrue.
+
+7. **A two-slot emoji column: executor, then role.** The executor slot is
    the orthogonal dimension the role alone cannot say — a `sql/transform`
    and an `apollo/enrich` are both role `enrich`, but one is free and
    offline and the other spends per record.
@@ -3166,17 +3182,19 @@ is worth building now and would not be if pipelines branched.
    restated the direction and hid the shared mechanism.
 
    Review is 👀 rather than a person glyph because the executor slot
-   already distinguishes 🧑 from 🤖.
+   already distinguishes 🧑 from 🤖. An unrecognised role renders ❔, never
+   the enrich glyph: a default that lies is worse than one that admits
+   ignorance.
 
-5. **Edges carry the available-set delta.** Each arrow is labelled with the
+8. **Edges carry the available-set delta.** Each arrow is labelled with the
    fields that step added — §7 step 2's walk made visible. Long lists
    truncate to `+N`.
 
-6. **Deterministic bytes.** Fixed 60-column frame, no color, no TTY
+9. **Deterministic bytes.** Fixed 64-column frame, no color, no TTY
    detection, no terminal-width autodetection, no animation. The output is
    golden-testable and pipes into a file or a PR comment unchanged.
 
-7. **Width is measured, not counted.** Emoji are two columns wide and
+10. **Width is measured, not counted.** Emoji are two columns wide and
    `len()` says one; padding MUST use display width or every box edge on an
    emoji row shifts. The table is hand-rolled (~20 lines) rather than taken
    as a dependency, so §2's list is untouched. ✍️ MUST be emitted as
