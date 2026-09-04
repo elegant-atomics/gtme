@@ -6,6 +6,11 @@ design, so they aren't lost and aren't accidentally built early. Promotion
 out of this file requires an ADR in DECISIONS.md and, if spec-visible, an
 approved SPEC.md diff. See PROCESS.md.
 
+A section marked **BUILT** has been promoted and is no longer a plan: it
+is kept as the trail from the name to the ADR that answered it, and to
+hold whatever it named that is *still* open. Read those for history, not
+for what is coming.
+
 ## `expand` role
 
 DECISIONS.md ADR-008. A pipeline step that takes one record in and emits N
@@ -250,62 +255,37 @@ interactive surfaces should be *generated from declarations* — a select
 menu from an enum, a form from a config schema — never hand-built per
 adapter or per step.
 
-## Asynchronous steps
+## Asynchronous steps — BUILT
 
-Named 2026-08-28, not specified. A step that may return PENDING with a
-token instead of records, so a run ends with the step in flight and a
-later run (or `--resume`) hands the token back and collects. One
-mechanism serves two needs: the Message Batches API — AI steps at 50% of
-the per-token price, results keyed by `custom_id` in any order, which is
-gtme's record shape — and `listen`-style provider polling. Additive to
-the wire protocol (unknown message types are already ignored). Needs an
-ADR on run-record state and receipt rendering for in-flight steps.
+Graduated: ADR-038 (accepted 2026-08-28, drafted from this entry; amended
+in review 2026-08-29 for the last-step rule and collect-first). A step may
+end a run in flight under a token, and a later `gtme run` (or `--resume`)
+collects. Both needs it was named for are served: the Message Batches API
+for AI steps (`internal/ai`, one request per record keyed by `custom_id`),
+and the same mechanism now carries `human/*`/`agent/*` steps (ADR-049).
 
-## Judgment cache — no paid call twice by default
+What it was also named for and is still open: `listen`-style provider
+polling — see the `listen` verb entry above, which is the surface that
+would use this mechanism for inbound events.
 
-Named 2026-08-29 while amending ADR-038. Enrich/verify steps already
-cache-skip within a freshness window; AI steps never do, so a re-run
-re-judges every record unless the author remembered `exclude:`. The
-symmetric rule: a paid per-record call is never made twice for the same
-(identity, judgment signature = adapter + model + prompt hash + provides
-schema) within the window unless the step says `respend: true`. Needs: a
-durable verdict to reuse (filter verdicts live only in `run_records`;
-a step-event detail carrying the signature is enough — no table) and the
-re-application of a reused verdict (pass advances, fail freezes);
-composes get it almost free through the enrich cache once the prompt
-hash joins the provenance string (ADR-026's `ai/compose @ <model>` — a
-spec-visible format change). Sources stay excluded by design: a source's
-spend is the query, and "search once, consume the group" already covers
-it. Retires ADR-038's respend warning when it lands. Needs its own ADR.
+## Judgment cache — no paid call twice by default — BUILT
 
-**Promoted (2026-08-29, ADR-039 — accepted 2026-08-29; build queued as M16).** Keyed on a signature over
-the question (adapter, model, prompt, output shape, uses) and a hash of
-the record's projected inputs — no clock by default, `cache: Nd` to
-bound, `respend: true` to opt out — recorded in the `done` event and the
-provenance string; no table, no migration. The AI respend warning
-retires; the paid-enrich one stays.
+Graduated: ADR-039 (accepted 2026-08-29, drafted from this entry), built
+in M16 (spec v0.19). A paid per-record judgment is not made twice for the
+same (identity, judgment signature) within the window unless the step says
+`respend: true`; the signature is the step's question — adapter, model,
+prompt, output shape, `uses:`, and `of:` (ADR-048) — and the input hash
+is the facts it reads, excluding the step's own outputs. Kept here only
+as the trail from the name to the ADR.
 
-**Promoted (2026-08-28, ADR-038 — accepted 2026-08-29; build queued as M15).** The ADR answers the two
-questions above without new state grammar: in flight is a `pending` step
-event plus a `pending` run status, `--resume` is the collection verb, and
-opting in is `deferred: true` on an AI step. Batches only; `listen`
-polling reuses the mechanism later but keeps its own design pass (identity
-correlation for events). Waiting of any kind stays out — no daemon.
+## Deliver preflight — BUILT
 
-## Deliver preflight
-
-Named 2026-08-28, not specified. A deliver adapter MAY declare checks
-against the live target that `plan` or `--dry-run` runs before arming:
-campaign status is Active, step count matches, every merge field the
-copy expects is actually referenced by the template, no A/B variants —
-the class of failure where every request succeeds and nothing sends.
-Manifest capability, per adapter; the Instantly adapter is the first
-candidate.
-
-**Promoted (2026-08-29, ADR-040 — accepted 2026-08-29; build queued as M17).** At `--dry-run` and arm
-time, not `plan` (which stays zero-network): a short preflight session
-per deliver step, a three-way answer (`ok` / `blocked` / `inconclusive`),
-checks derived from the step's own `variables:`; Instantly first.
+Graduated: ADR-040 (accepted 2026-08-29, drafted from this entry), built
+in M17 (spec v0.21). A deliver adapter MAY declare checks against the
+live target that `plan` and `--dry-run` run before arming — the class of
+failure where
+every request succeeds and nothing sends. Kept here only as the trail
+from the name to the ADR.
 
 ## Email waterfall as a pattern, not a provider
 
@@ -332,30 +312,19 @@ and the model writes one person at a time knowing who else is written
 to. Revisit only if receipts show seat copy converging; a batching key is
 then a small change to how the runner chunks, not a new step.
 
-## Participants — humans and AI in the pipeline
+## Participants — humans and AI in the pipeline — BUILT
 
-A governing perspective (2026-09-01), named ahead of any single feature
-and distilled into a session packet the next day, after a conversation
-that overturned its first draft: **a participant's output is a ledger
-fact** (a verdict, a value, a label), written with provenance, never
-control flow — whether the participant is a model, a person, or an agent
-driving gtme. The positions are now proposed ADRs (accepted when the
-packet merges):
+Graduated: ADR-048, ADR-049 and ADR-050 (accepted 2026-09-02), built in
+M24 (spec v0.35). The governing position held: **a participant's output
+is a ledger fact** — a verdict, a value, a label, written with provenance,
+never control flow — whether the participant is a model, a person, or an
+agent driving gtme. Three roles by what goes in and what comes out
+(filter gates, compose writes, review labels and never gates); `human/*`
+and `agent/*` as runner-owned adapters; `gtme answer` as the one write
+path; `of:` as the referent; the `claude-code` shell-out and the
+`engine:` key retired.
 
-- **ADR-048** — three roles by what goes in, what comes out, and what
-  for: *filter* (pass/fail, the only role that gates), *compose* (writes
-  values; with `of:` an edit), *review* (labels about one value, never
-  gates); any participant fills any role; the referent (`of:`,
-  `field_values.referent`); `ai/review`; the arm gate stays a run
-  property; `route:` declined on the record.
-- **ADR-049** — people and agents are adapters: `human/{filter,compose,
-  review}` with `render:` and `prompt: tty | never`, `agent/*` as aliases
-  that never prompt; `gtme answer` as the one write path; a human step
-  may sit anywhere, with the cron consequence stated as a pattern.
-- **ADR-050** — the `claude-code` shell-out and the `engine:` key retire;
-  an agent is the driver, never a service the CLI calls.
-
-What the first draft got wrong, kept here so it is not re-proposed: an
+What the first draft got wrong, kept so it is not re-proposed: an
 `engine: human` switch under an `ai/*` name (who answers is the adapter's
 name, not a config key); "review" as a third kind of step (it is a role
 defined by its output — labels about a value — and it never gates); a
@@ -364,7 +333,7 @@ defined by its output — labels about a value — and it never gates); a
 runner" to a person at a terminal (the rule exists for cron and batch
 APIs; a terminal walk is an API with a little more latency).
 
-Still open, deliberately: **agent workflows.** A multi-pass agent (review
+**Still open, deliberately: agent workflows.** A multi-pass agent (review
 then verify, several perspectives) answers under an `agent/*` step like
 any agent; its name is provenance, and the judgment signature is the step
 declaration alone (the cache is checked before anyone answers). Whether a
