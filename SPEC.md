@@ -2179,7 +2179,8 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
-- **M25 — plan visualization (ADR-051; §7, §8, §13). Queued.**
+- **M25 — plan visualization (ADR-051; §7, §8, §13). Built 2026-09-04
+  (changelog v0.37).**
   `gtme plan --viz` appends a diagram of the resolved plan to the default
   output; `--viz-only` prints it instead. One renderer over the existing
   resolved plan — no planner change, no network, no spend, stderr like the
@@ -2445,6 +2446,19 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.37 — 2026-09-04 (M25 build: plan visualization, built)
+**Changed:** §11 M25 marked built. No normative text changed beyond that
+mark and one acceptance criterion: v0.36 had already written the surface,
+and this pass built it. `internal/planner/viz.go` renders the resolved plan
+as a diagram — a pure function over the existing plan, so the planner is
+untouched and the default listing is byte-identical with no flag; `--viz`
+appends it, `--viz-only` replaces the listing, and both together are a
+validation error. `gtme help --agent` carries the flags, since §8 requires
+it to be the full surface. M25's acceptance criterion was rewritten to name
+a role-complete pipeline rather than "both shipped examples":
+`examples/demo.yaml` does not pass `gtme plan` today, a divergence from
+README.md that predates this work and is recorded in AUDIT.md.
 
 ### v0.36 — 2026-09-03 (ADR-051: plan visualization)
 **Added:** §7 — `gtme plan --viz` appends a diagram of the resolved plan to

@@ -49,11 +49,11 @@ func TestDisplayWidthCountsEmojiAsTwoColumns(t *testing.T) {
 	}{
 		{"abc", 3},
 		{"", 0},
-		{"🌐", 2},          // executor glyph
-		{"✍️", 2},          // U+270D U+FE0F — emoji presentation, two columns
-		{"🌐📥", 4},         // the two-slot column
-		{"─", 1},          // box drawing stays one column
-		{"…", 1},          // the truncation marker
+		{"🌐", 2},            // executor glyph
+		{"✍️", 2},           // U+270D U+FE0F — emoji presentation, two columns
+		{"🌐📥", 4},           // the two-slot column
+		{"─", 1},            // box drawing stays one column
+		{"…", 1},            // the truncation marker
 		{"🌐 1  source", 12}, // emoji plus ASCII
 	} {
 		if got := displayWidth(tc.in); got != tc.want {
@@ -111,14 +111,14 @@ func TestVizShapeCarriesRole(t *testing.T) {
 func TestVizGlyphPairIsExecutorThenRole(t *testing.T) {
 	out := viz(t, vizPlan())
 	for _, want := range []string{
-		"🌐📥", // vendor source
-		"💻🤏", // ai filter
-		"🌐💎", // vendor enrich
-		"💾💎", // sql enrich — same role, different executor
-		"🌐👌", // vendor verify
+		"🌐📥",  // vendor source
+		"💻🤏",  // ai filter
+		"🌐💎",  // vendor enrich
+		"💾💎",  // sql enrich — same role, different executor
+		"🌐👌",  // vendor verify
 		"💻✍️", // ai compose
-		"🧑👀", // human review
-		"🌐🚀", // vendor deliver
+		"🧑👀",  // human review
+		"🌐🚀",  // vendor deliver
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no glyph pair %q in output:\n%s", want, out)
