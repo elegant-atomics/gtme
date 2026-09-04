@@ -3157,9 +3157,21 @@ is worth building now and would not be if pipelines branched.
    Inside the box it drifted with the funnel's taper, one column per row,
    which defeated the point of an index.
 
-5. **An unknown price keeps the column's shape.** `$?/rec` beside
-   `$0.0100/rec`, not `$ ?` — the value is unknown, the unit is not. SPEC
-   §7.4 mandates the `?`, not how it is set.
+5. **The price column distinguishes five states, and none of them lies.**
+   `$0.0100/rec` known and billable; `$0.0000/rec` known and free (sql,
+   group, a free vendor call); `$?/rec` a vendor will charge but the amount
+   is unknowable at plan time (an AI step is token-metered); `unset` the
+   ADR-046 case, a rate templating from config the operator never set; and
+   `--` for a participant step, where nothing can bill you at all — it is
+   runner-owned, opens no session, and reaches no vendor (ADR-049). `$?/rec`
+   on a `human/*` step would have claimed a vendor charge of unknown size,
+   which is a different and false thing; what a participant actually spent
+   arrives afterwards through `gtme answer --cost`, which is measurement,
+   not a plan-time gap. For the same reason such steps do not inflate the
+   header's unpriced count, which exists to flag spend you cannot see.
+   `$ ?` became `$?/rec` so the unknown keeps the column's shape: the value
+   is unknown, the unit is not. SPEC §7.4 mandates the `?`, not how it is
+   set, and the listing keeps printing its bare `?`.
 
 6. **The role word is a scannable column.** All caps, every role, so the
    left edge reads vertically as an index of what each step is. It overlaps

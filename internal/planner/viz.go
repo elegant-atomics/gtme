@@ -85,7 +85,10 @@ func vizHeadline(p *Plan) string {
 		switch {
 		case s.CostEstimate != nil:
 			est += *s.CostEstimate
-		case !s.IsSource && !s.IsSQL:
+		case s.IsSource, s.IsSQL, s.IsGroupSource, s.IsGroupDeliver, s.RunnerOwned():
+			// Nothing here bills a vendor, so none of it leaves the estimate
+			// incomplete — the count exists to flag spend you cannot see.
+		default:
 			unpriced++
 		}
 	}
@@ -209,6 +212,12 @@ func vizHeadRight(s *Step) string {
 	case s.IsSQL, s.IsGroupSource, s.IsGroupDeliver:
 		// Runner-owned and ledger-local: no vendor to bill it.
 		return "$0.0000/rec"
+	case s.RunnerOwned():
+		// A person or an agent answers this: no session, no vendor, nothing
+		// that can charge (ADR-049). A price of unknown size would be a
+		// claim; "--" is the true statement. What the participant spent, if
+		// anything, arrives later via `gtme answer --cost`.
+		return "--"
 	}
 	return "$?/rec"
 }

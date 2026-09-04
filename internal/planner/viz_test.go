@@ -594,3 +594,39 @@ func TestVizUnknownRoleIsNotDisguisedAsEnrich(t *testing.T) {
 		t.Errorf("unknown role not marked as unknown:\n%s", out)
 	}
 }
+
+// A participant step is runner-owned: no session, no vendor, nothing that
+// can bill you (ADR-049). "$?/rec" would claim a vendor charge of unknown
+// size; "--" says what is true — not applicable. A participant may report
+// spend afterwards with `gtme answer --cost`, which is measurement, not a
+// plan-time gap, so such a step does not inflate the unpriced count either.
+func TestVizParticipantStepsHaveNoVendorPrice(t *testing.T) {
+	p := vizPlan()
+	p.Steps = p.Steps[:8]
+	out := viz(t, p)
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.Contains(l, "human/review") {
+			continue
+		}
+		if strings.Contains(l, "$") {
+			t.Errorf("participant step priced as a vendor charge:\n%s", l)
+		}
+		if !strings.Contains(l, "--") {
+			t.Errorf("participant step should read -- :\n%s", l)
+		}
+		return
+	}
+	t.Fatal("no participant row rendered")
+}
+
+func TestVizParticipantStepsAreNotCountedUnpriced(t *testing.T) {
+	only := &Plan{
+		Pipeline: &pipeline.Pipeline{Name: "p", Version: 1},
+		Steps: []Step{{ID: "a", Use: "human/review", Role: adapters.RoleReview,
+			Participant: adapters.KindHuman, EntityType: "person"}},
+	}
+	head := strings.SplitN(viz(t, only), "\n", 3)[1]
+	if strings.Contains(head, "unpriced") {
+		t.Errorf("a participant step counted as unpriced: %q", head)
+	}
+}
