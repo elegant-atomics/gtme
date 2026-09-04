@@ -143,3 +143,40 @@ steps:
 			res.code, res.stderr)
 	}
 }
+
+// TestDemoPipelinePlans guards the zero-key demo's second rung. README.md
+// offers `gtme plan examples/demo.yaml`, and nothing tested it, so the file
+// drifted out of contract unnoticed: the Apollo search returns masked fields
+// only (ADR-043), and the later steps wanted full_name and email. --simulate
+// kept working the whole time, which is why it went unseen.
+func TestDemoPipelinePlans(t *testing.T) {
+	h := newHarness(t)
+
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "examples", "demo.yaml"))
+	if err != nil {
+		t.Fatalf("reading the demo pipeline: %v", err)
+	}
+	h.write("demo.yaml", string(raw))
+
+	env := []string{
+		"APOLLO_API_KEY=plan-only",
+		"ANTHROPIC_API_KEY=plan-only",
+		"ATTIO_API_KEY=plan-only",
+	}
+	res := h.runWithEnv(env, "", "plan", "demo.yaml")
+	if res.code != 0 {
+		t.Fatalf("exit = %d, want 0 — README.md offers this command\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "plan ok — nothing has been spent", "demo plan")
+
+	// The reveal sits past the filter, so the per-credit call is only made for
+	// records that survived it (ADR-043).
+	fit := strings.Index(res.stderr, "[filter] — ai/filter")
+	reveal := strings.Index(res.stderr, "[enrich] — apollo/enrich")
+	if fit < 0 || reveal < 0 {
+		t.Fatalf("demo should filter before it reveals:\n%s", res.stderr)
+	}
+	if reveal < fit {
+		t.Errorf("apollo/enrich runs before the filter — ADR-043 pays only past it")
+	}
+}

@@ -2196,9 +2196,10 @@ decided contract, not shipped behavior.
   than counting runes (emoji are two columns wide) via a hand-rolled table,
   leaving §2's dependency list untouched. Acceptance: a pipeline exercising
   every role renders under `--viz` and `--viz-only`, with every box row the
-  same display width; the default output is byte-identical with no flag;
-  every §7 fact still appears in the listing; `--viz` with `--viz-only` is a
-  validation error.
+  same display width and no line wider than a conventional terminal; both
+  shipped examples plan and render; the default output is byte-identical with
+  no flag; every §7 fact still appears in the listing; `--viz` with
+  `--viz-only` is a validation error.
 - **M23 — honest costs + engine-owned limit (ADR-046, ADR-047; §3, §5,
   §7, §8, §10a). Built 2026-09-01 (changelog v0.33).** Migration 0010
   rebuilds `costs` with `basis` (backfill `estimated`); the COST message

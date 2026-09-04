@@ -21,10 +21,15 @@ source:
 steps:
   - id: fit
     use: ai/filter
-    uses: [full_name, title, company_domain]
+    uses: [first_name, title, company_name]   # masked fields only — free (ADR-043)
     with:
       prompt: >
         Keep only people who plausibly own outbound tooling decisions.
+
+  - id: reveal              # ADR-043: pay Apollo's per-credit reveal only past the filter
+    use: apollo/enrich
+    when: fit.passed
+    cache: 30d
 
   - id: lines
     use: ai/compose

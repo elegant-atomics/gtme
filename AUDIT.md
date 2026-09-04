@@ -277,7 +277,7 @@ re-confirmed here, not re-litigated.
    global-per-adapter guarantee in words an operator will find. Queued
    for a session packet; not applied.
 
-## (a) Code bug found 2026-09-04 (M25 build) — open
+## (a) Code bug found 2026-09-04 (M25 build) — fixed
 
 - **`examples/demo.yaml` does not pass `gtme plan`.** README.md:299 offers
   `gtme plan examples/demo.yaml` as the second rung of the zero-key ladder,
@@ -292,8 +292,18 @@ re-confirmed here, not re-litigated.
 
   Found while checking M25's acceptance criteria against both shipped
   examples; it predates ADR-051 and reproduces identically on the commit
-  before it, so it is not a regression from the viz work. Not fixed here —
-  adding a step to a shipped example changes what that example teaches, and
-  that is an editorial call, not an audit fix. M25's acceptance criterion
-  was rewritten to name a role-complete pipeline rather than "both shipped
-  examples", so nothing in §11 now asserts the broken state.
+  before it, so it was not a regression from the viz work.
+
+  **Fixed 2026-09-04.** The naive fix — an `apollo/enrich` before the filter —
+  would have contradicted ADR-043, which pays Apollo's per-credit reveal only
+  *past* the filter and is the reason `examples/apollo-to-instantly.yaml` is
+  shaped the way it is. Instead `fit` now judges the masked fields the search
+  already returns (`first_name, title, company_name`, free), and a `reveal`
+  step (`apollo/enrich`, `when: fit.passed`, `cache: 30d`) supplies
+  `full_name`/`email`/`company_domain` to the compose and deliver steps that
+  need them. `gtme plan` passes, and `gtme run --simulate` still runs the
+  whole pipeline offline with no keys — the demo's headline promise — now
+  resolving `name: "Jane Doe"` from the revealed `full_name` that was
+  missing. The demo gained a lesson rather than losing one: it now shows
+  ADR-043's ordering, which is the non-obvious part of building an Apollo
+  pipeline.
