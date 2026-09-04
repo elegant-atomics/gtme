@@ -211,15 +211,110 @@ func TestVizDeltaBelongsToTheStepAbove(t *testing.T) {
 	}
 }
 
-// The fork's `│ pass` is itself the connector; a bare rail under it is noise.
-func TestVizForkDoesNotDoubleTheConnector(t *testing.T) {
-	lines := strings.Split(viz(t, vizPlan()), "\n")
-	for i, l := range lines {
-		if !strings.HasSuffix(l, "│ pass") || i+1 >= len(lines) {
-			continue
-		}
-		if strings.TrimSpace(lines[i+1]) == "│" {
-			t.Errorf("bare rail duplicates the fork's connector at line %d", i+1)
+// The fork is two lines: the failing branch, then the arrow that carries the
+// passing one. A third line spent on a bare rail is noise.
+func TestVizForkIsTwoLines(t *testing.T) {
+	out := viz(t, vizPlan())
+	if !strings.Contains(out, "▼ pass") {
+		t.Errorf("the passing branch should label the arrow:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.TrimSpace(l) == "│ pass" {
+			t.Errorf("fork still spends a line on the passing branch alone")
 		}
 	}
+}
+
+// A diagonal edge replaces a corner glyph in place; it must not be indented
+// away from the rail above it, or the silhouette floats free of its own frame.
+func TestVizDiagonalRulesShareTheBoxIndent(t *testing.T) {
+	for _, l := range strings.Split(viz(t, vizPlan()), "\n") {
+		trimmed := strings.TrimLeft(l, " ")
+		if trimmed == "" {
+			continue
+		}
+		if !strings.ContainsRune("╲╱", []rune(trimmed)[0]) {
+			continue
+		}
+		if indent := len(l) - len(trimmed); indent != vizIndent {
+			t.Errorf("diagonal rule indented %d, want %d (it must meet the rail above):\n%s",
+				indent, vizIndent, l)
+		}
+	}
+}
+
+// Every rule between two steps carries the spine, so the boxes read as one
+// run rather than a stack of unconnected frames.
+func TestVizRulesJoinTheSpine(t *testing.T) {
+	lines := strings.Split(viz(t, vizPlan()), "\n")
+	var down, up int
+	for _, l := range lines {
+		for _, j := range []string{"┬", "┰"} {
+			if strings.Contains(l, j) {
+				down++
+			}
+		}
+		for _, j := range []string{"┴", "┸"} {
+			if strings.Contains(l, j) {
+				up++
+			}
+		}
+	}
+	// Eight steps: seven outgoing joints and seven incoming ones.
+	if down != 7 {
+		t.Errorf("outgoing spine joints = %d, want 7", down)
+	}
+	if up != 7 {
+		t.Errorf("incoming spine joints = %d, want 7", up)
+	}
+}
+
+// vizMaxLine is the widest line the diagram may produce: the frame plus the
+// connector labels beside it, inside a conventional 80-column terminal.
+func TestVizNoLineExceedsTheTerminalWidth(t *testing.T) {
+	p := vizPlan()
+	// A step providing many long field names is the case that overflows.
+	p.Steps[2].Provides = []string{
+		"company_industry", "company_employees", "company_linkedin_url",
+		"company_website", "email_status", "seniority", "linkedin_url", "city",
+	}
+	for _, l := range strings.Split(viz(t, p), "\n") {
+		if got := displayWidth(l); got > vizMaxLine {
+			t.Errorf("line is %d columns, want <= %d:\n%s", got, vizMaxLine, l)
+		}
+	}
+}
+
+// The wave is the compose step's floor; its corners stay rounded with it.
+func TestVizComposeFloorKeepsRoundedCorners(t *testing.T) {
+	out := viz(t, vizPlan())
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.Contains(l, "~") {
+			continue
+		}
+		trimmed := strings.TrimSpace(l)
+		if !strings.HasPrefix(trimmed, "╰") || !strings.HasSuffix(trimmed, "╯") {
+			t.Errorf("wavy floor should keep rounded corners, got:\n%s", l)
+		}
+		return
+	}
+	t.Fatal("no wavy floor rendered")
+}
+
+// Canonical fields carry more meaning than vendor-namespaced ones (§4a), so
+// when the label truncates it is the vendor noise that goes.
+func TestVizDeltaPrefersCanonicalFields(t *testing.T) {
+	p := vizPlan()
+	p.Steps[0].Provides = []string{"apollo.has_email", "apollo.id", "first_name", "title"}
+	out := viz(t, p)
+	for _, l := range strings.Split(out, "\n") {
+		if !strings.Contains(l, "+ ") {
+			continue
+		}
+		if !strings.Contains(l, "+ first_name, title") {
+			t.Errorf("canonical fields should lead the label, got:\n%s", l)
+		}
+		return
+	}
+	t.Fatal("no delta label rendered")
 }

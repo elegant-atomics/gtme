@@ -18,9 +18,10 @@ import (
 // The frame is fixed: no colour, no TTY detection, no terminal-width
 // autodetection, so the bytes are deterministic and golden-testable.
 const (
-	vizWidth  = 64 // box width, borders included
-	vizIndent = 2
-	vizSpine  = vizIndent + vizWidth/2 // the connector column
+	vizWidth   = 64 // box width, borders included
+	vizIndent  = 2
+	vizSpine   = vizIndent + vizWidth/2 // the connector column
+	vizMaxLine = 78                     // widest line, inside an 80-column terminal
 )
 
 // Viz writes the diagram for p.
@@ -34,7 +35,7 @@ func Viz(w io.Writer, p *Plan) {
 	seen := map[string]bool{}
 	for i := range p.Steps {
 		s := &p.Steps[i]
-		for _, line := range vizBox(s, i+1) {
+		for _, line := range vizBox(s, i+1, i > 0, i < len(p.Steps)-1) {
 			fmt.Fprintln(w, line)
 		}
 		if i == len(p.Steps)-1 {
@@ -92,15 +93,22 @@ func plural(n int, noun string) string {
 }
 
 // delta is what this step adds to the available set, and advances it.
+// Canonical fields lead: a vendor-namespaced name (§4a) says less about what
+// the record now holds, so it is the first thing a truncated label drops.
 func delta(s *Step, seen map[string]bool) []string {
-	var added []string
+	var canonical, vendor []string
 	for _, f := range s.Provides {
-		if !seen[f] {
-			seen[f] = true
-			added = append(added, f)
+		if seen[f] {
+			continue
+		}
+		seen[f] = true
+		if strings.Contains(f, ".") {
+			vendor = append(vendor, f)
+		} else {
+			canonical = append(canonical, f)
 		}
 	}
-	return added
+	return append(canonical, vendor...)
 }
 
 // vizEdge draws the connector, labelled with the step's contribution to the
@@ -108,21 +116,21 @@ func delta(s *Step, seen map[string]bool) []string {
 // unlabelled edge adds nothing and is skipped.
 func vizEdge(w io.Writer, added []string, forked bool) {
 	pad := strings.Repeat(" ", vizSpine)
-	switch {
-	case len(added) > 0:
-		fmt.Fprintf(w, "%s│  + %s\n", pad, joinCapped(added, 4))
-	case !forked:
-		fmt.Fprintln(w, pad+"│")
+	if len(added) > 0 {
+		fmt.Fprintf(w, "%s│  + %s\n", pad, fitFields(added, vizMaxLine-vizSpine-5))
 	}
-	fmt.Fprintln(w, pad+"▼")
+	arrow := pad + "▼"
+	if forked {
+		arrow += " pass"
+	}
+	fmt.Fprintln(w, arrow)
 }
 
-// vizFork is the filter's two outcomes: SPEC §7 freezes a failing record at
-// the step rather than dropping it, so both branches are named.
+// vizFork is the filter's failing branch: SPEC §7 freezes such a record at the
+// step rather than dropping it. The passing branch labels the arrow itself
+// (see vizEdge), so the fork costs one line, not three.
 func vizFork(w io.Writer) {
-	pad := strings.Repeat(" ", vizSpine)
-	fmt.Fprintln(w, pad+"├───╴ fail: record freezes here")
-	fmt.Fprintln(w, pad+"│ pass")
+	fmt.Fprintln(w, strings.Repeat(" ", vizSpine)+"├──╴ fail — record freezes here")
 }
 
 // joinCapped lists at most n fields, summarising the rest as "+N".
@@ -133,8 +141,22 @@ func joinCapped(v []string, n int) string {
 	return fmt.Sprintf("%s, +%d", strings.Join(v[:n], ", "), len(v)-n)
 }
 
+// fitFields lists as many fields as avail columns hold, summarising the rest
+// as "+N" — so a step providing twenty fields still names some of them rather
+// than running off the edge or collapsing to a bare count.
+func fitFields(v []string, avail int) string {
+	for n := len(v); n > 1; n-- {
+		if displayWidth(joinCapped(v, n)) <= avail {
+			return joinCapped(v, n)
+		}
+	}
+	return joinCapped(v, 1)
+}
+
 // vizBox renders one step. Shape carries role; the rows carry the facts.
-func vizBox(s *Step, n int) []string {
+// in/out say whether the spine enters from above and leaves below, so the
+// frame can be joined to it rather than floating over it.
+func vizBox(s *Step, n int, in, out bool) []string {
 	head := fmt.Sprintf("%s%s %d  %-10s %s", executorGlyph(s), roleGlyph(s), n, vizRole(s), s.Use)
 	if s.Manifest != nil {
 		head += fmt.Sprintf("@%d", s.Manifest.Version)
@@ -143,7 +165,7 @@ func vizBox(s *Step, n int) []string {
 	if l, r := vizGate(s); l != "" || r != "" {
 		rows = append(rows, [2]string{"      " + l, r})
 	}
-	return vizFrame(s, rows)
+	return vizFrame(s, rows, in, out)
 }
 
 // vizHeadRight is the top row's right column: the entity a source mints, and
@@ -251,43 +273,55 @@ func roleGlyph(s *Step) string {
 	return "💎"
 }
 
-// vizFrame draws rows inside the silhouette for s. Angled edges inset by
-// exactly one column so their corners meet the vertical rails, and the outline
-// angles once rather than per row — a step carrying four gate lines does not
-// taper away.
-func vizFrame(s *Step, rows [][2]string) []string {
+// vizFrame draws rows inside the silhouette for s. A diagonal edge replaces a
+// corner glyph in place rather than being indented away from it, so the funnel's
+// outlet and the trapezoid's lid meet the rails they belong to; and the rules
+// carry the spine's joint, so the boxes read as one run rather than a stack.
+func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 	rail, fill := "│", "─"
-	top := "┌" + strings.Repeat(fill, vizWidth-2) + "┐"
-	bottom := "└" + strings.Repeat(fill, vizWidth-2) + "┘"
-	indentTop, indentBottom := vizIndent, vizIndent
+	tl, tr, bl, br := "┌", "┐", "└", "┘"
+	up, down := "┴", "┬"
+	botFill := ""
 
 	switch {
 	case s.IsSource:
-		top = "╭" + strings.Repeat(fill, vizWidth-2) + "╮"
-		bottom = "╰" + strings.Repeat(fill, vizWidth-2) + "╯"
+		tl, tr, bl, br = "╭", "╮", "╰", "╯"
 	case s.IsDeliver:
 		rail, fill = "┃", "━"
-		top = "┏" + strings.Repeat(fill, vizWidth-2) + "┓"
-		bottom = "┗" + strings.Repeat(fill, vizWidth-2) + "┛"
-	case s.Role == adapters.RoleFilter: // funnel: full-width top, narrowed outlet
-		bottom = "╲" + strings.Repeat(fill, vizWidth-4) + "╱"
-		indentBottom = vizIndent + 1
-	case s.Role == adapters.RoleReview: // manual operation: narrow lid
-		top = "╱" + strings.Repeat(fill, vizWidth-4) + "╲"
-		indentTop = vizIndent + 1
-	case s.Role == adapters.RoleVerify: // adds no fields: doubled rails
-		rail = "║"
-		top = "╓" + strings.Repeat(fill, vizWidth-2) + "╖"
-		bottom = "╙" + strings.Repeat(fill, vizWidth-2) + "╜"
-	case s.Role == adapters.RoleCompose: // document: wavy floor
-		bottom = "╰" + strings.Repeat("~", vizWidth-2) + "╯"
+		tl, tr, bl, br = "┏", "┓", "┗", "┛"
+		// A light spine meeting a heavy rule: the joint keeps both weights.
+		up, down = "┸", "┰"
+	case s.Role == adapters.RoleFilter:
+		bl, br = "╲", "╱" // funnel: the outlet narrows
+	case s.Role == adapters.RoleReview:
+		tl, tr = "╱", "╲" // manual operation: the lid is the narrow end
+	case s.Role == adapters.RoleVerify:
+		rail = "║" // adds no fields
+		tl, tr, bl, br = "╓", "╖", "╙", "╜"
+	case s.Role == adapters.RoleCompose:
+		botFill = "~" // document
+		bl, br = "╰", "╯"
+
+	}
+	if botFill == "" {
+		botFill = fill
 	}
 
-	out := []string{strings.Repeat(" ", indentTop) + top}
+	out2 := []string{strings.Repeat(" ", vizIndent) + tl + spineRule(fill, up, in) + tr}
 	for _, r := range rows {
-		out = append(out, strings.Repeat(" ", vizIndent)+rail+vizRow(r[0], r[1])+rail)
+		out2 = append(out2, strings.Repeat(" ", vizIndent)+rail+vizRow(r[0], r[1])+rail)
 	}
-	return append(out, strings.Repeat(" ", indentBottom)+bottom)
+	return append(out2, strings.Repeat(" ", vizIndent)+bl+spineRule(botFill, down, out)+br)
+}
+
+// spineRule is a box's horizontal rule with the spine's joint set into it at
+// the connector column, or plain fill when no edge meets it there.
+func spineRule(fill, joint string, joined bool) string {
+	if !joined {
+		return strings.Repeat(fill, vizWidth-2)
+	}
+	at := vizSpine - vizIndent - 1 // the joint's index within the fill
+	return strings.Repeat(fill, at) + joint + strings.Repeat(fill, vizWidth-3-at)
 }
 
 // vizRow lays one row's left and right text into the frame's inner width,
