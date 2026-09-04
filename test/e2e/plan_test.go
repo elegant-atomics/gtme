@@ -261,3 +261,76 @@ const needsKeyManifest = `{
   "credentials": ["FIXTURE_API_KEY"],
   "freshness_days": 30
 }`
+
+// TestPlanVizAppendsTheDiagram is the M25 acceptance test (ADR-051): --viz is
+// additive. The default output is still there in full, with the picture after
+// it, and the diagram is never the only place a §7 fact appears.
+func TestPlanVizAppendsTheDiagram(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	h.write("pipeline.yaml", csvToMockYAML)
+
+	plain := h.mustRun("plan", "pipeline.yaml")
+	res := h.mustRun("plan", "pipeline.yaml", "--viz")
+
+	// Everything the listing prints is still printed.
+	for _, want := range []string{
+		"1. source [source] — csv/source@1",
+		"provides:  mock.note, mock.score",
+		"est/record: $0.0000",
+		"plan ok — nothing has been spent",
+	} {
+		contains(t, res.stderr, want, "--viz keeps the listing")
+	}
+	// And the diagram follows it.
+	for _, want := range []string{"🌐📥", "╭─", "│  + "} {
+		contains(t, res.stderr, want, "--viz adds the diagram")
+	}
+	if len(res.stderr) <= len(plain.stderr) {
+		t.Errorf("--viz did not append anything")
+	}
+	if res.stdout != "" {
+		t.Errorf("--viz writes to stderr; stdout should stay empty, got:\n%s", res.stdout)
+	}
+}
+
+// TestPlanVizOnlyReplacesTheListing: the same plan, the picture alone.
+func TestPlanVizOnlyReplacesTheListing(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	h.write("pipeline.yaml", csvToMockYAML)
+
+	res := h.mustRun("plan", "pipeline.yaml", "--viz-only")
+	contains(t, res.stderr, "🌐📥", "--viz-only prints the diagram")
+	if strings.Contains(res.stderr, "est/record:") {
+		t.Errorf("--viz-only should replace the listing, got:\n%s", res.stderr)
+	}
+}
+
+// TestPlanDefaultOutputIsUnchanged: the flags are opt-in. Bare `gtme plan`
+// prints exactly what it printed before ADR-051 — no glyph, no frame.
+func TestPlanDefaultOutputIsUnchanged(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	h.write("pipeline.yaml", csvToMockYAML)
+
+	res := h.mustRun("plan", "pipeline.yaml")
+	for _, unwanted := range []string{"🌐", "📥", "╭", "┏"} {
+		if strings.Contains(res.stderr, unwanted) {
+			t.Errorf("default plan output contains diagram glyph %q:\n%s", unwanted, res.stderr)
+		}
+	}
+}
+
+// TestPlanVizRejectsBothFlags: --viz and --viz-only contradict each other.
+func TestPlanVizRejectsBothFlags(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	h.write("pipeline.yaml", csvToMockYAML)
+
+	res := h.run("plan", "pipeline.yaml", "--viz", "--viz-only")
+	if res.code != 2 {
+		t.Errorf("exit = %d, want 2 (validation)", res.code)
+	}
+	contains(t, res.stderr, "--viz", "the error names the flags")
+}
