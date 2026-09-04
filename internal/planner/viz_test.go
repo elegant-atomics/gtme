@@ -62,33 +62,65 @@ func TestDisplayWidthCountsEmojiAsTwoColumns(t *testing.T) {
 	}
 }
 
-// isBoxRow reports a box's body row — opening and closing on a vertical rail.
-// The spine connectors also carry `│`, but they end in text, not a rail.
+// isBoxRow reports a box's body row — opening and closing on a rail, vertical
+// or diagonal. The spine connectors also carry `│`, but they end in text.
 func isBoxRow(line string) bool {
 	r := []rune(strings.TrimSpace(line))
 	if len(r) < 2 {
 		return false
 	}
-	const rails = "│┃║"
+	const rails = "│┃║╲╱"
 	return strings.ContainsRune(rails, r[0]) && strings.ContainsRune(rails, r[len(r)-1])
 }
 
-// The frame must not move. Every body row a box contributes is the same number
-// of display columns, or an emoji row ragged the right rail.
-func TestVizBoxRowsAreUniformWidth(t *testing.T) {
+func indentOf(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
+
+// A tapered box's rows are deliberately not all the same width — that is what
+// draws the funnel. What must hold is that every row stays centred on the same
+// axis, so the two sides taper in step and neither rail wanders.
+func TestVizBoxRowsShareOneAxis(t *testing.T) {
+	const axis = 2*vizIndent + vizWidth
 	rows := 0
 	for _, line := range strings.Split(viz(t, vizPlan()), "\n") {
 		if !isBoxRow(line) {
 			continue
 		}
 		rows++
-		if got := displayWidth(line); got != vizWidth+vizIndent {
-			t.Errorf("row is %d columns, want %d:\n%s", got, vizWidth+vizIndent, line)
+		if got := 2*indentOf(line) + displayWidth(strings.TrimLeft(line, " ")); got != axis {
+			t.Errorf("row is off the axis (%d, want %d):\n%s", got, axis, line)
 		}
 	}
 	if rows == 0 {
 		t.Fatal("no box rows rendered")
 	}
+}
+
+// A funnel's sides descend one column per row, so the diagonals stack into a
+// continuous line rather than kinking at a single step.
+func TestVizFunnelTapersOneColumnPerRow(t *testing.T) {
+	lines := strings.Split(viz(t, vizPlan()), "\n")
+	var run []int
+	for _, l := range lines {
+		trimmed := strings.TrimLeft(l, " ")
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "┌"), strings.HasPrefix(trimmed, "╲"):
+			run = append(run, indentOf(l))
+		case len(run) > 0:
+			for i := 1; i < len(run); i++ {
+				if run[i] != run[i-1]+1 {
+					t.Errorf("funnel side steps %d columns between rows, want 1", run[i]-run[i-1])
+				}
+			}
+			if len(run) < 3 {
+				t.Errorf("funnel drew %d diagonal rows, want the full taper", len(run))
+			}
+			return
+		}
+	}
+	t.Fatal("no funnel rendered")
 }
 
 func TestVizShapeCarriesRole(t *testing.T) {
@@ -169,7 +201,7 @@ func TestVizTruncatesRatherThanOverflowing(t *testing.T) {
 		t.Errorf("long adapter name not truncated:\n%s", out)
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if isBoxRow(line) && displayWidth(line) != vizWidth+vizIndent {
+		if isBoxRow(line) && 2*indentOf(line)+displayWidth(strings.TrimLeft(line, " ")) != 2*vizIndent+vizWidth {
 			t.Errorf("truncation broke the frame:\n%s", line)
 		}
 	}
@@ -221,24 +253,6 @@ func TestVizForkIsTwoLines(t *testing.T) {
 	for _, l := range strings.Split(out, "\n") {
 		if strings.TrimSpace(l) == "│ pass" {
 			t.Errorf("fork still spends a line on the passing branch alone")
-		}
-	}
-}
-
-// A diagonal edge replaces a corner glyph in place; it must not be indented
-// away from the rail above it, or the silhouette floats free of its own frame.
-func TestVizDiagonalRulesShareTheBoxIndent(t *testing.T) {
-	for _, l := range strings.Split(viz(t, vizPlan()), "\n") {
-		trimmed := strings.TrimLeft(l, " ")
-		if trimmed == "" {
-			continue
-		}
-		if !strings.ContainsRune("╲╱", []rune(trimmed)[0]) {
-			continue
-		}
-		if indent := len(l) - len(trimmed); indent != vizIndent {
-			t.Errorf("diagonal rule indented %d, want %d (it must meet the rail above):\n%s",
-				indent, vizIndent, l)
 		}
 	}
 }

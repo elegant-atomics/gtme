@@ -286,15 +286,19 @@ func roleGlyph(s *Step) string {
 	return "💎"
 }
 
-// vizFrame draws rows inside the silhouette for s. A diagonal edge replaces a
-// corner glyph in place rather than being indented away from it, so the funnel's
-// outlet and the trapezoid's lid meet the rails they belong to; and the rules
-// carry the spine's joint, so the boxes read as one run rather than a stack.
+// vizFrame draws rows inside the silhouette for s. The tapered shapes — the
+// filter's funnel and the review step's trapezoid — step one column per row on
+// each side, so their diagonals stack into a continuous line; a single-step
+// diagonal kinks against the rule it meets. Every row stays centred on the
+// same axis, so the two sides taper in step.
 func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 	rail, fill := "│", "─"
 	tl, tr, bl, br := "┌", "┐", "└", "┘"
 	up, down := "┴", "┬"
 	botFill := ""
+	// taper is the column each successive row moves inward (funnel) or
+	// outward (trapezoid); 0 leaves the sides vertical.
+	taper := 0
 
 	switch {
 	case s.IsSource:
@@ -305,42 +309,66 @@ func vizFrame(s *Step, rows [][2]string, in, out bool) []string {
 		// A light spine meeting a heavy rule: the joint keeps both weights.
 		up, down = "┸", "┰"
 	case s.Role == adapters.RoleFilter:
-		bl, br = "╲", "╱" // funnel: the outlet narrows
+		rail, bl, br = "╲", "╲", "╱" // funnel: narrows toward the outlet
+		taper = 1
 	case s.Role == adapters.RoleReview:
-		tl, tr = "╱", "╲" // manual operation: the lid is the narrow end
+		rail, tl, tr = "╱", "╱", "╲" // manual operation: widens from a narrow lid
+		taper = -1
 	case s.Role == adapters.RoleVerify:
 		rail = "║" // adds no fields
 		tl, tr, bl, br = "╓", "╖", "╙", "╜"
 	case s.Role == adapters.RoleCompose:
 		botFill = "~" // document
 		bl, br = "╰", "╯"
-
 	}
 	if botFill == "" {
 		botFill = fill
 	}
 
-	out2 := []string{strings.Repeat(" ", vizIndent) + tl + spineRule(fill, up, in) + tr}
-	for _, r := range rows {
-		out2 = append(out2, strings.Repeat(" ", vizIndent)+rail+vizRow(r[0], r[1])+rail)
+	// A trapezoid starts at its narrow lid and widens; a funnel starts wide.
+	steps := len(rows) + 1
+	indent := vizIndent
+	if taper < 0 {
+		indent = vizIndent + steps
 	}
-	return append(out2, strings.Repeat(" ", vizIndent)+bl+spineRule(botFill, down, out)+br)
+	width := vizWidth - 2*(indent-vizIndent)
+
+	line := func(left, right, f, joint string, joined bool) string {
+		return strings.Repeat(" ", indent) + left + spineRule(f, joint, joined, indent, width) + right
+	}
+	advance := func() {
+		indent += taper
+		width -= 2 * taper
+	}
+
+	out2 := []string{line(tl, tr, fill, up, in)}
+	for _, r := range rows {
+		advance()
+		lRail, rRail := rail, rail
+		if taper > 0 {
+			rRail = "╱"
+		} else if taper < 0 {
+			lRail, rRail = "╱", "╲"
+		}
+		out2 = append(out2, strings.Repeat(" ", indent)+lRail+vizRow(r[0], r[1], width-2)+rRail)
+	}
+	advance()
+	return append(out2, line(bl, br, botFill, down, out))
 }
 
 // spineRule is a box's horizontal rule with the spine's joint set into it at
 // the connector column, or plain fill when no edge meets it there.
-func spineRule(fill, joint string, joined bool) string {
+func spineRule(fill, joint string, joined bool, indent, width int) string {
 	if !joined {
-		return strings.Repeat(fill, vizWidth-2)
+		return strings.Repeat(fill, width-2)
 	}
-	at := vizSpine - vizIndent - 1 // the joint's index within the fill
-	return strings.Repeat(fill, at) + joint + strings.Repeat(fill, vizWidth-3-at)
+	at := vizSpine - indent - 1 // the joint's index within the fill
+	return strings.Repeat(fill, at) + joint + strings.Repeat(fill, width-3-at)
 }
 
 // vizRow lays one row's left and right text into the frame's inner width,
 // truncating the left rather than letting it overflow.
-func vizRow(left, right string) string {
-	inner := vizWidth - 2
+func vizRow(left, right string, inner int) string {
 	left = clipWidth(left, inner-3-displayWidth(right))
 	gap := inner - 2 - displayWidth(left) - displayWidth(right)
 	if gap < 1 {
