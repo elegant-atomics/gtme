@@ -42,7 +42,7 @@ func TestReferentIsRecordedAndProjected(t *testing.T) {
 func TestAnswersLatestWins(t *testing.T) {
 	ctx := context.Background()
 	l, _ := openTest(t)
-	run, err := l.CreateRun(ctx, "review", nil)
+	run, err := l.CreateRun(ctx, "review", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

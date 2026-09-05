@@ -29,7 +29,7 @@ func TestPipelineRecordsReadTerminality(t *testing.T) {
 		ID string `json:"id"`
 	}
 	snapshot := map[string]any{"name": "drain", "steps": []step{{ID: "gate"}, {ID: "send"}}}
-	a, err := l.CreateRun(ctx, "drain", snapshot)
+	a, err := l.CreateRun(ctx, "drain", snapshot, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,21 +47,27 @@ func TestPipelineRecordsReadTerminality(t *testing.T) {
 	must(l.FinishRun(ctx, a.ID, StatusDone))
 
 	// Another pipeline's run over the same people is not this pipeline's history.
-	other, err := l.CreateRun(ctx, "elsewhere", snapshot)
+	other, err := l.CreateRun(ctx, "elsewhere", snapshot, false)
 	must(err)
 	must(l.AddRunRecord(ctx, other.ID, ids["x@acme.com"], StateSourced))
 
 	// A source-only run finishes at 'sourced'.
-	b, err := l.CreateRun(ctx, "drain", map[string]any{"name": "drain"})
+	b, err := l.CreateRun(ctx, "drain", map[string]any{"name": "drain"}, false)
 	must(err)
 	must(l.AddRunRecord(ctx, b.ID, ids["z@acme.com"], StateSourced))
+
+	// A rehearsal's records come back marked dry (ADR-052 (7)).
+	d, err := l.CreateRun(ctx, "drain", snapshot, true)
+	must(err)
+	must(l.AddRunRecord(ctx, d.ID, ids["y@acme.com"], StateSourced))
+	must(l.SetRunRecordState(ctx, d.ID, ids["y@acme.com"], "send"))
 
 	recs, err := l.PipelineRecords(ctx, "drain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recs) != 4 {
-		t.Fatalf("got %d records, want 4: %+v", len(recs), recs)
+	if len(recs) != 5 {
+		t.Fatalf("got %d records, want 5: %+v", len(recs), recs)
 	}
 	byKey := map[string]PipelineRecord{}
 	for _, r := range recs {
@@ -81,5 +87,12 @@ func TestPipelineRecordsReadTerminality(t *testing.T) {
 	}
 	if _, ok := byKey[other.ID+"/"+ids["x@acme.com"]]; ok {
 		t.Error("another pipeline's run leaked into the answer")
+	}
+	dry := byKey[d.ID+"/"+ids["y@acme.com"]]
+	if !dry.Dry || dry.State != "send" {
+		t.Errorf("rehearsal record = %+v, want Dry with state send", dry)
+	}
+	if x.Dry {
+		t.Error("an armed run's record must not be marked dry")
 	}
 }

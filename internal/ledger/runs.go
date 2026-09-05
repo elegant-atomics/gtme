@@ -43,10 +43,15 @@ type Run struct {
 	StartedAt  string
 	FinishedAt string
 	Status     string
+	// Dry marks a --dry-run rehearsal (SPEC §3, ADR-052 (7)): an ordinary
+	// run in every other respect, but it finishes nothing a once: source
+	// counts.
+	Dry bool
 }
 
-// CreateRun opens a run with a snapshot of the resolved config.
-func (l *Ledger) CreateRun(ctx context.Context, pipeline string, config any) (Run, error) {
+// CreateRun opens a run with a snapshot of the resolved config; dry marks a
+// rehearsal.
+func (l *Ledger) CreateRun(ctx context.Context, pipeline string, config any, dry bool) (Run, error) {
 	raw := []byte("{}")
 	if config != nil {
 		var err error
@@ -60,10 +65,11 @@ func (l *Ledger) CreateRun(ctx context.Context, pipeline string, config any) (Ru
 		ConfigJSON: string(raw),
 		StartedAt:  l.stamp(l.now()),
 		Status:     StatusRunning,
+		Dry:        dry,
 	}
 	_, err := l.db.ExecContext(ctx,
-		`INSERT INTO runs (id, pipeline, config_json, started_at, status) VALUES (?, ?, ?, ?, ?)`,
-		run.ID, run.Pipeline, run.ConfigJSON, run.StartedAt, run.Status)
+		`INSERT INTO runs (id, pipeline, config_json, started_at, status, dry) VALUES (?, ?, ?, ?, ?, ?)`,
+		run.ID, run.Pipeline, run.ConfigJSON, run.StartedAt, run.Status, run.Dry)
 	if err != nil {
 		return Run{}, fmt.Errorf("ledger: inserting run: %w", err)
 	}
@@ -75,8 +81,8 @@ func (l *Ledger) GetRun(ctx context.Context, id string) (Run, error) {
 	var r Run
 	var finished sql.NullString
 	err := l.db.QueryRowContext(ctx,
-		`SELECT id, pipeline, config_json, started_at, finished_at, status FROM runs WHERE id = ?`, id).
-		Scan(&r.ID, &r.Pipeline, &r.ConfigJSON, &r.StartedAt, &finished, &r.Status)
+		`SELECT id, pipeline, config_json, started_at, finished_at, status, dry FROM runs WHERE id = ?`, id).
+		Scan(&r.ID, &r.Pipeline, &r.ConfigJSON, &r.StartedAt, &finished, &r.Status, &r.Dry)
 	if err == sql.ErrNoRows {
 		return Run{}, ErrNotFound
 	}
@@ -89,7 +95,7 @@ func (l *Ledger) GetRun(ctx context.Context, id string) (Run, error) {
 
 // ListRuns returns runs newest first, at most limit (0 = all).
 func (l *Ledger) ListRuns(ctx context.Context, limit int) ([]Run, error) {
-	q := `SELECT id, pipeline, config_json, started_at, finished_at, status FROM runs ORDER BY id DESC`
+	q := `SELECT id, pipeline, config_json, started_at, finished_at, status, dry FROM runs ORDER BY id DESC`
 	args := []any{}
 	if limit > 0 {
 		q += " LIMIT ?"
@@ -104,7 +110,7 @@ func (l *Ledger) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	for rows.Next() {
 		var r Run
 		var finished sql.NullString
-		if err := rows.Scan(&r.ID, &r.Pipeline, &r.ConfigJSON, &r.StartedAt, &finished, &r.Status); err != nil {
+		if err := rows.Scan(&r.ID, &r.Pipeline, &r.ConfigJSON, &r.StartedAt, &finished, &r.Status, &r.Dry); err != nil {
 			return nil, fmt.Errorf("ledger: listing runs: %w", err)
 		}
 		r.FinishedAt = finished.String
@@ -135,9 +141,9 @@ func (l *Ledger) LastRunForPipeline(ctx context.Context, pipeline string) (Run, 
 	var run Run
 	var finished sql.NullString
 	err := l.db.QueryRowContext(ctx,
-		`SELECT id, pipeline, config_json, started_at, finished_at, status FROM runs
+		`SELECT id, pipeline, config_json, started_at, finished_at, status, dry FROM runs
 		 WHERE pipeline = ? ORDER BY started_at DESC, id DESC LIMIT 1`, pipeline).
-		Scan(&run.ID, &run.Pipeline, &run.ConfigJSON, &run.StartedAt, &finished, &run.Status)
+		Scan(&run.ID, &run.Pipeline, &run.ConfigJSON, &run.StartedAt, &finished, &run.Status, &run.Dry)
 	if err == sql.ErrNoRows {
 		return Run{}, ErrNotFound
 	}
@@ -345,6 +351,8 @@ func (l *Ledger) SetVerdict(ctx context.Context, runID, identityID, stepID strin
 type PipelineRecord struct {
 	RunID     string
 	RunStatus string
+	// Dry marks a rehearsal's record (ADR-052 (7)): it finishes nothing.
+	Dry       bool
 	FinalStep string
 	RunRecord
 }
@@ -355,7 +363,7 @@ type PipelineRecord struct {
 // planner does it.
 func (l *Ledger) PipelineRecords(ctx context.Context, pipeline string) ([]PipelineRecord, error) {
 	rows, err := l.db.QueryContext(ctx,
-		`SELECT r.id, r.status, r.config_json, rr.identity_id, rr.state, rr.verdicts
+		`SELECT r.id, r.status, r.dry, r.config_json, rr.identity_id, rr.state, rr.verdicts
 		 FROM run_records rr JOIN runs r ON r.id = rr.run_id
 		 WHERE r.pipeline = ?
 		 ORDER BY r.started_at, r.id, rr.identity_id`, pipeline)
@@ -368,7 +376,7 @@ func (l *Ledger) PipelineRecords(ctx context.Context, pipeline string) ([]Pipeli
 	for rows.Next() {
 		var pr PipelineRecord
 		var config, raw string
-		if err := rows.Scan(&pr.RunID, &pr.RunStatus, &config, &pr.IdentityID, &pr.State, &raw); err != nil {
+		if err := rows.Scan(&pr.RunID, &pr.RunStatus, &pr.Dry, &config, &pr.IdentityID, &pr.State, &raw); err != nil {
 			return nil, fmt.Errorf("ledger: listing pipeline records: %w", err)
 		}
 		final, ok := finals[pr.RunID]

@@ -256,7 +256,7 @@ steps:
 	},
 	{
 		Name:        "human-review-then-cron",
-		Description: "The routing pattern for a participant step (ADR-049). A pipeline with a human step waits for its person, so keep the waiting out of cron: the reviewing pipeline is one a person runs and it ends in a group:, and the scheduled pipeline sources from that group and never waits. Two files, shown in order.",
+		Description: "The routing pattern for a participant step (ADR-049). A pipeline with a human step waits for its person, so keep the waiting out of cron: the reviewing pipeline is one a person runs and it ends in a group:, and the scheduled pipeline sources from that group and never waits; once: (ADR-052) makes it skip members it already finished, so a bounded cron drain advances instead of replaying its first batch. Two files, shown in order.",
 		Yaml: `# review.yaml — run by a person; ends in a group, nothing scheduled.
 name: review
 version: 1
@@ -290,6 +290,7 @@ name: send
 version: 1
 source:
   group: approved
+  once: true   # skip members this pipeline already finished, so the drain advances (ADR-052)
 steps:
   - id: send
     use: instantly/add-to-campaign

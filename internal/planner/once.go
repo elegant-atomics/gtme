@@ -23,6 +23,11 @@ func (p *Plan) FinishedRecords(ctx context.Context, l *ledger.Ledger) (map[strin
 	}
 	finished := map[string]bool{}
 	for _, rec := range recs {
+		// A rehearsal finishes nothing (ADR-052 (7)); a simulated run never
+		// reaches this ledger at all.
+		if rec.Dry {
+			continue
+		}
 		if rec.State == rec.FinalStep || p.Stopped(rec.RunRecord) {
 			finished[rec.IdentityID] = true
 		}

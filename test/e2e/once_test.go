@@ -216,6 +216,7 @@ steps:
 
 	plan := h.mustRun("plan", "work.yaml")
 	contains(t, plan.stderr, "once:      3 member(s), 3 not yet worked, sourcing 2 (oldest first)", "plan after a dry run still sees 3 eligible")
+	contains(t, h.mustRun("runs").stderr, "done (dry)", "gtme runs marks the rehearsal")
 
 	armed := h.mustRun("run", "work.yaml")
 	contains(t, armed.stderr, `source: sourced 2 members of group "todo" (3 of 3 not yet worked; limit 2, oldest first)`, "armed source line matches the dry one")
