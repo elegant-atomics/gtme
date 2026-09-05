@@ -3089,6 +3089,94 @@ everything else stays honestly `estimated`.
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
 
+### ADR-053: A receipt may not assert more than the run can substantiate
+**Status:** Proposed (2026-09-04 — from issues #30, #44 and #46, all
+reported from real runs)
+**Context:** Three reports, one shape. (#44) `http/enrich` responses over
+the byte cap warn "nothing stored", and the step still reports `10 in, 10
+out`; only two of ten identities held the field, and a downstream compose
+declaring it in `uses:` wrote copy for all ten. (#46) A CSV source read
+940 rows and reported `sourced 940 records`, while the next step received
+931 — nine coalesced into existing identities and nothing said which, or
+that it happened. (#30) A dropped source record left no `step_events` row,
+so a run that spent money and produced nothing could not be explained
+afterward; the code half was fixed (PR #35), and two spec-visible calls
+were left open.
+
+Each is the receipt claiming throughput the run cannot substantiate, and
+it is the same defect ADR-046 fixed one column over: a total that could
+not distinguish a measured dollar from an assumed one. The money column
+was taught to say which it was. The record columns have not been.
+
+Verified rather than assumed, because it changes the diagnosis: this is
+not an `http/enrich` quirk. `Out++` fires on advance
+(`internal/runner/step.go`), so a `sql/transform` whose query matches
+nothing also reports `2 in, 2 out` having written nothing for anyone. It
+is one runner-level accounting rule, which is why one ADR answers three
+issues.
+**Decision:** (1) **`out` means the step contributed something; `empty`
+names the rest.** For a step whose output is *fields* — enrich, verify,
+compose, review, `sql/transform` — a record that advanced without the
+step writing any field is counted `empty`, not `out`, and the receipt
+prints it: `website: 10 in, 2 out, 8 empty`. `out + empty` is what
+advanced, so nothing is lost and the record still moves. A filter's
+output is a verdict and a deliver's is a send, so neither counts `empty`;
+their existing columns already say what happened. (2) **A declared field
+absent at run time is visible, and `on_missing:` governs it.** `uses:`
+(and `of:`) are validated at plan time for *availability* (§7, ADR-004),
+which does not make them present for every record — an enrich may
+legitimately produce nothing for one. So a participant step MAY carry
+`on_missing: run | skip | fail`, the vocabulary deliver steps already use
+for `variables:` (§8). **The default is `run`**, today's behavior,
+deliberately: sparse `uses:` is a real pattern and a shipped example
+relies on it (`uses: [recent_posts, role_history]`), so defaulting to
+`skip` would break working pipelines to fix a reporting defect. What
+changes by default is only that the receipt says it — `write: 10 in, 10
+out (8 missing web.homepage)` — so an operator learns the gap exists and
+reaches for `skip` if it matters to them. (3) **The source line
+reconciles.** A source reports rows read, records sourced, and the
+difference classified: `read 940 rows from acquired-contacts.csv — 931
+records (9 coalesced into known identities)`. Coalescing is recorded per
+record, so which row merged into which identity is answerable afterward
+by SQL rather than inferable from a count. (4) **A response the run
+threw away is still retained** under ADR-030's purgeable tier, for the
+window the step already declares — `http/enrich`'s oversized response is
+precisely the one an operator needs to look at, and keeping it costs
+nothing `gtme vacuum` does not already reclaim. (5) **A paid run that produced
+nothing is marked, not re-coded.** `gtme runs` and the receipt say so
+explicitly — `done — 0 records, $4.10 spent (estimated)` — and the exit
+code does not change. §8's exit codes are a scripting contract and a new
+one would break callers to carry information the receipt now carries
+plainly.
+**Consequences:** Every per-step line can be reconciled against the
+ledger: `in` equals `out + empty + filtered + failed + gated + skipped +
+cached`, which no reading of the current receipt guarantees. The cost is
+one column that is usually zero and one reconciliation clause on the
+source line — both silent when nothing is amiss. `empty` will surface
+real defects on first run, some of them in adapters nobody suspected
+(#44 was reported against `http/enrich`; `sql/transform` has the same
+behavior and no one had noticed). That is the point, and it is also a
+reason to expect the first run after this to look worse than the last run
+before it while nothing has actually changed. Golden receipt tests move
+in the same change.
+**Rejected:** *Redefining `out` silently* — the count changes meaning
+with no new column to explain it, and every historical receipt becomes
+unreadable against the new rule. *Defaulting `on_missing:` to `skip`* —
+correct for #44's reporter, wrong for sparse `uses:`, and it would fix a
+reporting defect by breaking pipelines. *A new exit code for a paid
+zero-record run* — §8's codes are a scripting contract; the information
+belongs in the receipt. *Failing a record whose `uses:` field is absent* —
+that is `on_missing: fail`, which the operator chooses; making it the
+rule would mean a compose could never work from whatever the ledger
+happens to hold. *Three separate fixes* — the shared question ("what may
+a receipt claim?") would then be answered three times, differently.
+**Spec impact:** AMEND — §10 (`http/enrich`: an oversized response is
+retained, and its record counts `empty`), §7
+(`on_missing:` on a participant step), §8 (the `empty` column, the source
+reconciliation line, the missing-field note, the paid-zero-record mark),
+§9 (`on_missing:` grammar beyond deliver steps), §11 milestone M27.
+`spec/schemas/pipeline.schema.json` rides the build. No §3 change: the
+coalescing record is a `step_events` row, which §3 already carries.
 ### ADR-052: `once:` — a bounded group source advances past what it finished
 **Status:** Proposed (2026-09-04 — from issue #43, reported from a real
 outreach run)

@@ -783,6 +783,20 @@ manifest `needs` is the needs-all wildcard (`additionalProperties: true`, no
 before ADR-004 — `uses` is how an AI step narrows that to what it actually
 needs, gaining plan-time validation in exchange.
 
+**A declared field absent at run time (ADR-053).** `uses:` and `of:` are
+validated at plan time for *availability* (above), which does not make
+them present on every record: an enrich step may legitimately produce
+nothing for one. A participant step MAY therefore carry `on_missing: run
+| skip | fail` — the vocabulary deliver steps already use for `variables:`
+(§8). `run` (the DEFAULT) dispatches the record with the field absent, as
+before; `skip` advances the record untouched without dispatching it;
+`fail` fails the record naming the missing fields. Whatever the setting,
+the receipt MUST report how many records were dispatched with a declared
+field absent, so the gap is visible without the operator having chosen
+anything. The default is `run` because a sparse `uses:` is a legitimate
+pattern — a compose working from whatever the ledger holds — and changing
+it would alter the meaning of pipelines already written.
+
 **Referents and human surfaces (ADR-048, ADR-049):** a compose or review
 step MAY declare `of: <field>` — the value it is about (required on a
 review); the planner MUST validate it exactly as one more `uses:` entry,
@@ -987,6 +1001,33 @@ output (receipts, progress, errors) MUST go to stderr; stdout is reserved
 for data (`gtme query`'s result rows, `gtme freeze`'s YAML). Exit codes: 0 ok,
 2 validation/contract error, 3 auth/credential, 4 rate-limited, 5 network, 1
 other.
+
+**Record accounting (ADR-053).** A step's `out` counts records the step
+*contributed to*, not merely records that advanced. For a step whose
+output is fields — enrich, verify, compose, review, `sql/transform` — a
+record that advanced without the step writing any field MUST be counted
+`empty` and printed beside `out`; `out + empty` is what advanced. A
+filter's output is a verdict and a deliver's is a send, so neither counts
+`empty`. Per step, `in` MUST reconcile: `out + empty + filtered + failed
++ gated + skipped + cached`.
+
+A source MUST reconcile what it read against what it sourced, classifying
+the difference — records that coalesced into identities the ledger already
+held are the ordinary cause, and the coalescing MUST be recorded per
+record (a `step_events` row) so which row merged into which identity is
+answerable afterward, not merely counted:
+
+```
+source [info]: read 940 rows from acquired-contacts.csv
+source: sourced 931 records (9 coalesced into known identities)
+website: 10 in, 2 out, 8 empty
+write:   10 in, 10 out (8 missing web.homepage)
+```
+
+A run that spent money and produced no records MUST say so on the receipt
+and in `gtme runs` — `done — 0 records, $4.10 spent (estimated)`. Its exit
+code is unchanged: §8's codes are a scripting contract, and this is
+information, not a new outcome.
 
 **Terminal receipt** (stderr, end of run): records in/out per step, cache
 skips, cost per step and total, cost avoided via cache (sum of
@@ -1861,8 +1902,11 @@ engine's inline JSON mode). `freshness_days` is REQUIRED config with no
 default and doubles as the step's cache window, so N AI steps across M
 runs reuse one fetch. The engine-enforced size cap defaults to 256 KB
 (`max_bytes` overrides); an oversized response is dropped with a warning,
-never truncated silently. Fetched responses attach as payloads (§5) under
-the ADR-030 declaration. Under `--simulate` the step is a counted
+never truncated silently — the record advances counted `empty`, not `out`
+(ADR-053), and the oversized response is still retained as a payload for
+the step's declared window, because a response the run threw away is
+precisely the one an operator needs to look at. Fetched responses attach
+as payloads (§5) under the ADR-030 declaration. Under `--simulate` the step is a counted
 simulation gap — replaying retained payloads is the ROADMAP
 simulate-replay verb, not this build.
 
@@ -2208,6 +2252,26 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
+- **M27 — record accounting (ADR-053; §7, §8, §9, §10). Queued.** A
+  field-writing step counts `empty` for a record it advanced without
+  writing anything, and `in` reconciles against the classified columns;
+  the source line reconciles rows read against records sourced with
+  coalescing recorded per record; a participant step takes `on_missing:
+  run | skip | fail` (default `run`), and the receipt reports records
+  dispatched with a declared field absent regardless; a dropped record
+  keeps its payload under ADR-030's tier; a paid run that produced no
+  records is marked on the receipt and in `gtme runs`, exit code
+  unchanged. `spec/schemas/pipeline.schema.json` rides the build.
+  Acceptance, offline: a `sql/transform` whose query matches nothing
+  reports `2 in, 0 out, 2 empty` and the records still advance; an
+  `http/enrich` over its byte cap does the same rather than reporting
+  full throughput; a compose declaring `uses: [a, b]` where `b` is absent
+  for some records runs on all of them by default and the receipt names
+  the count, `on_missing: skip` advances those records untouched, and
+  `on_missing: fail` fails them naming `b`; a CSV whose rows coalesce
+  reports the reconciliation and a SQL query answers which row merged
+  into which identity; a run that spent and sourced nothing is marked;
+  every per-step line reconciles `in` against its classified columns.
 - **M26 — bounded group consumers (ADR-052; §8, §9). Queued.** A group
   source gains `once: true`: selection skips members this pipeline has
   finished — completed the final step, or stopped by a filter verdict —
@@ -2495,6 +2559,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
+### v0.39 (proposed) — 2026-09-04 (ADR-053: record accounting; build queued as M27)
+**Changed:** §10 (`http/enrich`: an oversized response is retained and
+its record counts `empty`); §7 (`on_missing:` on a participant step, default `run`, and the
+receipt's missing-field report); §8 (the `empty` column and the per-step
+reconciliation, the source's rows-read/records-sourced line with
+coalescing recorded per record, the paid-zero-record mark); §9
+(`on_missing:` beyond deliver steps); §11 gains M27.
+`spec/schemas/pipeline.schema.json` rides the build.
+**Not changed:** §3 — the coalescing record is a `step_events` row, which
+§3 already carries, so M27 has no migration. Exit codes are untouched by
+design (ADR-053 (5)).
+**Numbering:** assumes ADR-052 / M26 (the `once:` packet) lands first. If
+that packet is rejected, this becomes ADR-052 / M26 at merge.
+**Status:** proposed, not accepted — no code until a human merges.
 ### v0.38 (proposed) — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
 **Changed:** §8 gains the `once:` selection rule (finished = completed or
 filter-stopped; failed and pending stay eligible), the plan line carrying
