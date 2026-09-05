@@ -741,7 +741,14 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 		return fmt.Errorf("runner: %s: %w", st.ID, err)
 	}
 	// Insertion order, oldest first, capped by limit: (SPEC §8/§9, ADR-032).
+	// Under once: (ADR-052) the cap applies after dropping members this
+	// pipeline already finished, so a bounded consumer advances instead of
+	// replaying its first batch. The group itself is never touched.
+	var total, eligible int
 	members, err := r.l.GroupMembersOldest(ctx, g.ID, st.Limit)
+	if st.Once && err == nil {
+		members, total, eligible, err = r.onceSelection(ctx, g.ID, st.Limit)
+	}
 	if err != nil {
 		return err
 	}
@@ -759,15 +766,53 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 	if st.Limit > 0 {
 		detail["limit"] = st.Limit
 	}
+	if st.Once {
+		detail["once"] = true
+		detail["members"] = total
+		detail["eligible"] = eligible
+	}
 	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done", detail); err != nil {
 		return err
 	}
-	if st.Limit > 0 {
+	switch {
+	case st.Once && st.Limit > 0:
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q (%d of %d not yet worked; limit %d, oldest first)\n",
+			st.ID, len(members), g.Name, eligible, total, st.Limit)
+	case st.Once:
+		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q (%d of %d not yet worked, oldest first)\n",
+			st.ID, len(members), g.Name, eligible, total)
+	case st.Limit > 0:
 		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q (limit %d, oldest first)\n", st.ID, len(members), g.Name, st.Limit)
-	} else {
+	default:
 		fmt.Fprintf(r.stderr, "%s: sourced %d members of group %q\n", st.ID, len(members), g.Name)
 	}
 	return nil
+}
+
+// onceSelection applies `once:` to a group (SPEC §8, ADR-052): every current
+// member oldest-added first, minus those this pipeline has finished, capped
+// at limit when one is set. Returns the selection, the member count and the
+// eligible count.
+func (r *runner) onceSelection(ctx context.Context, groupID string, limit int) ([]ledger.Identity, int, int, error) {
+	all, err := r.l.GroupMembersOldest(ctx, groupID, 0)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	finished, err := r.plan.FinishedRecords(ctx, r.l)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	var eligible []ledger.Identity
+	for _, ident := range all {
+		if !finished[ident.ID] {
+			eligible = append(eligible, ident)
+		}
+	}
+	selected := eligible
+	if limit > 0 && limit < len(eligible) {
+		selected = eligible[:limit]
+	}
+	return selected, len(all), len(eligible), nil
 }
 
 // ingestSourceRecord canonicalizes a sourced record into an identity, writes its

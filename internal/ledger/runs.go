@@ -338,6 +338,71 @@ func (l *Ledger) SetVerdict(ctx context.Context, runID, identityID, stepID strin
 	})
 }
 
+// PipelineRecord is one identity's membership in one run of a named
+// pipeline, with the run's status and the final step id its config snapshot
+// declared — the facts a `once:` group source reads terminality from
+// (SPEC §8, ADR-052). A snapshot without steps finishes at StateSourced.
+type PipelineRecord struct {
+	RunID     string
+	RunStatus string
+	FinalStep string
+	RunRecord
+}
+
+// PipelineRecords lists every run record of every run of a named pipeline,
+// oldest run first. Nothing here judges "finished": that needs the plan
+// (a deliver step's fail verdict is a withheld send, not a stop), so the
+// planner does it.
+func (l *Ledger) PipelineRecords(ctx context.Context, pipeline string) ([]PipelineRecord, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT r.id, r.status, r.config_json, rr.identity_id, rr.state, rr.verdicts
+		 FROM run_records rr JOIN runs r ON r.id = rr.run_id
+		 WHERE r.pipeline = ?
+		 ORDER BY r.started_at, r.id, rr.identity_id`, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: listing pipeline records: %w", err)
+	}
+	defer rows.Close()
+	finals := map[string]string{}
+	var out []PipelineRecord
+	for rows.Next() {
+		var pr PipelineRecord
+		var config, raw string
+		if err := rows.Scan(&pr.RunID, &pr.RunStatus, &config, &pr.IdentityID, &pr.State, &raw); err != nil {
+			return nil, fmt.Errorf("ledger: listing pipeline records: %w", err)
+		}
+		final, ok := finals[pr.RunID]
+		if !ok {
+			final = snapshotFinalStep(config)
+			finals[pr.RunID] = final
+		}
+		pr.FinalStep = final
+		pr.Verdicts = map[string]string{}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &pr.Verdicts); err != nil {
+				return nil, fmt.Errorf("ledger: decoding verdicts: %w", err)
+			}
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
+// snapshotFinalStep reads the last step id out of a run's resolved-pipeline
+// snapshot (runs.config_json, SPEC §3). Step ids are already defaulted by
+// position when the snapshot is taken, so the last entry names the final step.
+func snapshotFinalStep(configJSON string) string {
+	var snap struct {
+		Steps []struct {
+			ID string `json:"id"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(configJSON), &snap); err != nil || len(snap.Steps) == 0 {
+		return StateSourced
+	}
+	return snap.Steps[len(snap.Steps)-1].ID
+}
+
 // RunRecords lists a run's records in insertion order.
 func (l *Ledger) RunRecords(ctx context.Context, runID string) ([]RunRecord, error) {
 	rows, err := l.db.QueryContext(ctx,

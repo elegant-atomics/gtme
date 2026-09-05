@@ -262,6 +262,11 @@ func vizGates(s *Step) [][2]string {
 
 	var right []string
 	switch {
+	case s.IsGroupSource && s.Once && s.OnceCounted:
+		right = append(right, fmt.Sprintf("once · %d of %d left, sourcing %d",
+			s.OnceEligible, s.OnceMembers, s.OnceSourcing()))
+	case s.IsGroupSource && s.Once:
+		right = append(right, "once · unfinished members only")
 	case s.IsGroupSource && s.Limit > 0:
 		right = append(right, fmt.Sprintf("limit %d, oldest first", s.Limit))
 	case s.IsGroupDeliver:

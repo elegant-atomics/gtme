@@ -142,6 +142,16 @@ func TestParseErrors(t *testing.T) {
 			yaml: "name: x\nversion: 2\nsource:\n  use: a/b\n",
 			want: "unsupported version",
 		},
+		{
+			name: "once: is a group-source key (ADR-052)",
+			yaml: "name: x\nsource:\n  use: a/b\n  once: true\n",
+			want: "once: is only valid on a group source",
+		},
+		{
+			name: "once: on an interior step is refused too",
+			yaml: "name: x\nsource:\n  group: g\nsteps:\n  - id: s\n    use: c/d\n    once: true\n",
+			want: "once: is only valid on a group source",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -273,5 +283,24 @@ func TestProvidesDeclarationShapes(t *testing.T) {
 				t.Errorf("error should name the step: %v", err)
 			}
 		})
+	}
+}
+
+// TestOnceParsesOnAGroupSource: `once: true` is a group-source key (SPEC §9,
+// ADR-052); absent, it is false and nothing about the source changes.
+func TestOnceParsesOnAGroupSource(t *testing.T) {
+	p, err := Parse([]byte("name: x\nsource:\n  group: todo\n  limit: 2\n  once: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Source.Once || p.Source.Limit != 2 || p.Source.Group != "todo" {
+		t.Errorf("source = %+v, want once on a limited group source", p.Source)
+	}
+	p, err = Parse([]byte("name: x\nsource:\n  group: todo\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Source.Once {
+		t.Error("once should default to false")
 	}
 }

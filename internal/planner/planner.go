@@ -124,6 +124,14 @@ type Step struct {
 	IsGroupSource bool
 	SourceGroup   string
 	Limit         int
+	// Once selects only members this pipeline has not finished (ADR-052).
+	// OnceMembers/OnceEligible are counted by CheckGroups — current members,
+	// and those not yet finished — from the ledger at plan time; OnceCounted
+	// says whether that happened.
+	Once         bool
+	OnceMembers  int
+	OnceEligible int
+	OnceCounted  bool
 	// IsGroupDeliver marks a `use: group/deliver` step (SPEC §8, ADR-032):
 	// a runner-owned deliver step whose target is TargetGroup, created on
 	// demand. Every deliver-step key applies; --dry-run withholds it.
@@ -744,6 +752,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		ps.IsGroupSource = true
 		ps.SourceGroup = strings.TrimSpace(s.Group)
 		ps.Limit = s.Limit
+		ps.Once = s.Once
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
@@ -1296,6 +1305,14 @@ func (p *Plan) CheckGroups(ctx context.Context, l *ledger.Ledger) error {
 	}
 	if len(problems) > 0 {
 		return &Errors{Problems: problems}
+	}
+	// A `once:` source's eligible count is a plan-time fact (ADR-052 (6)).
+	for i := range p.Steps {
+		if s := &p.Steps[i]; s.IsGroupSource && s.Once {
+			if err := p.countOnce(ctx, l, s); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
