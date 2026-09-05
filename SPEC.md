@@ -158,7 +158,7 @@ binary (`internal/ledger/migrations/000N_*.sql`), applied at open.
 
 CREATE TABLE identities (
   id           TEXT PRIMARY KEY,          -- ULID
-  entity_type  TEXT NOT NULL,             -- 'person' | 'company' (extensible)
+  entity_type  TEXT NOT NULL,             -- a type file's name (§4a, ADR-054): person | company | post | job_posting embedded; more installed
   identity_key TEXT NOT NULL,             -- canonical key, see §4
   created_at   TEXT NOT NULL,             -- RFC3339
   UNIQUE(entity_type, identity_key)
@@ -242,16 +242,18 @@ CREATE TABLE deliveries (
 );
 
 -- Layer 3: groups — named associations between identities and a context
--- (ADR-021). A group carries no type field and no executable logic: its
--- character (campaign-like, DNC-like, pool-like) is derived from its events
--- and the pipelines that reference it. Members are identities, so groups
--- hold people and companies alike.
+-- (ADR-021). A group carries the entity type of its members (ADR-054) and
+-- no executable logic: its character (campaign-like, DNC-like, pool-like)
+-- is derived from its events and the pipelines that reference it. Members
+-- are identities of one type per group; a group created before ADR-054
+-- has no type and is entity-blind until `gtme groups add --type` sets it.
 
 CREATE TABLE groups (
-  id         TEXT PRIMARY KEY,           -- ULID
-  name       TEXT NOT NULL UNIQUE,
-  note       TEXT,
-  created_at TEXT NOT NULL
+  id          TEXT PRIMARY KEY,          -- ULID
+  name        TEXT NOT NULL UNIQUE,
+  note        TEXT,
+  created_at  TEXT NOT NULL,
+  entity_type TEXT                       -- ADR-054: the members' type; null = created before it (entity-blind)
 );
 
 CREATE TABLE group_events (
@@ -371,6 +373,25 @@ canonical field registry (§4a), and MUST be implemented exactly once — key
 derivation here and ingress normalization (§10.1) share the same
 implementations.
 
+**The tiers are read from the type file (ADR-054).** Every entity type's
+key derivation is the ordered `identity` list its type file declares
+(§4a) — a sequence of tiers, each naming a registry field whose
+normalization is a public-identifier rule (`email`, `domain`,
+`linkedin_url`, `handle`, `url`) with an optional key prefix, or a `hash`
+of named fields (the `nh:` fallback). The runner takes the first tier
+that yields a value. There is no switch over type names: `person` and
+`company` are the two lists below, expressed in `spec/fields/person.json`
+and `spec/fields/company.json`, and a third type's derivation is its own
+file's list. A tier MUST NOT name a vendor's record id: keying on one
+forks the identity the moment a second vendor arrives (the failure
+ADR-020 avoids for LinkedIn), so vendor ids stay in the vendor namespace
+and the identity stays keyed on what the platform exposes publicly. The
+`url` rule: trim, lowercase the scheme and host, drop the fragment and
+any trailing slash; the path and query are kept as written. A signal type
+(§4a) declares no `hash` tier — a post without a URL or a platform id is
+not a post the ledger can hold, and is dropped at the source with the
+reason recorded, as a CSV row with no key is today.
+
 - `person`: first non-empty of
   1. lowercased, trimmed email
   2. normalized **public-form** LinkedIn slug (strip protocol, host, trailing
@@ -438,10 +459,13 @@ is the registry's `handle` rule: trim, strip a leading `@`, strip a
 `needs`/`provides` matching is string equality; it is only meaningful if
 adapters agree on field names *and* value shapes (ADR-017). The registry is
 that agreement: a canonical field registry per entity type lives in
-`spec/fields/<entity_type>.json` (currently `person.json`, `company.json`) —
-machine-checkable artifacts, loaded directly by the implementation and the
-test suite, per ADR-010. `spec/schemas/field-registry.schema.json` is the
-schema for the registry files themselves.
+`spec/fields/<entity_type>.json` — `person.json`, `company.json`,
+`post.json`, `job_posting.json` embedded — machine-checkable artifacts,
+loaded directly by the implementation and the test suite, per ADR-010.
+`spec/schemas/field-registry.schema.json` is the schema for the registry
+files themselves. Since ADR-054 the registry file is the type's whole
+definition — its kind, its key tiers, its fields, its references — so
+"type file" and "registry file" name the same artifact.
 
 Each registry entry declares: `name`, `tier`, `type`, optional `format`,
 `normalization` (a named rule, see below), optional `enum` (the canonical
@@ -479,6 +503,50 @@ Three tiers:
    namespaced name. Namespaced fields in a pipeline's needs make vendor
    coupling visible; `gtme plan` MUST note them.
 
+**Type files (ADR-054).** Beyond `fields`, a type file declares:
+
+- `kind: subject | signal`. A *subject* (`person`, `company`) is what a
+  pipeline delivers to. A *signal* (`post`, `job_posting`) is what a
+  pipeline finds and traverses from: keyed on a platform-public
+  identifier, related to a subject, never the target of a deliver step
+  (a deliver manifest naming a signal type is a plan error).
+- `identity`: the ordered key tiers §4 reads — `[{field: email},
+  {field: linkedin_url}, {field: github_username, prefix: "gh:"}, …,
+  {hash: [full_name, company_domain], prefix: "nh:"}]`. Each `field`
+  entry names a registry field in this file whose `normalization` is one
+  of `email`, `domain`, `linkedin_url`, `handle`, `url`; a `hash` entry
+  names fields whose lowercased values are joined with `|` and hashed.
+  The fields the tiers name are the file's `tier: identity` fields.
+- `reference` (optional, per field): `{type: <type>, relation: <name>,
+  fields: [<name>, …]}` — a record carrying this field also names an
+  identity of `<type>`, keyed and populated from the listed fields
+  carried under the same names. The runner resolves-or-mints that
+  identity and writes `<name>` from the record to it (`relations`, §3).
+  `company_domain` on `person` declares `{type: company, relation:
+  works_at, fields: [company_domain, company_name]}`, which is how the
+  `works_at` edge has always been written; it is now the registry's
+  declaration rather than the runner's special case. A referenced
+  identity is a ledger fact, never a run member.
+
+**Discovery (ADR-054).** Types are discovered like adapters (§6). The
+binary embeds `person`, `company`, `post`, `job_posting`. A binding MAY
+ship `types/<name>.json` beside its `binding.yaml`; `gtme adapters add`
+installs it to `~/.gtme/types/<name>.json` after `verify` passes, and an
+operator MAY place a file there by hand. Two files of the same name with
+different content are a plan error naming both paths. A type two
+verified registry bindings ship is promoted into the binary (the rule of
+two, below). There is no verb that creates a type: it is a file.
+
+**The adapter–type contract (ADR-054).** For every manifest or binding
+naming an `entity_type` (and, for a traverse, a `from`), `gtme plan` and
+`gtme adapters verify` MUST check, with no network and no spend: (a) the
+name resolves to exactly one type file; (b) every static `provides`
+property is canonical for that type or vendor-namespaced (layer 1
+below); (c) for a source or a traverse, the `provides` properties cover
+at least one of the type's key tiers, so every emitted record can be
+keyed — failing this at plan is the point, since a source that emits
+unkeyable records is billed by the vendor and yields nothing (#27).
+
 **Promotion:** namespaced → core when a second adapter provides the same
 fact (the rule of two). Additive registry changes are non-breaking (one
 ADR line). Renames are breaking: spec amendment + version bump.
@@ -490,7 +558,8 @@ lowercase), `email` (§4 tier 1), `domain` (registrable domain, eTLD+1),
 `linkedin_url` (public vanity URLs canonicalized to
 `https://www.linkedin.com/<slug>`; any other LinkedIn shape is an
 *invalid* value for this rule — it belongs in `linkedin_internal_url` or
-`linkedin_sales_nav_url`, §4), `handle` (§4 reserved tiers). A stored canonical value MUST be a
+`linkedin_sales_nav_url`, §4), `handle` (§4 reserved tiers), `url` (§4,
+ADR-054: a platform-public URL as a key). A stored canonical value MUST be a
 fixed point of its field's rule.
 
 **Enforcement, three layers:**
@@ -536,6 +605,10 @@ Runner → adapter:
 {"type":"END"}
 ```
 `fields` contains exactly the projection of the adapter's `needs` — nothing more.
+For a traverse step (§6, ADR-054) the inbound RECORD is the parent, of the
+manifest's `from` type; every outbound RECORD MUST carry the manifest's
+`entity_type` in `key.entity_type` — the protocol already carries the
+type per record, which is why a step that changes it needs no new message.
 
 Adapter → runner:
 ```
@@ -644,7 +717,7 @@ beside it. The canonical schema for this file is
 {
   "id": "harvest/profile",
   "version": 1,
-  "role": "enrich",              // source|filter|enrich|verify|compose|review|deliver (review: ADR-048 — compose-shaped, of: required, never gates)
+  "role": "enrich",              // source|traverse|filter|enrich|verify|compose|review|deliver (review: ADR-048 — compose-shaped, of: required, never gates; traverse: ADR-054 — records of `from` in, records of `entity_type` out, each related to its parent)
   "entity_type": "person",
   "needs": {
     "type": "object",
@@ -706,11 +779,26 @@ beside it. The canonical schema for this file is
 - **Entity-agnostic manifests (ADR-033):** an adapter whose contract does
   not depend on the entity type — the AI steps (§10.3, §10.5) — declares
   `"entity_type": "*"`. Its steps take the pipeline's entity type (the
-  source's; none after a group source, in which case name validation is
-  entity-blind), and a static `needs`/`provides` schema on such a manifest
-  is validated against that type at plan time. A source MUST NOT be
-  entity-agnostic: it has no pipeline type to take, and the planner
-  rejects one.
+  current segment's, §7 — the source's, a traverse's output type after
+  one, a typed group's after a group source; only an untyped legacy group
+  leaves it unknown, in which case name validation is entity-blind), and
+  a static `needs`/`provides` schema on such a manifest is validated
+  against that type at plan time. A source or a traverse MUST NOT be
+  entity-agnostic: each names the type it emits, and the planner rejects
+  one that does not.
+- **Traverse (ADR-054):** a manifest with `"role": "traverse"` declares
+  `from` (the input type — the planner requires it to equal the current
+  segment's type), `entity_type` (the output type), `needs` (validated
+  against `from`), `provides` (validated against `entity_type`, key
+  coverage included, §4a), and `relation: {"name": "authored_by",
+  "from": "record" | "parent"}` — the edge written between every emitted
+  record and the parent it was traversed from, and which end it starts
+  at (`authored_by` runs from the post to its author; `works_at` from a
+  person to the company they were traversed from). The runner dispatches
+  a traverse per parent (or per batch, as an enrich), mints or resolves
+  each emitted record, writes the relation, and opens the next segment
+  (§7). `limit` is engine-owned on a traverse exactly as on a source
+  (ADR-047).
 - `freshness_days`: default cache window for fields this adapter provides;
   overridable per step (`cache:` in YAML).
 - **Payload retention (ADR-030):** `keep_payloads` (default true) and
@@ -750,7 +838,10 @@ beside it. The canonical schema for this file is
 
 1. Resolve every step's adapter + manifest.
 2. Walk the pipeline: maintain the set of available fields (source `provides`
-   ∪ each prior step's `provides`). For each step, every property in
+   ∪ each prior step's `provides`) and the **current type** (ADR-054: the
+   source's, or the group's for a group source; a traverse replaces it
+   with its `entity_type` and resets the available-field set to the
+   traverse's `provides`). For each step, every property in
    `needs.required` MUST be available; failure MUST produce an error naming
    the step and the missing field. No network calls, no spend.
 3. Verify all `credentials` across all steps are resolvable.
@@ -876,6 +967,26 @@ canonical name) is SUGGESTED in plan output, never silently guessed;
 tier (§4) — none at all is a plan error, and only the name-hash fallback
 tier is a plan warning.
 
+**Types, segments and traverses (ADR-054):** a run is a sequence of
+typed segments, and the planner walks them. Every step is validated
+against the type of its segment — its manifest's `entity_type` MUST equal
+it or be `*`. A traverse step's `from` MUST equal the current type, and
+after it only records of its `entity_type` continue: the records before
+it are finished at the traverse (terminal in ADR-052's sense, whether
+they yielded children or none), and a deliver step MAY sit in any
+segment. For every manifest naming a type, plan runs the adapter–type
+contract (§4a): the type resolves to one file, `provides` is canonical
+for it, and a source or traverse can key what it emits. Plan output MUST
+print each traverse as a type change with its relation — `person → post
+via harvest/posts (authored_by)` — and, for any step whose `provides`
+carry a reference field (§4a), the relation it will write — `writes
+works_at → company` — so a reviewer sees the graph a run builds without
+reading a type file. A `{query:}` value that reads `group_membership`
+prints the group it reads. The terminus and every `group/deliver` are
+checked against their group's type (below); a mismatch — a company run
+ending in a group of people — fails the plan naming the group, its type,
+and the pipeline's final type.
+
 **Group checks (ADR-021):** group references are resolved against the
 local ledger — read-only, still zero network calls and zero spend. A
 group named by `require:`, `exclude:`, `suppress:`, or a group source
@@ -883,7 +994,12 @@ group named by `require:`, `exclude:`, `suppress:`, or a group source
 (`gtme groups add <name> …`). A `record:` target and a group terminus are
 *created on demand* at run time (they record outcomes; requiring them to
 pre-exist would make every new pipeline a two-step dance), so plan only
-checks their names are non-empty. A `suppress.within` window MUST parse
+checks their names are non-empty — and, when the group already exists,
+that its `entity_type` (§3, ADR-054) matches the pipeline's final type; a
+group created on demand takes that type. A group source takes its
+group's type as the pipeline's (§9); a group with no type (created before
+ADR-054) leaves the pipeline entity-blind, and plan MUST say so and name
+the fix (`gtme groups add <name> --type <type>`). A `suppress.within` window MUST parse
 as `Nd` (§9's cache grammar). The plan output lists each step's
 membership gates, and MUST call out each deliver step — target adapter
 and touch scope — so the pipeline's full send surface is reviewable in
@@ -1038,6 +1154,17 @@ A run that spent money and produced no records MUST say so on the receipt
 and in `gtme runs` — `done — 0 records, $4.10 spent (estimated)`. Its exit
 code is unchanged: §8's codes are a scripting contract, and this is
 information, not a new outcome.
+
+A traverse step (§6, ADR-054) reports two populations: `in` counts its
+parents and reconciles exactly as any step's does (a parent that yielded
+no children counts `empty`); `traversed` and `coalesced` count the
+children it minted and the children that resolved to an identity already
+in the run (ADR-053 (3)). Spend at a traverse is spend as at a source,
+and a dry run executes it:
+
+```
+posts:   10 in, 8 out, 2 empty — 84 traversed (post), 3 coalesced
+```
 
 **Terminal receipt** (stderr, end of run): records in/out per step, cache
 skips, cost per step and total, cost avoided via cache (sum of
@@ -1403,14 +1530,25 @@ that mutated durable associations would not be a rehearsal.
 
 **`gtme groups` verbs:**
 ```
-gtme groups                          # list groups with derived character
-gtme groups show NAME                # members (current), recent events
+gtme groups                          # list groups with type, derived character
+gtme groups show NAME                # members (current), recent events, producers and consumers
 gtme groups add NAME KEY...          # hand-edit membership by identity key
 gtme groups add NAME --from-segment SEGMENT | --query "SQL"
+gtme groups add NAME --type TYPE     # set a new or untyped group's entity type (ADR-054)
 gtme groups remove NAME KEY... [--note TEXT]
 ```
-`gtme groups` lists each group with member count and event tallies
-(added/removed/touched) — character is derived, never stored. The
+`gtme groups` lists each group with its entity type (ADR-054), member
+count and event tallies (added/removed/touched) — character is derived,
+never stored; the type is stored, set once at creation. `gtme groups
+show` additionally prints which pipelines wrote to the group and which
+sourced from it, derived from `group_events.run_id` and `runs` — the
+chain a group sits in, visible without a workflow file. A group's type
+is set when it is created: by a terminus or `group/deliver` from the
+run's type, by `add` from an unambiguous key match or from the query's
+identities, or by `--type`, which is REQUIRED when the key is ambiguous
+or no key is given; adding an identity of another type is refused naming
+both types. A group created before ADR-054 has no type until `--type`
+sets it, and until then a pipeline sourcing from it is entity-blind. The
 snapshot forms evaluate an intensional definition into extensional
 membership: `--from-segment` runs a saved segment, `--query` a one-off
 SELECT; either MUST yield an `identity_id` column (segments-as-SQL
@@ -1525,7 +1663,13 @@ its repeat policy — defaulting per the adapter's declared idempotency
 idempotent. `respend: true` on a step (grammar, any paid step) declares that re-running
 the pipeline MAY pay for that step's records again — it silences the §7
 respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
-`Nd`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
+`Nd`. A **traverse step** (ADR-054) is an ordinary `steps:` entry whose
+adapter role is `traverse` (§6): it MAY carry `limit: N` (engine-owned,
+as on a source), `when:`, `require:`/`exclude:`, and `cache:`; after it,
+every later step is validated against its output type (§7), and the
+pipeline's terminus group takes that type. `use: sql/traverse` (§10a) is
+the runner-owned form: `with: {entity_type: <type>, query: <SQL>}`, the
+query yielding `identity_id` and `parent_id`. `uses:` (ADR-004) is a list of field names, valid only on steps whose
 adapter role is `filter`/`compose`/`review` (the participant roles,
 ADR-048: `ai/*`, `human/*`, `agent/*`); the planner validates it exactly
 as `needs.required` (§7). `provides:` (ADR-033) is likewise valid only on
@@ -1589,11 +1733,13 @@ group: q3-qualified         # terminus: records completing the run are added
 ```
 
 - A **group source** is `source: {group: <name>}` — no `use:`, mutually
-  exclusive with it. Members (people and companies alike) are projected
-  from the ledger like any record. A group source declares no static
-  provides: the plan treats the available-field set as open, and each
-  step's needs are enforced per record at run time, exactly like the
-  needs-all wildcard.
+  exclusive with it. Members are projected from the ledger like any
+  record, and the pipeline takes the group's entity type (ADR-054, §3),
+  so every step's field names are validated against it; a group with no
+  type (created before ADR-054) leaves the plan entity-blind, and plan
+  says so. A group source declares no static provides: the plan treats
+  the available-field set as open, and each step's needs are enforced
+  per record at run time, exactly like the needs-all wildcard.
 - `require: [<group>, …]` / `exclude: [<group>, …]` are valid on any
   non-source step, deliver steps included: membership gates, checked
   per record against current membership (§7).
@@ -1820,6 +1966,11 @@ cursor/STATE; `limit` is a reserved engine key, ADR-047 — config
 validation accepts it whether or not the binding's `config_schema`
 declares it, the engine caps emitted records and terminates pagination
 at the cap, and a binding that does declare it receives it unchanged),
+traverse (ADR-054: a source-shaped binding — pagination, `limit`,
+extraction to records of its `entity_type` — whose request is templated
+per parent from `{{record.<field>}}` placeholders that are also its
+`needs`, and which declares `from` and `relation` as §6 requires; a
+binding MAY ship the type file it emits, `types/<name>.json`, §4a),
 enrich (per-record request), and deliver (idempotency + dry-run
 receipts). A binding declares the same manifest surface as a
 process adapter (`needs`/`provides`/`config_schema`/`freshness_days`, §6)
@@ -1966,6 +2117,27 @@ engine with provenance `sql/transform @ <query-hash>`. `sql/filter`: a
 `pass` column — membership-style: returned records pass, absent records
 fail with the predicate named. SQL steps run normally under `--simulate`
 (they are offline by construction).
+
+`sql/traverse` (ADR-054): the runner-owned traverse — following relations
+the ledger already holds needs no vendor. Config carries `entity_type`
+(the output type, a type file §4a) and `query`; the result MUST yield
+`identity_id` (identities of that type) and `parent_id` (identities of
+the current segment's type, the run's records); rows whose parent is not
+in the run are dropped and counted, as for any SQL step. It runs once
+per step on the read-only connection, timeboxed, plan-`EXPLAIN`ed and
+annotated cross-record; it mints nothing and writes no relation — the
+edge it follows already exists. The companies of this run's people is
+one line over the vocabulary views:
+
+```yaml
+  - id: to-company
+    use: sql/traverse
+    with:
+      entity_type: company
+      query: >
+        SELECT r.to_id AS identity_id, r.from_id AS parent_id
+        FROM relations r WHERE r.relation = 'works_at'
+```
 
 Two semantics were true from M11 and are normative from ADR-037. A SQL
 step's query MAY read any identity in the ledger — only its *results* are
@@ -2265,6 +2437,38 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
+- **M28 — types and traverse (ADR-054; §3, §4, §4a, §5, §6, §7, §8, §9,
+  §10a, §13). Queued.** A type is a file: `spec/fields/*.json` gain
+  `kind`, `identity` and per-field `reference`, §4 derivation reads the
+  `identity` list (person and company unchanged in behavior, `post` and
+  `job_posting` seeded), the `url` rule exists, and `~/.gtme/types/` is
+  discovered with `gtme adapters add` installing a binding's `types/`.
+  The adapter–type contract runs in `plan` and `adapters verify`. The
+  `works_at` special case becomes `company_domain`'s declared reference.
+  `traverse` is a manifest and binding role with `from` and `relation`;
+  the runner opens a new segment after one, relates children to parents,
+  coalesces by ADR-053 (3), finishes parents for `once:`, and reports
+  `traversed`/`coalesced`. `sql/traverse` is the runner-owned floor.
+  `groups.entity_type` (migration `0013`) is set at creation and
+  enforced on add; `gtme groups add --type`; the group source takes the
+  group's type; plan checks terminus and `group/deliver` against it and
+  prints type changes, relation writes, and the groups a `{query:}`
+  reads; `gtme groups show` prints producers and consumers. §13's
+  fan-out non-goal retires. Schemas, `spec/ledger.sql`, and the type
+  files ride the build. Acceptance, offline: a person pipeline with a
+  fixture `traverse` to `post` plans printing `person → post … (authored_by)`,
+  runs from fixtures, writes `authored_by` per post, coalesces a post two
+  parents share, counts the parents `in`/`empty` and the children
+  `traversed`/`coalesced`, and its terminus group is typed `post`; a
+  second traverse back to `person` (engagers) reaches a person already
+  in the run and coalesces; a `sql/traverse` over `works_at` yields the
+  companies of the run's people; a traverse binding emitting posts with
+  no key fails `plan` and `verify` naming the missing tier; two
+  `types/post.json` with different hashes fail plan naming both; a group
+  source over a `post` group validates field names against `post`; a
+  company run ending in a person group fails plan; an existing person
+  pipeline plans and runs byte-identically; `once:` treats a parent that
+  reached a traverse as finished.
 - **M27 — record accounting (ADR-053; §5, §7, §8, §9, §10). Built
   2026-09-04 (changelog v0.41).** A
   field-writing step counts `empty` for a record it advanced without
@@ -2468,8 +2672,8 @@ recipe, §8), dashboards or any UI (a one-shot static render such as
 `gtme plan --viz` is not one: no process, no interaction, no retained
 state — see ADR-051), DAG/branching beyond
 `when:`, `waterfall:` execution (parse-and-reject only), email waterfall
-providers, company-pipeline fan-out verbs (the relations table exists; no
-verbs over it — see ROADMAP.md's `expand` role for the deferred version),
+providers, relations that end (`works_at` cannot say someone left — see
+ROADMAP.md; fan-out itself is `traverse`, ADR-054, no longer a non-goal),
 teams/auth, MCP server mode (see ROADMAP.md), a *hosted* adapter
 marketplace — accounts, payments, a service (the bindings registry, an
 index and a fetch verb, is in scope: §8, ADR-042),
@@ -2575,6 +2779,27 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.42 (proposed) — 2026-09-05 (ADR-054: types and traverse; build queued as M28)
+**Added:** §4a type files — `kind: subject | signal`, an ordered
+`identity` tier list §4 now reads, per-field `reference` (the runner
+writes the relation; `works_at` becomes `company_domain`'s declaration),
+discovery from `~/.gtme/types/` and a binding's `types/`, and the
+three-check adapter–type contract run by `plan` and `adapters verify`;
+`post` and `job_posting` seeded. §4 the `url` rule. §6 the `traverse`
+role with `from` and `relation`; §10a the traverse binding role and
+`sql/traverse`. §7 segment typing, the contract checks, plan's type-change
+and relation-write annotations, and group type checks. §8 the traverse
+receipt line, `gtme groups add --type`, the type column, and `gtme groups
+show`'s producers and consumers. §9 the traverse step and a typed group
+source. §11 M28 queued.
+**Changed:** §3 `groups.entity_type` (nullable; a pre-existing group is
+entity-blind until set), the identities and groups comments. §5 a
+traverse's RECORDs name the output type. §13 the fan-out non-goal
+retires; relations that end is named in its place. Ontology decided:
+two kinds of type; account, deal, campaign, segment, event, persona,
+offer, value proposition are not types (ADR-054 (10); packs on
+ROADMAP.md).
 
 ### v0.41 — 2026-09-04 (M27 build: record accounting, built)
 **Changed:** §11 M27 marked built. Two clarifications the build needed,
