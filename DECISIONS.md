@@ -3089,6 +3089,88 @@ everything else stays honestly `estimated`.
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
 
+### ADR-052: `once:` — a bounded group source advances past what it finished
+**Status:** Proposed (2026-09-04 — from issue #43, reported from a real
+outreach run)
+**Context:** A group used as a durable work queue with `limit: N` selects
+the oldest N *current members*, and nothing in the run marks those members
+as worked. The next run selects the same N, cache-skips their downstream
+work, and never reaches member N+1. Reported against a 481-member
+candidate group with `limit: 10`: ten people processed on the first run,
+the same ten sourced on the second, 471 permanently unreachable. The
+documented qualify → group → bounded-send composition — the same one
+ADR-049 points cron users toward, to keep a human step out of a scheduled
+pipeline — therefore stalls after its first batch unless an operator runs
+`gtme groups remove` from a script after every run, which makes the
+pipeline's progress depend on a mutation outside the receipted run.
+
+The obvious composition does not work, which is why this needs a decision
+rather than a doc fix. `exclude: [<group>]` on the source plus the
+existing membership terminus would advance past *completers* only:
+`assertTerminus` adds records that reached the final step and were not
+stopped, so a record a filter froze never joins the terminus, is never
+excluded, and occupies a `limit` slot on every subsequent run. The
+reporter named exactly this: the mechanism must cover "both passed and
+filtered records."
+**Decision:** (1) **A group source MAY carry `once: true`.** With it, the
+source selects only members the pipeline has not already *finished* —
+oldest-added first, at most `limit` — instead of the oldest N members
+outright. (2) **Finished means terminal, and terminal means two things:**
+the record completed the pipeline's final step, or a filter's fail verdict
+stopped it. Both are outcomes the pipeline reached on purpose. (3)
+**Everything else stays eligible, deliberately.** A record that *failed* a
+step is not terminal, so a transient provider error is retried on the next
+run rather than silently swallowing the record — the invariant the issue
+asks for ("retries remain safe while a successful scheduled run can
+eventually reach every member"). A record left `pending` under a deferred
+batch or a `human/*`/`agent/*` step is not terminal either; collect-first
+(ADR-038) already resumes a pending run rather than re-sourcing, so the
+two rules do not interact. (4) **The scope is the pipeline name**, as
+`record:` defaults on a deliver step (ADR-031). Terminality is read from
+the run records of earlier runs of the same pipeline; nothing new is
+persisted and no migration is needed. A named scope shared across two
+pipelines is a real want — a reviewing pipeline and a sending pipeline
+draining one group — but it needs somewhere to store the scope, so it goes
+to ROADMAP rather than into this ADR. (5) **The group is never mutated.**
+`once:` changes what a source *selects*, not what a group *contains*, so a
+group stays what ADR-021 made it: a reviewed decision, re-runnable from
+the top by an operator who wants the whole set again. The audit trail is
+the ordinary one — run records and step events already say what each run
+did with each record. (6) **`gtme plan` prints the eligible count**, not
+just the limit: `group "candidates" — 481 member(s), 471 not yet worked,
+sourcing 10 (oldest first)`. The number that matters before a scheduled
+run is how much work is left, and it is knowable at plan time without
+spending anything. (7) **A dry or simulated run finishes nothing.**
+Neither writes durable run state, so neither advances the queue —
+consistent with the dry-runs-assert-nothing-durable rule (§8), and it
+means a rehearsal can be repeated.
+**Consequences:** The composition ADR-049 recommends becomes autonomous
+under cron: review into a group in one pipeline, drain it from another,
+with no external script and no mutation outside the receipted run. The
+cost is one key and one query. A permanently-failing record — malformed
+data rather than a flaky API — is re-sourced every run and occupies a
+`limit` slot, which is the deliberate price of (3); it is visible in every
+receipt as a failure rather than hidden, and the fix is to fix the record
+or the step. Operators who want the old behavior write nothing: `once:` is
+opt-in, and a source without it is unchanged. `limit:` without `once:`
+keeps its current meaning, which several shipped examples rely on.
+**Rejected:** *A draining source that removes what it finished* — the
+simplest mental model, and it destroys the thing groups are for: the
+reviewed set is consumed, a re-run over the same people becomes impossible
+without re-snapshotting, and membership history survives only in
+`group_events`. *`exclude:` on the source composed with the terminus* —
+smallest possible change, reuses two primitives verbatim, and only
+half-fixes the bug (filtered records clog the window forever), so it would
+have shipped a partial answer to a complete report. *Leases, attempts, or
+a workflow state machine* — the reporter explicitly did not ask for them,
+and a queue that can express retry limits is a different product. *A
+`gtme groups ack` verb* — §8's verb set is closed by ADR-005, and this is
+a property of a source, not a new thing an operator does.
+**Spec impact:** AMEND — §8 (group-source selection, the plan line, the
+dry-run rule), §9 (`once:` in the source grammar), §11 milestone M26.
+`spec/schemas/pipeline.schema.json` rides the build. **No §3 change**: by
+(4) nothing new is persisted, so there is no migration in this milestone.
+
 ### ADR-051: `gtme plan --viz` — the resolved plan as a picture
 **Status:** Accepted (2026-09-03 — drafted in a design session;
 human-approved 2026-09-04 by merging the packet)

@@ -111,6 +111,26 @@ introduces a shared invariant is a mechanism, and mechanisms arrive
 disguised as the obvious fix. The cross-type traversal item above turned
 out not to need `expand` at all: it is a `sql/filter` today.
 
+## A work-claim scope shared by two pipelines
+
+ADR-052 gives a group source `once: true`, which selects only members the
+pipeline has not already finished. Its scope is the pipeline name, chosen
+because it needs nothing persisted and no migration.
+
+The want it does not cover: two pipelines draining one group under a
+shared claim — a reviewing pipeline and a sending pipeline working the
+same candidate set, where a record either one has finished should not be
+re-offered to the other. That needs `once: <scope>` with the scope
+recorded on the run, which is a `runs` column and a migration, so it is
+parked here rather than bundled into a milestone whose reported bug it
+does not affect.
+
+Open when it comes back: whether the scope is a free string (like
+`record:` on a deliver step, ADR-031) or has to name something that
+exists; and whether two pipelines sharing a claim should be able to see
+*which* pipeline finished a record, or only that one did. The second
+question is the one that decides whether this stays a single column.
+
 ## SQL segments as pipeline sources
 
 Named in SPEC §1's long-term list; sharpened by the groups discussion
