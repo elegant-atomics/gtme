@@ -2573,7 +2573,7 @@ design (ADR-053 (5)).
 **Numbering:** assumes ADR-052 / M26 (the `once:` packet) lands first. If
 that packet is rejected, this becomes ADR-052 / M26 at merge.
 **Status:** proposed, not accepted — no code until a human merges.
-### v0.38 (proposed) — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
+### v0.38 — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
 **Changed:** §8 gains the `once:` selection rule (finished = completed or
 filter-stopped; failed and pending stay eligible), the plan line carrying
 the eligible count, and the dry-run rule; §9 gains `once:` in the group
@@ -2583,8 +2583,7 @@ the build.
 nothing new is persisted, so this milestone carries no migration. A group
 source without `once:` behaves exactly as before, so no shipped pipeline
 changes meaning.
-**Status:** proposed, not accepted — no code is written against this
-until a human merges the packet.
+**Status:** accepted 2026-09-04 by merging the packet; built as M26.
 
 ### v0.37 — 2026-09-04 (M25 build: plan visualization, built)
 **Changed:** §11 M25 marked built. No normative text changed beyond that

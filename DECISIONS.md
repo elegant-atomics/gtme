@@ -3178,8 +3178,8 @@ reconciliation line, the missing-field note, the paid-zero-record mark),
 `spec/schemas/pipeline.schema.json` rides the build. No §3 change: the
 coalescing record is a `step_events` row, which §3 already carries.
 ### ADR-052: `once:` — a bounded group source advances past what it finished
-**Status:** Proposed (2026-09-04 — from issue #43, reported from a real
-outreach run)
+**Status:** Accepted (2026-09-04 — from issue #43, reported from a real
+outreach run; human-approved 2026-09-04 by merging the packet)
 **Context:** A group used as a durable work queue with `limit: N` selects
 the oldest N *current members*, and nothing in the run marks those members
 as worked. The next run selects the same N, cache-skips their downstream
