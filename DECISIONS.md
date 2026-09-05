@@ -2745,6 +2745,68 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-04 — M27 internals: record accounting (ADR-053)
+
+**Question:** What exactly is `empty`, what exactly is a coalesce, what
+does `in` have to mean for the reconciliation to hold, and how does an
+adapter hand the runner a response to retain without claiming a field?
+**Choice:** (1) **`empty` is an advance that wrote zero non-null fields.**
+`WriteFields` already skips nil values and reports what it wrote, so the
+runner reads that count off the `done` event's `fields` detail in one
+place (`advance`) and applies it only to field-writing roles — enrich,
+verify, compose, review, and `sql/transform` (whose role is enrich). A
+filter's advance is a verdict and a deliver's a send, so theirs stay
+`out`. The "adapter said nothing" path already advanced with `fields: 0`;
+it now lands in `empty` with no other change.
+(2) **`in` counts eligibility, not dispatch.** It is bumped once, in
+`runStep`, for every record at the previous step's state — before `when:`,
+membership gates and caches — and nowhere else; the four per-item bumps
+(session chunks, the handoff loop, SQL steps, participant steps) are gone.
+That is the only reading under which `in = out + empty + filtered + failed
++ gated + skipped + cached` can be true, and the price is that lines which
+read `0 in, 0 out, 3 cached` now read `3 in, 0 out, 3 cached`. Three
+non-terminal states are named so an unsettled step still reconciles:
+`in flight` (pending), `held (dry run)` (a rehearsed deliver), `simulated`
+(a stub under `--simulate`).
+(3) **A coalesce is two rows, one identity, one run.** `AddRunRecord`
+reports whether the row was new; a row that resolved to an identity
+already in the run is not lost — its fields were written — but it is not
+a second record. The `coalesced` event sits on the identity that absorbed
+the row, with the row's own identity-key candidates in `detail.keys` and
+the winner in `detail.into`, so `SELECT ... FROM step_events WHERE event =
+'coalesced'` answers "which row merged into which identity" without a
+join through aliases. An identity known from an earlier run is *not* a
+coalesce: it is a new run record like any other, and the count was never
+wrong for it.
+(4) **A RECORD with no fields is the retention channel.** `http/enrich`
+used to answer an oversized response with a LOG alone; it now also emits
+a RECORD carrying no fields and the payload. The runner treats a
+fieldless RECORD as "nothing acquired" — no provides validation, no
+registry check, payload kept under the step's ADR-030 window, advance
+counted `empty` — because `fields: {}` is dropped on the wire by
+`omitempty` and arrives as null, which no object schema accepts, and
+because validating an assertion of nothing is meaningless. Filters and
+attesting deliverers are excluded: their RECORD is never the whole
+answer.
+(5) **`on_missing:` on a participant step is decided in `prepare`,**
+before the caches: `skip` and `fail` settle the record without a
+dispatch, `run` lets it through and counts it only if it is actually
+handed to the adapter (a cache hit is not "dispatched with a field
+absent"). "Absent" is `stringify(value) == ""` — missing or blank — the
+same test `variables:` resolution uses, so the two policies agree on what
+a hole is. A skipped record reuses the deliver policy's receipt block and
+`Skipped` column rather than growing a second vocabulary.
+(6) **The paid-zero mark is one phrase, `FormatSpent`,** used by the live
+receipt title and by `gtme runs` (list and receipt) from the ledger, so
+the two can never say different things; the condition is "the source
+produced no record and any step recorded a cost".
+**Why:** ADR-053's one rule is that a receipt may not claim more than the
+run can substantiate. Every choice here makes a count derivable from a
+ledger fact that already exists — the write count on the event, the
+insert result, the pending event, the cost rows — rather than from a
+second tally the runner keeps beside the first, which is how the
+original defect arose.
+
 ### 2026-09-04 — M26 internals: `once:` (ADR-052)
 
 **Question:** What does "finished" read from when the pipeline's shape has
