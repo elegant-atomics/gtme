@@ -193,7 +193,8 @@ CREATE TABLE runs (
   config_json TEXT NOT NULL,              -- resolved pipeline config snapshot
   started_at  TEXT NOT NULL,
   finished_at TEXT,
-  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed|pending (ADR-038: ended with a step in flight)
+  status      TEXT NOT NULL DEFAULT 'running',  -- running|done|failed|pending (ADR-038: ended with a step in flight)
+  dry         INTEGER NOT NULL DEFAULT 0  -- 1 for a --dry-run rehearsal (ADR-052 (7)): finishes nothing a once: source counts
 );
 
 CREATE TABLE run_records (
@@ -1339,7 +1340,9 @@ cache-covered, and its spend is already visible in `gtme plan`. Arming is
 the same command without the flag; a dry run is an ordinary run in every
 other respect (its own run id, receipt, and `gtme runs` entry), and because
 it writes no deliveries, the armed run's idempotency behaves as if the dry
-run had never happened.
+run had never happened. Its run row carries `dry = 1` (§3, ADR-052 (7)) so
+that anything reading run history for what a pipeline has *finished* — a
+`once:` group source — leaves rehearsals out; `gtme runs` marks the entry.
 
 ### Groups: touch scoping, suppression, terminus, and `gtme groups` (ADR-021)
 
@@ -1619,9 +1622,10 @@ on and it is knowable before anything is spent:
 source   group "candidates" — 481 member(s), 471 not yet worked, sourcing 10 (oldest first)
 ```
 
-A dry or simulated run finishes nothing, because neither writes durable
-run state (below); a rehearsal therefore repeats rather than advancing the
-queue.
+A dry or simulated run finishes nothing: a simulated run executes against
+a throwaway copy of the ledger, and a dry run's row is marked `dry` (§3)
+and left out of terminality. A rehearsal therefore repeats rather than
+advancing the queue.
 
 **Config values from the ledger (ADR-037).** Any value under `with:` MAY
 be `{query: <SQL>}` or `{segment: <name>}`; the planner resolves it
@@ -2272,13 +2276,16 @@ decided contract, not shipped behavior.
   reports the reconciliation and a SQL query answers which row merged
   into which identity; a run that spent and sourced nothing is marked;
   every per-step line reconciles `in` against its classified columns.
-- **M26 — bounded group consumers (ADR-052; §8, §9). Queued.** A group
+- **M26 — bounded group consumers (ADR-052; §3, §8, §9). Built 2026-09-04
+  (changelog v0.40).** A group
   source gains `once: true`: selection skips members this pipeline has
   finished — completed the final step, or stopped by a filter verdict —
   oldest-added first within `limit`, with failed and pending records
-  deliberately still eligible. Scope is the pipeline name; nothing new is
-  persisted and there is no migration. `gtme plan` prints the eligible
-  count beside the selection; a dry or simulated run advances nothing.
+  deliberately still eligible. Scope is the pipeline name; terminality is
+  read from earlier runs' records, so the only new persisted fact is
+  `runs.dry` (migration 0012), which the build found ADR-052 (7) needed.
+  `gtme plan` prints the eligible count beside the selection; a dry or
+  simulated run advances nothing.
   `spec/schemas/pipeline.schema.json` rides the build.
   Acceptance, offline: a three-member group with `limit: 2` and
   `once: true` sources members 1–2, then 3 on the next run, then nothing;
@@ -2559,6 +2566,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
+### v0.40 — 2026-09-04 (M26 build: bounded group consumers, built)
+**Changed:** §11 M26 marked built. §3 `runs` gains `dry INTEGER NOT NULL
+DEFAULT 0` (migration 0012, appended last, no rebuild): the build found
+that ADR-052 (7) — a dry run finishes nothing — rested on dry runs writing
+no run state, which §8 (ADR-019) contradicts: a dry run has its own run
+row, and its records advance to the deliver step's state. Without a
+marker a rehearsal would have advanced the queue; the e2e that proves the
+rule failed before the column and passes after it. §8's dry-run paragraph
+says the row is marked and `gtme runs` shows it (`done (dry)`); the
+`once:` paragraph names the actual mechanism instead of the premise.
+Human-approved in conversation on 2026-09-04. Terminality is judged
+against each run's own snapshot (the final step it declared when it ran),
+so a pipeline that later grows a step does not re-offer everyone it had
+already worked — recorded as an M26 implementation decision. `gtme help
+--agent`'s `human-review-then-cron` recipe carries `once: true` on the
+scheduled half, since that composition is what the key exists for.
+
 ### v0.39 (proposed) — 2026-09-04 (ADR-053: record accounting; build queued as M27)
 **Changed:** §10 (`http/enrich`: an oversized response is retained and
 its record counts `empty`); §7 (`on_missing:` on a participant step, default `run`, and the
@@ -2580,10 +2604,11 @@ the eligible count, and the dry-run rule; §9 gains `once:` in the group
 source grammar; §11 gains M26. `spec/schemas/pipeline.schema.json` rides
 the build.
 **Not changed:** §3 — by ADR-052 (4) the scope is the pipeline name and
-nothing new is persisted, so this milestone carries no migration. A group
+nothing new is persisted, so this milestone carries no migration. *(The
+build overturned this: see v0.40 — `runs.dry` was needed for (7).)* A group
 source without `once:` behaves exactly as before, so no shipped pipeline
 changes meaning.
-**Status:** accepted 2026-09-04 by merging the packet; built as M26.
+**Status:** accepted 2026-09-04 by merging the packet; built as M26 (v0.40).
 
 ### v0.37 — 2026-09-04 (M25 build: plan visualization, built)
 **Changed:** §11 M25 marked built. No normative text changed beyond that
