@@ -40,6 +40,16 @@ remains of `expand` is single-file ergonomics, and single-file would
 it is not a safety improvement. Kept here as a convenience item only;
 the open question is retired, not solved — nothing needs it answered.
 
+**Promoted (2026-09-05, ADR-054) as `traverse`.** The open question is
+answered: a run is a sequence of typed segments, only the most recent
+type moves forward, and the records before a traverse are finished at it.
+Renamed because the step also contracts (people to their companies is the
+same step, coalescing). The gate ADR-037 worried about is answered by
+`human/*` steps inside a file (ADR-049) and by the two-pipeline form,
+which is unchanged and remains the way to put a human or a cron boundary
+between segments. What stays here: a typed `via:` relation hop on a group
+source (below), held for receipts.
+
 ## Pipes as a transport, not a syntax
 
 DECISIONS.md ADR-005 killed pipe syntax as a v0 *authoring* surface (`gtme
@@ -61,6 +71,7 @@ rather than a special case. Shape unresolved — likely a `source` variant
 whose records are events rather than person/company records, which has
 implications for identity-key derivation (an event correlates to an
 existing identity rather than minting one) that need their own design pass.
+ADR-054 confirms the reading: an event is not an entity type.
 
 ## REPL
 
@@ -110,6 +121,12 @@ that does one specific thing one specific way, combines with nothing, and
 introduces a shared invariant is a mechanism, and mechanisms arrive
 disguised as the obvious fix. The cross-type traversal item above turned
 out not to need `expand` at all: it is a `sql/filter` today.
+
+**Typed groups, the harmless half (2026-09-05, ADR-054).** A group now
+carries the entity type of its members, set at creation and enforced on
+add, so a group source has a type and the plan after it is no longer
+entity-blind. This is homogeneity only; the item above — a type that
+implies a rule bundle — stays refused, and no rule rides on the type.
 
 ## A work-claim scope shared by two pipelines
 
@@ -386,6 +403,16 @@ target is the routing key in disguise and stays refused. A later
 pipeline can always source *from* the association (`{query:}` over
 relations) into its one gated target.
 
+**Promoted (2026-09-05, ADR-054).** Two kinds of type — subjects and
+signals — and a type is a file discovered like an adapter; `person` and
+`company` become two such files; `post` and `job_posting` are seeded. The
+association-vs-commitment line above held: associating is a relation
+written by a declared reference field, committing is a delivery into a
+typed group. What this entry named as candidates and ADR-054 declined by
+name: account, deal, campaign, segment, event, persona, offer, value
+proposition — the last three are content, not rows (see "Packs" below).
+Still open here: relations that end (below).
+
 ## Getting started paths
 
 v0.1.0 ships darwin/linux binaries with checksums on a tag-triggered
@@ -447,3 +474,43 @@ plan-dependent-pricing problem and could take the same treatment. Less
 urgent — a wrong estimate is less damaging than a wrong ledger row — and
 deferred so M23 stays small. Whoever picks it up: the resolution point is
 plan time, from the step's resolved config.
+
+## Packs — operator content the pipeline includes
+
+Named 2026-09-05 in the ADR-054 session, deliberately not made an entity
+type. A persona, an offer, its pains and gains, a value proposition — the
+content a compose or a judge reads to speak to one audience rather than
+another — needs no identity key, no cross-source dedupe, and is never the
+subject of a run's records. What it needs is versioning: authored once,
+included into several pipelines' prompts, pinned so a changed pack
+re-judges. The hooks exist — the judgment signature (ADR-039) already
+hashes the prompt, `runs.config_json` snapshots config, and the freeze
+bundle carries files by content hash — and nothing in the grammar reads a
+file, so today a pack is copy-paste. The shape to hold to: a prompt (or a
+`variables:` value) MAY come from a file; the file's hash enters the
+judgment signature and the run snapshot; `freeze --bundle` carries it.
+Association with a persona stays a field with an enum drawn from the
+pack (declared AI outputs, ADR-033), and the routing that follows is
+`group/deliver` per branch. A pipeline item with its own short ADR, after
+M28.
+
+## A `via:` relation hop on a group source
+
+`source: {group: authors, via: authored_by, use: harvest/posts}` would put
+a type crossing in grammar at a pipeline boundary. ADR-054 answers the
+same want with `sql/traverse` (a query yielding `identity_id` and
+`parent_id` over `relations`) and, inside a file, the `traverse` role;
+ADR-037's rule applies — mint the typed atom only when receipts show the
+SQL recurring. Held here so it is not built early.
+
+## Relations that end
+
+`relations` rows carry `created_at` and nothing else: no `ended_at`, no
+removal. `works_at` therefore cannot say that someone left, and a
+`sql/traverse` over it will reach a company a person no longer works at.
+Named in the ADR-054 session and left alone on purpose — gtme is not a
+CRM, and the first receipts should say whether stale edges actually cost
+anything before a second timestamp and an "ended" event are designed.
+When it comes back: an `ended_at` column, the append-then-derive pattern
+(a `current_relations` view), and which adapters could ever assert an
+end.

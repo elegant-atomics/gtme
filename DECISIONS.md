@@ -3187,6 +3187,204 @@ everything else stays honestly `estimated`.
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
 
+### ADR-054: `traverse` — a run is a sequence of typed segments, and a type is a file
+**Status:** Proposed (2026-09-05 — design session; answers ADR-008's parked
+question and ROADMAP.md's "Object ontology"; not accepted until a human
+merges the packet)
+**Context:** §4 derives identity for exactly `person` and `company`, as a
+closed switch. `entity_type` is an open string everywhere else, and since
+issue #27 plan and verify refuse what has no derivation — an extension
+point that is real, enforced, and empty. ADR-008 named `expand` (one
+record in, N records out, possibly of another type, writing `relations`)
+and parked one question: what run membership means when the type changes
+mid-run. ADR-037 retired that question by composition — fan-out at the
+pipeline boundary through a `{query:}` source, membership fresh per run —
+and kept single-file fan-out as a convenience item, judging that it would
+remove a review gate.
+
+Three things have changed since. The runner already crosses types inside
+a run: a person record carrying `company_domain` mints a company, writes
+its fields and a `works_at` edge, and never adds the company to the run
+(`relateCompany`, `internal/runner/runner.go`) — one hardcoded instance
+of a general move. `once:` (ADR-052) made a group-sourced consumer
+autonomous under cron, so a chain of typed pipelines drains itself and
+the "new run" reading no longer costs a human per stage. And `human/*`
+steps (ADR-049) put a gate inside one run, so single-file no longer means
+gateless.
+
+The plays that need a third type are signal-shaped — a post whose
+engagers resolve into people, a job posting whose company becomes a
+target — and each is one record of type A becoming N related records of
+type B. ADR-037's composition works (three files chained by groups) but
+hides the flow: the chain has no expression, the type crossing lives
+inside a SQL string, and the relation write is a side effect nothing in
+the YAML mentions. Candidate types were tried against a three-leg test —
+a durable key that dedupes across sources, a vocabulary that crosses
+adapter boundaries, and being the subject of a run's records — and most
+failed a leg. An account is a company in a group (ADR-037's test built
+the account shape on relations alone). A deal is a CRM's commitment, and
+keying it would rebuild the stage machine ADR-032 refused. A campaign is
+the namespace of a judgment (ADR-033's scope rule) plus a group. Replies,
+opens and meetings correlate to an identity and belong to `listen`.
+Personas, offers and value propositions are operator-authored content a
+compose reads, not rows a person joins to. What passed is one kind:
+signals.
+**Decision:** (1) **Two kinds of type, and a type is a file.** A
+*subject* (`person`, `company`) is what a pipeline delivers to. A
+*signal* (`post`, `job_posting` seeded) is what a pipeline finds and
+traverses from: keyed on a platform-public identifier, never a delivery
+target, related to a subject. The registry file
+(`spec/fields/<type>.json`, §4a) becomes the type's whole definition: it
+gains `kind: subject | signal` and an ordered `identity` list of key
+tiers, so §4's derivation reads the file instead of a switch. Person and
+company are expressed in their own files, behavior unchanged. A key tier
+names a field whose normalization is a public-identifier rule — `email`,
+`domain`, `linkedin_url`, `handle`, and a new `url` rule — or a `hash` of
+fields (the `nh:` fallback, declared where wanted and absent for
+signals). A vendor's record id is never a tier: keying on one forks the
+identity the moment a second vendor arrives, the failure ADR-020 spent a
+packet avoiding. (2) **Types are discovered like adapters; gtme ships the
+floor, not the catalog.** Embedded: `person`, `company`, `post`,
+`job_posting`. Installed: a binding MAY ship `types/<name>.json` beside
+its manifest, `gtme adapters add` installs it to
+`~/.gtme/types/<name>.json`, and an operator MAY put a file there by
+hand. Same name, different content hash is a plan error naming both
+files — the operator picks. The rule of two promotes: a type two verified
+bindings ship moves into the binary and the argument is settled once.
+There is no custom-object verb, schema editor or UI: a type is a file,
+and that is what keeps it from becoming one. (3) **The contract between
+an adapter and a type is three plan-time checks.** For any manifest
+naming an `entity_type`: (a) the name resolves to exactly one type file;
+(b) every static `provides` property is canonical for that type or
+vendor-namespaced (§4a's rule, unchanged); (c) for a source or a
+traverse, `provides` covers at least one of the type's key tiers, so
+every emitted record can be keyed — an adapter emitting posts without a
+URL fails `gtme plan` and `gtme adapters verify`, not the run, and
+nothing is billed first. This is what #27 asked for, generalized;
+conformance fixtures prove the same thing offline. (4) **A registry field
+MAY declare a reference, and the runner writes the relation.**
+`reference: {type: <type>, relation: <name>, fields: [<name>, …]}` on a
+field says: a record carrying this field also names an identity of
+`<type>`, keyed and populated from the listed fields carried under the
+same names; the runner resolves-or-mints it and writes `<name>` from the
+record to it. `company_domain` on `person` declares `{type: company,
+relation: works_at, fields: [company_domain, company_name]}`, and
+`relateCompany` becomes the one generic path. The referenced identity is
+a ledger fact, never a run member. (5) **`traverse` is the eighth role.**
+Records of one type in, records of another type out, each related to the
+record that produced it — ADR-008's `expand`, renamed because it also
+contracts (people to their companies is the same step, coalescing) and a
+name that needs a caveat is the wrong name. A traverse manifest declares
+`from: <type>` (the input type — the planner requires it to equal the
+pipeline's current type), `entity_type: <type>` (the output type),
+`needs` (validated against `from`), `provides` (validated against
+`entity_type`, check (3c) included), and `relation: {name: <name>, from:
+record | parent}` — which end the edge starts at (`authored_by` runs from
+the post to its author; `works_at` from the person to the company it was
+traversed from). Neither `from` nor `entity_type` may be `*`. The runner
+dispatches a traverse per input record (or per batch, as an enrich),
+accepts RECORDs whose key names the output type — the wire protocol needs
+nothing, a RECORD already carries `entity_type` — mints or resolves them,
+writes the relation to the dispatching parent, and opens the next
+segment. `limit:` is engine-owned on a traverse as on a source (ADR-047)
+and bounds the plan estimate; spend at a traverse is spend as at a
+source, and `--dry-run` runs it. (6) **A run is a sequence of typed
+segments.** The pipeline's type is the source's until a traverse changes
+it; every step is validated against the type of its segment; after a
+traverse only the new type moves forward. The records of the segment
+before it are *finished* at the traverse — terminal in ADR-052's sense,
+whether they yielded children or none — and a parent that yielded none
+counts `empty`. Run membership needs no new column: `run_records` keys on
+identity, and an identity carries its type. An identity a later segment
+reaches that is already in the run is a coalesce by ADR-053 (3) — one
+row, its state advancing to the later step. The terminus adds the last
+segment's completers. A deliver MAY sit in any segment. The traverse's
+receipt line reads like a source's — `posts: 10 in, 84 traversed, 3
+coalesced` — where `in` counts parents and reconciles as for any step
+(`empty` beside it when a parent yielded nothing), and `traversed` and
+`coalesced` count children. (7) **`sql/traverse` is the runner-owned
+floor.** Following relations the ledger already holds — the companies of
+these people — needs no vendor. A `sql/traverse` step declares
+`entity_type:` (the output type) and a query yielding `identity_id` (of
+that type) and `parent_id`; it runs once per step, read-only, timeboxed,
+plan-`EXPLAIN`ed and annotated cross-record like every `sql/*` step, and
+writes no relation (it follows one). A typed `via: works_at` atom waits
+for receipts showing that query recurring — ADR-037's floor→ceiling rule
+applied to itself. (8) **A group has a type.** `groups` gains
+`entity_type` (nullable, §3). It is set when the group is created — by a
+terminus or `group/deliver` from the run's current type, by `gtme groups
+add` from an unambiguous key match, or by `--type` (required when the
+key is ambiguous or no key is given) — and adding a member of another
+type is refused. A group source takes its group's type, so the plan after
+a group source is no longer entity-blind; plan checks a terminus or
+`group/deliver` against its group's type and fails on mismatch naming
+both pipelines, which is what makes a chain checkable at both ends. A
+group created before this decision has no type: it stays entity-blind,
+plan says so, and `gtme groups add --type` sets it once. This is
+homogeneity, not the typed-groups item ROADMAP.md refused — no rule rides
+on the type. (9) **The chain is visible without a workflow file.** `gtme
+plan` prints, for a traverse, `person → post via harvest/posts
+(authored_by)`; for a step whose provides carry a reference field,
+`writes works_at → company`; for a group source, the group's type; for a
+`{query:}` reading `group_membership`, the group it reads. `gtme groups`
+lists each group's type; `gtme groups show` prints the pipelines that
+wrote to it and sourced from it — derived from `group_events.run_id` and
+`runs`, never stored. (10) **Not types, by name:** account, deal,
+campaign, segment, event (reply, open, bounce, meeting), persona, offer,
+value proposition. The last three are operator content — a versioned
+file a pipeline includes into its prompts and hashes into the run —
+parked on ROADMAP.md as *packs*, a pipeline item, not an ontology one.
+**Consequences:** People to posts to engagers is one file, and its plan
+shows every type change and every relation it writes. The two-pipeline
+form is unchanged and remains the way to put a human or a cron boundary
+between segments; a file MAY traverse and then end in a group. Every
+existing pipeline plans and runs unchanged: a run with no traverse is one
+segment. `person` and `company` stop being a special case in Go and
+become two files the test suite loads. An adapter author writes a
+traverse binding as a source binding with `from:`, `needs`, a
+`{{record.<field>}}` in the request and a `relation:`; `--simulate` runs
+the crossing from fixtures. The registry becomes an identity authority —
+the cost of (1) — which (1)'s public-identifier rule and (3c) bound. Two
+association mechanisms coexist and the rule for choosing is stated:
+**group membership is a decision** (gated, reversible, with events); **a
+relation is a fact** (per record, free, joinable). Relations still cannot
+end — `works_at` cannot say someone left — recorded on ROADMAP.md, not
+solved. Roles are eight; ADR-051's diagram gains a silhouette.
+**Rejected:** *A third dimension on `run_records`* — the identity already
+carries its type. *A source manifest with non-empty `needs` instead of a
+role* — the reviewer should see the role in the id, the reasoning that
+kept `sql/filter` its name. *Keeping the name `expand`* — it misdescribes
+the contraction case. *A `via:` relation-hop key on a group source* — a
+special case of what `sql/traverse` does generally; wait for receipts
+(ADR-037). *Reference objects as ledger identities* (persona, offer) —
+they need no cross-source dedupe and are never a run's subject; what they
+need is versioning, which is a file. *Campaign as a type* — a
+campaign-scoped fact is a pipeline-namespaced field and enrolment is a
+group; a campaign row would make one column hold two campaigns' answers.
+*Vendor-declared types* — a type must be vendor-independent or two
+adapters fork one identity. *Vendor ids as key tiers* — the same failure.
+*Groups as identities with `member_of` relations* — uniform querying at
+the price of the event log, which is what makes membership a decision.
+*A multi-type run with per-type accounting* — moves the same complexity
+into the runner, where `in`, the dry-run receipt and the arming gate all
+lose their answer.
+**Spec impact:** AMEND (this packet's second commit) — §3
+(`groups.entity_type`; the identities and groups comments), §4
+(derivation reads the type file; the `url` rule), §4a (type files:
+`kind`, `identity`, `reference`; discovery; the three checks), §5 (a
+traverse's RECORDs name the output type), §6 (`traverse` role; `from`;
+`relation`), §7 (segment typing; the checks; plan annotations; group type
+checks), §8 (the traverse receipt line; `gtme groups` type and `--type`;
+`gtme groups show` producers and consumers), §9 (a traverse step and
+`limit:` on it; `sql/traverse` config; a group source's type), §10a
+(binding role `traverse`; `sql/traverse`), §11 (M28 queued), §13 (the
+fan-out non-goal retires). `spec/schemas/manifest.schema.json`,
+`spec/binding-schema.json`, `spec/schemas/field-registry.schema.json`,
+`spec/fields/*.json`, `spec/ledger.sql` and migration `0013` ride the
+build. ROADMAP.md: `expand` and "Object ontology" promoted; typed groups
+noted under option C; new entries for packs, the `via:` hop, and
+relations that end.
+
 ### ADR-053: A receipt may not assert more than the run can substantiate
 **Status:** Accepted (2026-09-04 — from issues #30, #44 and #46, all
 reported from real runs; human-approved 2026-09-04 by merging the packet)
