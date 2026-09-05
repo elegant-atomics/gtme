@@ -2745,6 +2745,42 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-04 — M26 internals: `once:` (ADR-052)
+
+**Question:** What does "finished" read from when the pipeline's shape has
+changed since a record was worked, where does the selection happen, and
+how does a rehearsal stay out of it when a dry run is an ordinary run?
+**Choice:** (1) Terminality is judged against each run's *own* snapshot:
+`PipelineRecords` reads the final step id out of `runs.config_json` (the
+resolved pipeline `gtme answer` and `gtme freeze` already reconstruct
+from), so a record that completed the last step of the pipeline *as it
+ran* is finished even if the pipeline has since grown a step. The
+alternative — the current plan's final step — would re-offer everyone
+already worked the moment an operator appends a notification step to a
+drain, which is the replay bug in a new coat. A snapshot without steps
+finishes at `sourced`. "Stopped" reuses the plan's own rule: a fail
+verdict on a non-deliver step (`Plan.Stopped`, the same judgment the
+terminus makes), so a withheld send never counts as a stop.
+(2) The selection is in Go, not SQL: every current member oldest-first,
+minus the finished set, capped at `limit`. The finished set is one join
+over `runs` and `run_records` per pipeline name; a 481-member group is
+nothing, and pushing the set into SQL would mean a temp table or a
+parameter list per run. Revisit if a group reaches the tens of thousands.
+(3) The plan-time count lives in `CheckGroups`, which already has the
+ledger and already fetched the group, so `gtme plan` and `gtme run` print
+the same numbers from the same code with no new call site.
+(4) `runs.dry` (migration 0012) is set by the runner from the same flag
+that withholds delivery, so it can never disagree with the receipt; the
+simulated case needs nothing because its ledger is a throwaway copy
+(§8). `FinishedRecords` skips dry records; nothing else reads the column
+yet except `gtme runs`, which appends `(dry)` to the status.
+**Why:** Each choice keeps one rule in one place: terminality in the
+snapshot the run itself wrote, stoppedness in the plan, the count where
+the group is already in hand, and the rehearsal flag on the row the
+rehearsal created. The one that cost a migration (4) is the one that
+could not be derived — nothing in a dry run's records distinguishes it
+from an armed run once the deliver step has receipted its variables.
+
 ### 2026-09-02 — M24 internals: participants (ADR-048, ADR-049, ADR-050)
 
 **Question:** Where does the one implementation behind `human/*` and
@@ -3178,8 +3214,8 @@ reconciliation line, the missing-field note, the paid-zero-record mark),
 `spec/schemas/pipeline.schema.json` rides the build. No §3 change: the
 coalescing record is a `step_events` row, which §3 already carries.
 ### ADR-052: `once:` — a bounded group source advances past what it finished
-**Status:** Proposed (2026-09-04 — from issue #43, reported from a real
-outreach run)
+**Status:** Accepted (2026-09-04 — from issue #43, reported from a real
+outreach run; human-approved 2026-09-04 by merging the packet)
 **Context:** A group used as a durable work queue with `limit: N` selects
 the oldest N *current members*, and nothing in the run marks those members
 as worked. The next run selects the same N, cache-skips their downstream
@@ -3258,6 +3294,15 @@ a property of a source, not a new thing an operator does.
 dry-run rule), §9 (`once:` in the source grammar), §11 milestone M26.
 `spec/schemas/pipeline.schema.json` rides the build. **No §3 change**: by
 (4) nothing new is persisted, so there is no migration in this milestone.
+*Build note, 2026-09-04:* (7) rested on dry runs writing no run state,
+and they do — §8 (ADR-019) gives a dry run its own run row, and its
+records advance to the deliver step's state. Without a marker a rehearsal
+would have advanced the queue, which (7) forbids. The build added
+`runs.dry` (§3, migration 0012 — one appended column, no rebuild) and
+`gtme runs` shows it; human-approved in conversation over the two
+alternatives (a step-level `dry_run` event, or dropping the rule). (4)'s
+claim stands for the queue itself: no claim, lease or scope is persisted.
+See the M26 implementation decision.
 
 ### ADR-051: `gtme plan --viz` — the resolved plan as a picture
 **Status:** Accepted (2026-09-03 — drafted in a design session;

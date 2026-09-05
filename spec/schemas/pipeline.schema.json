@@ -254,6 +254,10 @@
           "minimum": 1,
           "description": "ADR-032: group source only — at most N current members, oldest-added first."
         },
+        "once": {
+          "type": "boolean",
+          "description": "ADR-052: group source only — select only members this pipeline has not already finished (completed the final step, or stopped by a filter verdict); failed and pending records stay eligible. Oldest-added first within limit. Never mutates the group; a dry or simulated run finishes nothing."
+        },
         "respend": {
           "type": "boolean",
           "description": "ADR-038: declares that re-running the pipeline MAY pay for this step's records again — silences the plan's respend warning (SPEC.md §7). Not valid on the source."

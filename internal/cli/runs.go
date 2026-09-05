@@ -56,7 +56,7 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 				}
 				inFlight = fmt.Sprint(n)
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", run.ID, run.Pipeline, run.Status, run.StartedAt, len(records), inFlight)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", run.ID, run.Pipeline, runStatus(run), run.StartedAt, len(records), inFlight)
 		}
 		tw.Flush()
 		return nil
@@ -82,7 +82,7 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 // again long after the run finished.
 func printReceipt(ctx context.Context, env Env, l *ledger.Ledger, run ledger.Run) error {
 	fmt.Fprintf(env.Stderr, "run %s\npipeline: %s\nstatus:   %s\nstarted:  %s\n",
-		run.ID, run.Pipeline, run.Status, run.StartedAt)
+		run.ID, run.Pipeline, runStatus(run), run.StartedAt)
 	if run.FinishedAt != "" {
 		fmt.Fprintf(env.Stderr, "finished: %s\n", run.FinishedAt)
 	}
@@ -167,4 +167,13 @@ func money(v float64) string {
 		return "$0"
 	}
 	return fmt.Sprintf("$%.4f", v)
+}
+
+// runStatus is a run's status with its rehearsal marked (SPEC §3, ADR-052
+// (7)): a dry run has its own entry like any other, and says so.
+func runStatus(run ledger.Run) string {
+	if run.Dry {
+		return run.Status + " (dry)"
+	}
+	return run.Status
 }

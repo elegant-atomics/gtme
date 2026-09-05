@@ -10,7 +10,7 @@ import (
 func TestCostsCarryTheirBasis(t *testing.T) {
 	ctx := context.Background()
 	l, _ := openTest(t)
-	run, err := l.CreateRun(ctx, "p", nil)
+	run, err := l.CreateRun(ctx, "p", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

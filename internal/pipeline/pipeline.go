@@ -99,6 +99,11 @@ type Step struct {
 	// members, oldest-added first — the budget for "work thirty today".
 	// Valid only on a group source.
 	Limit int `yaml:"limit,omitempty" json:"limit,omitempty"`
+	// Once makes a group source select only members this pipeline has not
+	// already finished (SPEC §8/§9, ADR-052): completed the final step, or
+	// stopped by a filter verdict. Failed and pending records stay eligible.
+	// Opt-in; valid only on a group source. Never mutates the group.
+	Once bool `yaml:"once,omitempty" json:"once,omitempty"`
 	// Require / Exclude are membership gates (SPEC §7, ADR-021): process only
 	// current members of every Require group; skip current members of any
 	// Exclude group. Valid on interior steps and deliver, not the source.
@@ -292,6 +297,12 @@ func (p *Pipeline) normalize() error {
 		}
 		if strings.TrimSpace(s.Group) == "" || s.ID != p.Source.ID {
 			return fmt.Errorf("pipeline: %s: limit: is only valid on a group source (SPEC §9, ADR-032)", s.ID)
+		}
+	}
+	// once: (ADR-052) selects a group source's unfinished members and nothing else.
+	for _, s := range p.AllSteps() {
+		if s.Once && (strings.TrimSpace(s.Group) == "" || s.ID != p.Source.ID) {
+			return fmt.Errorf("pipeline: %s: once: is only valid on a group source (SPEC §9, ADR-052)", s.ID)
 		}
 	}
 	for _, s := range p.AllSteps() {

@@ -51,7 +51,8 @@ CREATE TABLE runs (
   config_json TEXT NOT NULL,              -- resolved pipeline config snapshot
   started_at  TEXT NOT NULL,
   finished_at TEXT,
-  status      TEXT NOT NULL DEFAULT 'running'  -- running|done|failed|pending (ADR-038: ended with a step in flight)
+  status      TEXT NOT NULL DEFAULT 'running',  -- running|done|failed|pending (ADR-038: ended with a step in flight)
+  dry         INTEGER NOT NULL DEFAULT 0  -- 1 for a --dry-run rehearsal (ADR-052 (7)): finishes nothing a once: source counts
 );
 
 CREATE TABLE run_records (
