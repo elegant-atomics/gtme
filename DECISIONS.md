@@ -3126,8 +3126,8 @@ everything else stays honestly `estimated`.
 manifests ride the build.
 
 ### ADR-053: A receipt may not assert more than the run can substantiate
-**Status:** Proposed (2026-09-04 — from issues #30, #44 and #46, all
-reported from real runs)
+**Status:** Accepted (2026-09-04 — from issues #30, #44 and #46, all
+reported from real runs; human-approved 2026-09-04 by merging the packet)
 **Context:** Three reports, one shape. (#44) `http/enrich` responses over
 the byte cap warn "nothing stored", and the step still reports `10 in, 10
 out`; only two of ten identities held the field, and a downstream compose

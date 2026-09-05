@@ -2583,7 +2583,7 @@ already worked — recorded as an M26 implementation decision. `gtme help
 --agent`'s `human-review-then-cron` recipe carries `once: true` on the
 scheduled half, since that composition is what the key exists for.
 
-### v0.39 (proposed) — 2026-09-04 (ADR-053: record accounting; build queued as M27)
+### v0.39 — 2026-09-04 (ADR-053: record accounting; build queued as M27)
 **Changed:** §10 (`http/enrich`: an oversized response is retained and
 its record counts `empty`); §7 (`on_missing:` on a participant step, default `run`, and the
 receipt's missing-field report); §8 (the `empty` column and the per-step
@@ -2596,7 +2596,8 @@ coalescing recorded per record, the paid-zero-record mark); §9
 design (ADR-053 (5)).
 **Numbering:** assumes ADR-052 / M26 (the `once:` packet) lands first. If
 that packet is rejected, this becomes ADR-052 / M26 at merge.
-**Status:** proposed, not accepted — no code until a human merges.
+**Status:** accepted 2026-09-04 by merging the packet; built as M27.
+
 ### v0.38 — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
 **Changed:** §8 gains the `once:` selection rule (finished = completed or
 filter-stopped; failed and pending stay eligible), the plan line carrying
