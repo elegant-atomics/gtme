@@ -618,7 +618,12 @@ Rules:
   count is exact.
 - Output RECORD `fields` MUST be validated against the manifest `provides`
   schema before ledger write; on invalid input the record MUST fail
-  (`step_events.event='failed'`), and the run MUST continue.
+  (`step_events.event='failed'`), and the run MUST continue. A RECORD
+  with no `fields` asserts nothing and is not validated: it means "nothing
+  acquired for this record", exactly as no RECORD would, and it MAY carry
+  the `payload` the adapter could not use — the record advances counted
+  `empty` (§8, ADR-053). A filter's or an attesting deliverer's RECORD is
+  never read this way; their verdict or attestation decides.
 - Adapters MUST exit 0 on success, non-zero on fatal error; partial output
   before a crash MUST be kept (ledger is append-only), and the run MUST be
   resumable from that point.
@@ -1010,7 +1015,11 @@ record that advanced without the step writing any field MUST be counted
 `empty` and printed beside `out`; `out + empty` is what advanced. A
 filter's output is a verdict and a deliver's is a send, so neither counts
 `empty`. Per step, `in` MUST reconcile: `out + empty + filtered + failed
-+ gated + skipped + cached`.
++ gated + skipped + cached`. `in` therefore counts every record eligible at
+the step, not only those handed to the adapter; a record still in flight,
+held by a dry run, or passed through a simulation gap is the non-terminal
+remainder and the line names it (`N in flight`, `N held (dry run)`,
+`N simulated`), so the identity holds for a step that has not settled.
 
 A source MUST reconcile what it read against what it sourced, classifying
 the difference — records that coalesced into identities the ledger already
@@ -2256,7 +2265,8 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
-- **M27 — record accounting (ADR-053; §7, §8, §9, §10). Queued.** A
+- **M27 — record accounting (ADR-053; §5, §7, §8, §9, §10). Built
+  2026-09-04 (changelog v0.41).** A
   field-writing step counts `empty` for a record it advanced without
   writing anything, and `in` reconciles against the classified columns;
   the source line reconciles rows read against records sourced with
@@ -2566,6 +2576,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
+### v0.41 — 2026-09-04 (M27 build: record accounting, built)
+**Changed:** §11 M27 marked built. Two clarifications the build needed,
+both inside ADR-053's decision: §8 says what `in` now counts — every
+record eligible at the step, since the reconciliation `in = out + empty +
+filtered + failed + gated + skipped + cached` cannot hold otherwise (before
+this, `in` was records handed to the adapter, so a fully cached step read
+`0 in, 0 out, 3 cached`; it now reads `3 in, 0 out, 3 cached`) — and that
+a record in flight, held by a dry run, or passed through a simulation gap
+is the named non-terminal remainder. §5 says a RECORD with no `fields`
+asserts nothing and is not validated: it is how `http/enrich` hands the
+runner an oversized response to retain (ADR-053 (4)) without claiming a
+field. `on_missing:` gains `run` in §9's vocabulary and
+`spec/schemas/pipeline.schema.json`; `run` is refused on a deliver step.
+The receipt table gains an `empty` column; the step line prints `empty`
+beside `out` when non-zero, and `skipped`, `simulated` and `held (dry
+run)` when non-zero; a participant step's absent declared fields print as
+`(N missing f1, f2)` and a receipt line names the policy. The source line
+reconciles (`sourced 931 records (9 coalesced into known identities)`) and
+each coalesce is a `coalesced` step event on the identity that won, with
+the row's own keys in `detail`. A paid zero-record run titles its receipt
+and its `gtme runs` entry `done — 0 records, $X spent (estimated)`.
+Implementation choices — what "coalesced" means, what "empty" means, and
+the remainder columns — are recorded as the 2026-09-04 M27 decision.
+
 ### v0.40 — 2026-09-04 (M26 build: bounded group consumers, built)
 **Changed:** §11 M26 marked built. §3 `runs` gains `dry INTEGER NOT NULL
 DEFAULT 0` (migration 0012, appended last, no rebuild): the build found
@@ -2583,7 +2617,7 @@ already worked — recorded as an M26 implementation decision. `gtme help
 --agent`'s `human-review-then-cron` recipe carries `once: true` on the
 scheduled half, since that composition is what the key exists for.
 
-### v0.39 (proposed) — 2026-09-04 (ADR-053: record accounting; build queued as M27)
+### v0.39 — 2026-09-04 (ADR-053: record accounting; build queued as M27)
 **Changed:** §10 (`http/enrich`: an oversized response is retained and
 its record counts `empty`); §7 (`on_missing:` on a participant step, default `run`, and the
 receipt's missing-field report); §8 (the `empty` column and the per-step
@@ -2596,7 +2630,8 @@ coalescing recorded per record, the paid-zero-record mark); §9
 design (ADR-053 (5)).
 **Numbering:** assumes ADR-052 / M26 (the `once:` packet) lands first. If
 that packet is rejected, this becomes ADR-052 / M26 at merge.
-**Status:** proposed, not accepted — no code until a human merges.
+**Status:** accepted 2026-09-04 by merging the packet; built as M27.
+
 ### v0.38 — 2026-09-04 (ADR-052: bounded group consumers; build queued as M26)
 **Changed:** §8 gains the `once:` selection rule (finished = completed or
 filter-stopped; failed and pending stay eligible), the plan line carrying

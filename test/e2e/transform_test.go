@@ -73,7 +73,7 @@ steps:
 	if res.code != 0 {
 		t.Fatalf("re-run exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "fetch: 0 in, 0 out, 3 cached", "cache-skip step line")
+	contains(t, res.stderr, "fetch: 3 in, 0 out, 3 cached", "cache-skip step line")
 
 	// gtme vacuum: nothing has expired; facts and payloads survive.
 	res = h.mustRun("vacuum")

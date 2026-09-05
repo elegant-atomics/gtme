@@ -288,15 +288,21 @@ func (r RunRecord) AnyFailed() bool {
 }
 
 // AddRunRecord adds an identity to a run at the given state, leaving an existing
-// row (and its progress) alone.
-func (l *Ledger) AddRunRecord(ctx context.Context, runID, identityID, state string) error {
-	_, err := l.db.ExecContext(ctx,
+// row (and its progress) alone. It reports whether the row was new: false
+// means the identity was already in the run (SPEC §8, ADR-053: the row
+// coalesced).
+func (l *Ledger) AddRunRecord(ctx context.Context, runID, identityID, state string) (bool, error) {
+	res, err := l.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO run_records (run_id, identity_id, state, verdicts) VALUES (?, ?, ?, '{}')`,
 		runID, identityID, state)
 	if err != nil {
-		return fmt.Errorf("ledger: inserting run record: %w", err)
+		return false, fmt.Errorf("ledger: inserting run record: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("ledger: inserting run record: %w", err)
+	}
+	return n > 0, nil
 }
 
 // SetRunRecordState advances a record's state to the step it just completed.

@@ -85,8 +85,8 @@ func TestJudgmentCacheReusesTheSameAnswer(t *testing.T) {
 	// Run 2: same question, same facts — nothing dispatched; verdicts
 	// re-applied, so gating and the terminus behave as before.
 	res, calls = run("second", cachedJudgeAnswer, "$auto")
-	contains(t, res.stderr, "judge: 0 in, 0 out, 3 cached, 1 filtered", "judge cached, verdicts re-applied")
-	contains(t, res.stderr, "brief: 0 in, 0 out, 2 cached", "compose cached")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 3 cached, 1 filtered", "judge cached, verdicts re-applied")
+	contains(t, res.stderr, "brief: 2 in, 0 out, 2 cached", "compose cached")
 	if calls != 0 {
 		t.Fatalf("model calls on an unchanged re-run = %d, want 0", calls)
 	}
@@ -104,13 +104,13 @@ func TestJudgmentCacheReusesTheSameAnswer(t *testing.T) {
 	if sim.code != 0 {
 		t.Fatalf("simulate exit = %d\nstderr:\n%s", sim.code, sim.stderr)
 	}
-	contains(t, sim.stderr, "judge: 0 in, 0 out, 3 cached, 1 filtered", "simulate cache-skips")
+	contains(t, sim.stderr, "judge: 3 in, 0 out, 3 cached, 1 filtered", "simulate cache-skips")
 
 	// Run 3: a changed prompt is a different question — everyone re-judged.
 	h.write("judge.yaml", strings.Replace(cachedJudgeYAML, "%s", "Keep decision makers who own budget.", 1))
 	res, calls = run("third", cachedJudgeAnswer, "$auto")
 	contains(t, res.stderr, "judge: 3 in, 2 out, 0 cached, 1 filtered", "prompt change re-judges all")
-	contains(t, res.stderr, "brief: 0 in, 0 out, 2 cached", "the compose's question and facts are unchanged — still cached")
+	contains(t, res.stderr, "brief: 2 in, 0 out, 2 cached", "the compose's question and facts are unchanged — still cached")
 	if calls != 1 {
 		t.Errorf("model calls after a prompt change = %d, want 1 (only the judge)", calls)
 	}
@@ -118,7 +118,7 @@ func TestJudgmentCacheReusesTheSameAnswer(t *testing.T) {
 	// Run 4: one record's input changes — only that record is re-judged.
 	h.write("people.csv", strings.Replace(peopleCSV, "Head of Growth", "CFO", 1))
 	res, calls = run("fourth", `[{"identity_key":"bob@globex.io","pass":true,"reason":"fits","cached-judge.rationale":"buys"}]`)
-	contains(t, res.stderr, "judge: 1 in, 1 out, 2 cached, 1 filtered", "one changed input re-judges one")
+	contains(t, res.stderr, "judge: 3 in, 1 out, 2 cached, 1 filtered", "one changed input re-judges one")
 	if calls != 1 {
 		t.Errorf("model calls after one input change = %d, want 1", calls)
 	}
@@ -176,7 +176,7 @@ group: judged
 	if res.code != 0 {
 		t.Fatalf("exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "judge: 0 in, 0 out, 3 cached", "cache-check before submit")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 3 cached", "cache-check before submit")
 	if strings.Contains(res.stderr, "in flight") {
 		t.Errorf("nothing should be submitted:\n%s", res.stderr)
 	}

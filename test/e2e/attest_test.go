@@ -86,7 +86,7 @@ func TestDeliveriesAreAcceptedUntilAttested(t *testing.T) {
 
 			// A re-run never re-sends: the row holds, contradicted or not.
 			again := h.runWithEnv([]string{"MOCK_ATTEST=" + tc.mode}, "", "run", "p.yaml")
-			contains(t, again.stderr, "send: 0 in, 0 out, 3 cached", "already delivered")
+			contains(t, again.stderr, "send: 3 in, 0 out, 3 cached", "already delivered")
 		})
 	}
 

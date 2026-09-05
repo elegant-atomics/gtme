@@ -127,7 +127,7 @@ func TestGroupDeliverHandsOffAsADelivery(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("re-run exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "intake: 0 in, 0 out, 3 cached", "already delivered")
+	contains(t, res.stderr, "intake: 3 in, 0 out, 3 cached", "already delivered")
 	if n := h.queryInt(`SELECT count(*) FROM group_events WHERE event = 'added'`); n != 5 {
 		t.Errorf("added events after re-run = %d, want 5 (nothing twice)", n)
 	}

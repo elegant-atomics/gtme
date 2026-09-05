@@ -39,8 +39,6 @@ func (r *runner) runSQLStep(ctx context.Context, st *planner.Step, identityIDs [
 	for _, id := range identityIDs {
 		eligible[id] = true
 	}
-	r.bump(st, func(s *StepStat) { s.In += len(identityIDs) })
-
 	rows, hasPass, dropped, err := r.sqlResults(ctx, st, eligible)
 	if err != nil {
 		r.logStepFailure(ctx, st, err)
@@ -91,7 +89,13 @@ func (r *runner) runSQLStep(ctx context.Context, st *planner.Step, identityIDs [
 		if err := r.l.SetRunRecordState(ctx, r.runID, identityID, st.ID); err != nil {
 			return err
 		}
-		r.bump(st, func(s *StepStat) { s.Out++ })
+		// A record the query said nothing about advanced with nothing
+		// derived: empty, not out (SPEC §8, ADR-053).
+		if len(fields) == 0 {
+			r.bump(st, func(s *StepStat) { s.Empty++ })
+		} else {
+			r.bump(st, func(s *StepStat) { s.Out++ })
+		}
 	}
 	return nil
 }

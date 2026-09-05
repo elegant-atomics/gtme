@@ -39,7 +39,6 @@ func (r *runner) runParticipantStep(ctx context.Context, st *planner.Step, work 
 		}
 		// Collecting (ADR-038 applied to a person): the answer is in the
 		// ledger or it is not — nothing waits.
-		r.bump(st, func(s *StepStat) { s.In++ })
 		ans, ok := answers[it.identityID]
 		if !ok {
 			r.stillPending(st, it)
@@ -55,7 +54,6 @@ func (r *runner) runParticipantStep(ctx context.Context, st *planner.Step, work 
 			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
 				return err
 			}
-			r.bump(st, func(s *StepStat) { s.In++ })
 		}
 		var walkErr error
 		if r.canAsk(st) {

@@ -77,10 +77,13 @@ type Step struct {
 	// target merge-field name → canonical or namespaced ledger field. Its
 	// values are the step's dynamic needs. Valid only on deliver steps.
 	Variables map[string]string `yaml:"variables,omitempty" json:"variables,omitempty"`
-	// OnMissing is a deliver step's per-record completeness policy (SPEC §8):
-	// skip (default) or fail when a variables: target does not resolve. Skip
-	// withholds this step's send but the record advances; fail freezes it
-	// (ADR-031).
+	// OnMissing is a per-record completeness policy. On a deliver step
+	// (SPEC §8): skip (default) or fail when a variables: target does not
+	// resolve — skip withholds this step's send but the record advances;
+	// fail freezes it (ADR-031). On a participant step (SPEC §7, ADR-053):
+	// run (default) | skip | fail when a declared uses: field is absent —
+	// run dispatches anyway and the receipt counts it, skip advances the
+	// record untouched, fail fails it naming the fields.
 	OnMissing string `yaml:"on_missing,omitempty" json:"on_missing,omitempty"`
 
 	// Redeliver is a deliver step's repeat policy (SPEC §8/§9, ADR-045):
@@ -243,9 +246,9 @@ func (p *Pipeline) normalize() error {
 			return fmt.Errorf("pipeline: %s: redeliver must be \"always\", \"on_change\" or \"never\" (got %q)", s.ID, s.Redeliver)
 		}
 		switch s.OnMissing {
-		case "", "skip", "fail":
+		case "", "run", "skip", "fail":
 		default:
-			return fmt.Errorf("pipeline: %s: on_missing must be \"skip\" or \"fail\" (got %q)", s.ID, s.OnMissing)
+			return fmt.Errorf("pipeline: %s: on_missing must be \"run\", \"skip\" or \"fail\" (got %q)", s.ID, s.OnMissing)
 		}
 		for target, field := range s.Variables {
 			if strings.TrimSpace(target) == "" || strings.TrimSpace(field) == "" {

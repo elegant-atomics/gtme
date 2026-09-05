@@ -124,7 +124,12 @@ Universal knobs that work on (nearly) every step, regardless of adapter:
 `cache: Nd` overrides the freshness window; `when: <step>.passed` gates on
 a filter; `require:`/`exclude:` gate on group membership; deliver steps
 take `variables:` (egress mapping), `idempotency:`, `on_missing:
-skip|fail`, `record:` (touch scope), and `suppress: {group, within}`.
+skip|fail`, `record:` (touch scope), and `suppress: {group, within}`;
+participant steps (ai/*, human/*, agent/*) take `on_missing:
+run|skip|fail` for a `uses:` field absent at run time (ADR-053 — `run`,
+the default, dispatches anyway and the receipt counts it). A field-writing
+step that advances a record without writing anything counts it `empty`
+on the receipt, not `out`.
 
 ---
 

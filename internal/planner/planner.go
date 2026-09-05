@@ -68,8 +68,13 @@ type Step struct {
 	// target merge-field name → ledger field. Its values joined Needs/Required
 	// (the dynamic-needs derivation, SPEC §6).
 	Variables map[string]string
-	// OnMissing is the deliver completeness policy (SPEC §8): "skip" | "fail".
+	// OnMissing is the per-record completeness policy: on a deliver step
+	// "skip" | "fail" (SPEC §8); on a participant step "run" | "skip" |
+	// "fail" for a declared uses: field absent at run time (SPEC §7,
+	// ADR-053). Uses is the declared list itself, kept apart from Needs so
+	// the runner can name exactly which declared fields were absent.
 	OnMissing string
+	Uses      []string
 	// NeedsBranches are the one-of alternatives (SPEC §7): the step is
 	// satisfiable when any single branch's fields are all available.
 	NeedsBranches [][]string
@@ -578,21 +583,37 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	// gateDeliverKeys rejects the deliver-only keys on a step whose role is
 	// not deliver (SPEC §9, ADR-031) — the uses: pattern, second instance.
 	// Called once the step's role is known.
-	gateDeliverKeys := func() {
+	// on_missing: is also a participant-step key (ADR-053), so a participant
+	// step is the one non-deliver step that keeps it.
+	gateDeliverKeys := func(participant bool) {
 		for _, k := range []struct {
 			key string
 			set bool
 		}{
 			{"variables:", len(s.Variables) > 0},
-			{"on_missing:", s.OnMissing != ""},
+			{"on_missing:", s.OnMissing != "" && !participant},
 			{"idempotency:", strings.TrimSpace(s.Idempotency) != ""},
 			{"record:", strings.TrimSpace(s.Record) != ""},
 			{"suppress:", s.Suppress != nil},
 		} {
+			if k.set && k.key == "on_missing:" {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+					Msg: fmt.Sprintf("on_missing: is only valid on deliver steps and participant steps (ai/*, human/*, agent/*); %s has role %q — ADR-031, ADR-053", ps.Use, ps.Role)})
+				continue
+			}
 			if k.set {
 				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
 					Msg: fmt.Sprintf("%s is only valid on deliver steps (%s has role %q) — ADR-031", k.key, ps.Use, ps.Role)})
 			}
+		}
+	}
+
+	// gateOnMissingRun refuses `on_missing: run` on a deliver step: blank
+	// merge fields never send (SPEC §8), so there is nothing "run" could mean.
+	gateOnMissingRun := func() {
+		if s.OnMissing == "run" {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+				Msg: "on_missing: run is not valid on a deliver step — blank merge fields never send; use skip or fail (SPEC §8)"})
 		}
 	}
 
@@ -657,6 +678,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		if ps.OnMissing == "" {
 			ps.OnMissing = "skip"
 		}
+		gateOnMissingRun()
 		ps.Idempotency = s.Idempotency
 		ps.RecordGroup = strings.TrimSpace(s.Record)
 		if s.Suppress != nil {
@@ -684,7 +706,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	if s.Use == SQLEnrichID {
 		problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
 			Msg: fmt.Sprintf("%s was renamed %s (ADR-037) — a transform is a per-record derivation or a cross-record aggregate, not a provider lookup; change use: to %s", SQLEnrichID, SQLTransformID, SQLTransformID)})
-		gateDeliverKeys()
+		gateDeliverKeys(false)
 		return ps, problems
 	}
 	if s.Use == SQLTransformID || s.Use == SQLFilterID {
@@ -738,7 +760,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
 				Msg: s.Use + " cannot be the source"})
 		}
-		gateDeliverKeys()
+		gateDeliverKeys(false)
 		gateProvides(false)
 		gateOf()
 		return ps, problems
@@ -756,7 +778,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
-		gateDeliverKeys()
+		gateDeliverKeys(false)
 		gateProvides(false)
 		gateOf()
 		return ps, problems
@@ -812,7 +834,16 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 			ps.SuppressWithin = d
 		}
 	} else {
-		gateDeliverKeys()
+		participant := resolved.Manifest.IsParticipant()
+		gateDeliverKeys(participant)
+		if participant {
+			// A declared field absent at run time (SPEC §7, ADR-053): run
+			// (the default) dispatches and the receipt counts it.
+			ps.OnMissing = s.OnMissing
+			if ps.OnMissing == "" {
+				ps.OnMissing = "run"
+			}
+		}
 	}
 	gateProvides(participant)
 
@@ -871,6 +902,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 		ps.Needs = append([]string(nil), s.Uses...)
 		ps.Required = append([]string(nil), s.Uses...)
+		ps.Uses = append([]string(nil), s.Uses...)
 		ps.NeedsAll = false
 	}
 
@@ -949,6 +981,7 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		if ps.OnMissing == "" {
 			ps.OnMissing = "skip"
 		}
+		gateOnMissingRun()
 	}
 	ps.NeedsBranches = resolved.Manifest.NeedsBranches()
 

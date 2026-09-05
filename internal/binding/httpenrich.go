@@ -44,7 +44,7 @@ var httpEnrichManifest = []byte(`{
       "field": {"type": "string", "description": "The declared content field (markdown mode) — canonical or namespaced (§4a)"},
       "extract": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Inline JSON mode: field → dotted response path"},
       "freshness_days": {"type": "integer", "minimum": 1, "description": "REQUIRED, no default: web content rots. Doubles as the step's cache window."},
-      "max_bytes": {"type": "integer", "minimum": 1, "description": "Response size cap (default 262144). Oversized responses fail the record, never truncate silently."},
+      "max_bytes": {"type": "integer", "minimum": 1, "description": "Response size cap (default 262144). An oversized response stores no field — the record advances counted empty, never truncated silently — and is still retained as a payload under the ADR-030 window (ADR-053)."},
       "auth": {
         "type": "object",
         "required": ["type", "env"],
@@ -273,9 +273,19 @@ func (a *HTTPEnrich) fetch(ctx context.Context, w *protocol.Writer, p adapters.P
 			"http/enrich: %s: HTTP %d from %s — nothing stored", key.IdentityKey, resp.StatusCode, url)))
 	}
 	if len(body) > cfg.MaxBytes {
-		// Never truncate silently (SPEC §10a): an oversized page is not stored.
-		return w.Write(protocol.Log("warn", fmt.Sprintf(
-			"http/enrich: %s: response exceeds the %d-byte cap — nothing stored", key.IdentityKey, cfg.MaxBytes)))
+		// Never truncate silently (SPEC §10): an oversized page writes no
+		// field, so the record advances counted empty (ADR-053) — and the
+		// response the run threw away is exactly the one an operator needs
+		// to look at, so it still rides along as a payload for retention.
+		if err := w.Write(protocol.Log("warn", fmt.Sprintf(
+			"http/enrich: %s: response exceeds the %d-byte cap — nothing stored", key.IdentityKey, cfg.MaxBytes))); err != nil {
+			return err
+		}
+		msg := protocol.Record(key, map[string]any{}, nil)
+		if keepPayloads(cfg) {
+			msg.Payload = &protocol.Payload{ContentType: resp.Header.Get("Content-Type"), Body: string(body)}
+		}
+		return w.Write(msg)
 	}
 
 	learned := map[string]any{}
@@ -304,13 +314,18 @@ func (a *HTTPEnrich) fetch(ctx context.Context, w *protocol.Writer, p adapters.P
 	}
 
 	msg := protocol.Record(key, learned, nil)
-	keep := true
-	if v, ok := cfg.raw["keep_payloads"].(bool); ok {
-		keep = v
-	}
-	if keep {
+	if keepPayloads(cfg) {
 		ct := resp.Header.Get("Content-Type")
 		msg.Payload = &protocol.Payload{ContentType: ct, Body: string(body)}
 	}
 	return w.Write(msg)
+}
+
+// keepPayloads is the step's ADR-030 offer: on unless the operator said
+// keep_payloads: false. The runner owns retention either way.
+func keepPayloads(cfg httpEnrichConfig) bool {
+	if v, ok := cfg.raw["keep_payloads"].(bool); ok {
+		return v
+	}
+	return true
 }

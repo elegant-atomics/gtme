@@ -75,7 +75,7 @@ func TestGroupsQualifyJudgeOnceSendSuppress(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("top-up exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "judge: 0 in", "top-up step line (nothing re-judged)")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 0 cached, 0 filtered, 0 failed, 3 gated", "top-up step line (nothing re-judged)")
 	contains(t, res.stderr, "3 gated", "top-up step line")
 	if n := h.queryInt(`SELECT count(*) FROM group_events WHERE event = 'added'`); n != 3 {
 		t.Errorf("added events after top-up = %d, want 3 (2 qualified + 1 rejected, no re-adds)", n)
