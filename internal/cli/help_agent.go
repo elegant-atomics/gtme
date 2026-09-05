@@ -113,7 +113,7 @@ var agentVerbs = []agentVerb{
 	{"gtme show --run RUN_ID|last [--fields a,b] [--provenance] [--limit N]", "list the records a run touched"},
 	{"gtme show --run RUN_ID|last --pending [STEP]", "the records awaiting a participant with the surface each is shown, as text on stderr and NDJSON on stdout — what an agent reads before it answers (ADR-049)"},
 	{"gtme answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set field=value ...] [--as NAME] [--cost USD [--measured]] [--note TEXT]", "record a participant's answer for one pending human/* or agent/* step: a filter takes pass=true|false and reason, a compose or review its declared fields; the value is validated against the step's declared outputs and refused naming them otherwise. Writes an `answered` event and nothing else — it never sends. STEP may be omitted when one step is pending; with no identity key and a terminal it walks the pending records. --as names the participant (default the OS user; the human/ or agent/ prefix follows the adapter), --cost records what the participant spent (estimated unless --measured), --note is free text kept with the answer (never part of a cache key)"},
-	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step)"},
+	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step); a rehearsal is marked (dry) and a run that spent money and sourced nothing reads `done — 0 records, $X spent` (ADR-052, ADR-053)"},
 	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
 	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
 	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
@@ -304,7 +304,7 @@ steps:
 	},
 	{
 		Name:        "csv-sourced-compose-with-uses",
-		Description: "csv/source -> cached enrich -> ai/compose (uses: on a compose step, not a filter), no AI filter in the chain.",
+		Description: "csv/source -> cached enrich -> ai/compose (uses: on a compose step, not a filter), no AI filter in the chain. A uses: field can be absent for a record at run time even though the plan validated it; on_missing: run (the default) still dispatches and the receipt prints `(N missing <field>)`, on_missing: skip advances the record untouched, on_missing: fail fails it naming the field (ADR-053).",
 		Yaml: `name: csv-personalize
 version: 1
 source:

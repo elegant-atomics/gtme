@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 )
 
@@ -38,10 +39,19 @@ func PrintReceipt(w io.Writer, res *Result) {
 			title += " — ended with a step in flight; the next `gtme run` of this pipeline collects (ADR-038)"
 		}
 	}
+	// A paid run that produced no records says so (SPEC §8, ADR-053) —
+	// information on the receipt, not a new exit code.
+	if paidForNothing(res) {
+		var spent ledger.CostTotal
+		for _, s := range res.Steps {
+			spent.Add(s.Cost)
+		}
+		title += " — 0 records, " + FormatSpent(spent)
+	}
 	fmt.Fprintf(w, "\nrun %s — %s\n", res.RunID, title)
 
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "step\tadapter\tin\tout\tcached\tfiltered\tfailed\tcost\tavoided")
+	fmt.Fprintln(tw, "step\tadapter\tin\tout\tempty\tcached\tfiltered\tfailed\tcost\tavoided")
 
 	var totalCost ledger.CostTotal
 	var totalAvoided float64
@@ -66,11 +76,18 @@ func PrintReceipt(w io.Writer, res *Result) {
 		totalCost.Add(s.Cost)
 		totalAvoided += s.AvoidedUSD
 
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n",
-			s.ID, s.Use, s.In, s.Out, s.CacheSkips,
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			s.ID, s.Use, s.In, s.Out, dash(s.Empty), s.CacheSkips,
 			dash(s.Filtered), dash(s.Failed), money(s.Cost.Total()), avoided)
 	}
 	tw.Flush()
+	// Declared fields absent at dispatch (SPEC §7, ADR-053): the gap is
+	// visible whether or not the operator chose a policy.
+	for i := range res.Steps {
+		if s := &res.Steps[i]; s.Missing > 0 {
+			fmt.Fprintf(w, "%s: %s — dispatched anyway (on_missing: run); set on_missing: skip or fail to hold them\n", s.ID, missingNote(s))
+		}
+	}
 
 	// Simulation gaps (SPEC §8): a binding without fixtures, or a credentialed
 	// process adapter with nothing to serve, is surfaced — never silently passed.
@@ -216,6 +233,19 @@ func PrintReceipt(w io.Writer, res *Result) {
 	fmt.Fprintln(w, total)
 }
 
+// paidForNothing reports a run that spent money and sourced no records
+// (SPEC §8, ADR-053).
+func paidForNothing(res *Result) bool {
+	sourced, spent := 0, 0.0
+	for _, s := range res.Steps {
+		if s.Role == adapters.RoleSource {
+			sourced += s.Out + s.Empty
+		}
+		spent += s.Cost.Total()
+	}
+	return sourced == 0 && spent > 0
+}
+
 func holdReason(res *Result) string {
 	if res.Simulated {
 		return "simulated run"
@@ -243,6 +273,20 @@ func FormatCost(c ledger.CostTotal) string {
 		return money(c.Estimated) + " (estimated)"
 	default:
 		return fmt.Sprintf("%s (%s measured + %s estimated)", money(c.Total()), money(c.Measured), money(c.Estimated))
+	}
+}
+
+// FormatSpent renders "$X spent" with its basis after the verb — `$4.10
+// spent (estimated)` — the phrase SPEC §8's paid-zero-record mark uses on
+// the receipt and in `gtme runs`.
+func FormatSpent(c ledger.CostTotal) string {
+	switch {
+	case c.Estimates == 0:
+		return money(c.Total()) + " spent"
+	case c.Measured == 0:
+		return money(c.Estimated) + " spent (estimated)"
+	default:
+		return fmt.Sprintf("%s spent (%s measured + %s estimated)", money(c.Total()), money(c.Measured), money(c.Estimated))
 	}
 }
 

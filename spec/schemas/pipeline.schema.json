@@ -196,10 +196,11 @@
         },
         "on_missing": {
           "enum": [
+            "run",
             "skip",
             "fail"
           ],
-          "description": "Deliver steps only (ADR-019/031, SPEC.md §8): per-record policy when a variables: target does not resolve to a non-empty value. Default skip (with a recorded verdict, and the record advances past the step); fail freezes the record. Blank merge fields never send."
+          "description": "Per-record completeness policy. Deliver steps (ADR-019/031, SPEC.md §8): skip (default) or fail when a variables: target does not resolve to a non-empty value — skip records a verdict and the record advances past the step; fail freezes it; blank merge fields never send, so run is not valid here. Participant steps (ai/*, human/*, agent/*; ADR-053, SPEC.md §7): run (default) dispatches the record with a declared uses: field absent and the receipt counts it; skip advances the record untouched without dispatching; fail fails it naming the missing fields."
         },
         "waterfall": {
           "description": "Reserved (SPEC.md §9); rejected in v0."

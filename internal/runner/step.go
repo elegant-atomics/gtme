@@ -106,6 +106,10 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		if rr.State != prev {
 			continue
 		}
+		// in counts every record eligible at this step (SPEC §8, ADR-053), so
+		// the line reconciles: in = out + empty + cached + filtered + failed +
+		// gated + skipped (+ simulated, held, in flight).
+		r.bump(st, func(s *StepStat) { s.In++ })
 		if st.WhenStep != "" && !rr.Passed(st.WhenStep) {
 			r.bump(st, func(s *StepStat) { s.Gated++ })
 			continue
@@ -174,7 +178,6 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
 				return err
 			}
-			r.bump(st, func(s *StepStat) { s.In++ })
 			if err := r.advance(ctx, st, it, map[string]any{"group": st.TargetGroup}, nil); err != nil {
 				return err
 			}
@@ -347,6 +350,39 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 		}
 	}
 
+	// A declared field absent at run time (SPEC §7, ADR-053): uses: was
+	// validated for availability at plan time, which does not make it present
+	// on every record. skip advances the record untouched; fail fails it
+	// naming the fields; run (the default) dispatches and the receipt counts.
+	var absent []string
+	if isParticipant(st) && len(st.Uses) > 0 {
+		for _, f := range st.Uses {
+			if stringify(fields[f]) == "" {
+				absent = append(absent, f)
+			}
+		}
+	}
+	if len(absent) > 0 {
+		reason := "missing " + strings.Join(absent, ", ")
+		switch st.OnMissing {
+		case "fail":
+			return nil, r.failItem(ctx, st, it, reason)
+		case "skip":
+			if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "done",
+				map[string]any{"fields": 0, "skipped": true, "reason": reason}); err != nil {
+				return nil, err
+			}
+			if err := r.l.SetRunRecordState(ctx, r.runID, it.identityID, st.ID); err != nil {
+				return nil, err
+			}
+			r.bump(st, func(s *StepStat) {
+				s.Skipped++
+				s.MissingSkips = append(s.MissingSkips, RecordVariables{IdentityKey: it.key.IdentityKey, Missing: absent})
+			})
+			return nil, nil
+		}
+	}
+
 	skipped, err := r.cacheSkip(ctx, st, it)
 	if err != nil {
 		return nil, err
@@ -427,6 +463,19 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 		if r.dry {
 			return nil, r.dryDeliver(ctx, st, it, rv)
 		}
+	}
+	if len(absent) > 0 {
+		// Dispatched with a declared field absent (on_missing: run): visible
+		// on the receipt whatever the operator chose (SPEC §7, ADR-053).
+		r.bump(st, func(s *StepStat) {
+			s.Missing++
+			if s.MissingFields == nil {
+				s.MissingFields = map[string]int{}
+			}
+			for _, f := range absent {
+				s.MissingFields[f]++
+			}
+		})
 	}
 	return it, nil
 }
@@ -656,10 +705,23 @@ func (r *runner) printStepLine(st *planner.Step) {
 	stat := r.stat(st)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	line := fmt.Sprintf("%s: %d in, %d out, %d cached, %d filtered, %d failed",
-		st.ID, stat.In, stat.Out, stat.CacheSkips, stat.Filtered, stat.Failed)
+	line := fmt.Sprintf("%s: %d in, %d out", st.ID, stat.In, stat.Out)
+	if stat.Empty > 0 {
+		// Beside out (SPEC §8, ADR-053): out + empty is what advanced.
+		line += fmt.Sprintf(", %d empty", stat.Empty)
+	}
+	line += fmt.Sprintf(", %d cached, %d filtered, %d failed", stat.CacheSkips, stat.Filtered, stat.Failed)
 	if stat.Gated > 0 {
 		line += fmt.Sprintf(", %d gated", stat.Gated)
+	}
+	if stat.Skipped > 0 {
+		line += fmt.Sprintf(", %d skipped", stat.Skipped)
+	}
+	if stat.SimGapRecords > 0 {
+		line += fmt.Sprintf(", %d simulated", stat.SimGapRecords)
+	}
+	if n := len(stat.DryRun); n > 0 {
+		line += fmt.Sprintf(", %d held (dry run)", n)
 	}
 	switch {
 	case stat.InFlight > 0 && stat.Awaiting != "":
@@ -667,7 +729,21 @@ func (r *runner) printStepLine(st *planner.Step) {
 	case stat.InFlight > 0:
 		line += fmt.Sprintf(", %d in flight", stat.InFlight)
 	}
+	if stat.Missing > 0 {
+		line += " (" + missingNote(stat) + ")"
+	}
 	fmt.Fprintln(r.stderr, line)
+}
+
+// missingNote renders "8 missing web.homepage" — records dispatched with a
+// declared uses: field absent, and which fields (SPEC §7, ADR-053).
+func missingNote(stat *StepStat) string {
+	fields := make([]string, 0, len(stat.MissingFields))
+	for f := range stat.MissingFields {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields)
+	return fmt.Sprintf("%d missing %s", stat.Missing, strings.Join(fields, ", "))
 }
 
 // cacheSkip skips a record whose output this step already knows, within the
@@ -841,7 +917,6 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "claimed", nil); err != nil {
 			return err
 		}
-		r.bump(st, func(s *StepStat) { s.In++ })
 		msgs = append(msgs, protocol.Record(it.key, it.fields, nil))
 	}
 	msgs = append(msgs, protocol.End())
@@ -1084,6 +1159,18 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 	}
 	it.output = true
 
+	// A RECORD with no fields says "nothing acquired for this record" — the
+	// same thing as no RECORD at all, except it may carry the payload the
+	// adapter threw away (SPEC §10, ADR-053 (4)). There is nothing to
+	// validate; the record advances counted empty, and a filter's verdict,
+	// if any, still decides it.
+	if len(m.Fields) == 0 && st.Role != adapters.RoleFilter && !attesting(st) {
+		if err := r.keepPayload(ctx, st, it.identityID, m); err != nil {
+			return err
+		}
+		return r.advance(ctx, st, it, map[string]any{"fields": 0}, nil)
+	}
+
 	// Output is validated against the step's provides before it reaches the
 	// ledger (SPEC §5) — the declared schema for an AI step that carries one
 	// (ADR-033), else the manifest's: an invalid record fails, the run
@@ -1204,9 +1291,43 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		}
 	}
 	it.advanced = true
-	r.bump(st, func(s *StepStat) { s.Out++ })
+	// out means the step contributed something (SPEC §8, ADR-053): a
+	// field-writing step that advanced a record without writing a field
+	// counts it empty. A filter's output is a verdict and a deliver's a
+	// send, so their advances are always out.
+	if writesFields(st) && fieldsWritten(detail) == 0 {
+		r.bump(st, func(s *StepStat) { s.Empty++ })
+	} else {
+		r.bump(st, func(s *StepStat) { s.Out++ })
+	}
 	r.emit(it.key, fields)
 	return nil
+}
+
+// writesFields reports a step whose output is fields — enrich, verify,
+// compose, review, sql/transform — as opposed to a verdict or a send.
+func writesFields(st *planner.Step) bool {
+	if st.IsDeliver || st.IsSource {
+		return false
+	}
+	switch st.Role {
+	case adapters.RoleEnrich, adapters.RoleVerify, adapters.RoleCompose, adapters.RoleReview:
+		return true
+	}
+	return false
+}
+
+// fieldsWritten reads the "fields" count an advance carries in its detail.
+func fieldsWritten(detail map[string]any) int {
+	switch n := detail["fields"].(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return 0
 }
 
 func (r *runner) failItem(ctx context.Context, st *planner.Step, it *item, reason string) error {

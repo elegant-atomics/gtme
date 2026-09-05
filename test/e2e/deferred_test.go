@@ -52,7 +52,7 @@ func TestDeferredStepEndsTheRunPendingAndRunCollects(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("submit exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "judge: 2 in, 0 out, 0 cached, 0 filtered, 0 failed, 1 gated, 2 in flight", "step line")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 0 cached, 0 filtered, 0 failed, 1 gated, 2 in flight", "step line")
 	contains(t, res.stderr, "pending — ended with a step in flight; the next `gtme run` of this pipeline collects", "receipt title")
 	contains(t, res.stderr, "judge: 2 record(s) in flight (fixture-batch-1); the next `gtme run` of this pipeline collects, or `gtme run --resume", "receipt")
 	runID := h.queryStrings(`SELECT id FROM runs WHERE pipeline = 'judge-deferred'`)[0]
@@ -83,7 +83,7 @@ func TestDeferredStepEndsTheRunPendingAndRunCollects(t *testing.T) {
 		t.Fatalf("collect-1 exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
 	contains(t, res.stderr, "collecting run "+runID+" — the latest run of \"judge-deferred\" ended with a step in flight", "collect-first")
-	contains(t, res.stderr, "judge: 2 in, 0 out, 0 cached, 0 filtered, 0 failed, 1 gated, 2 in flight", "still in flight")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 0 cached, 0 filtered, 0 failed, 1 gated, 2 in flight", "still in flight")
 	if n := h.queryInt(`SELECT count(*) FROM runs WHERE pipeline = 'judge-deferred'`); n != 1 {
 		t.Fatalf("runs = %d, want 1 — collecting must not start a run", n)
 	}
@@ -100,7 +100,7 @@ func TestDeferredStepEndsTheRunPendingAndRunCollects(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("collect-2 exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "judge: 2 in, 2 out, 0 cached, 0 filtered, 0 failed", "collected")
+	contains(t, res.stderr, "judge: 3 in, 2 out, 0 cached, 0 filtered, 0 failed, 1 gated", "collected")
 	contains(t, res.stderr, `group "judged": 2 record(s) added`, "terminus")
 	if s := h.queryStrings(`SELECT status FROM runs WHERE id = '` + runID + `'`); s[0] != "done" {
 		t.Errorf("status = %s, want done", s[0])
@@ -130,7 +130,7 @@ func TestDeferredStepEndsTheRunPendingAndRunCollects(t *testing.T) {
 	if n := h.queryInt(`SELECT count(*) FROM runs WHERE pipeline = 'judge-deferred'`); n != 2 {
 		t.Errorf("runs = %d, want 2", n)
 	}
-	contains(t, res.stderr, "judge: 0 in, 0 out, 0 cached, 0 filtered, 0 failed, 3 gated", "judgment memory")
+	contains(t, res.stderr, "judge: 3 in, 0 out, 0 cached, 0 filtered, 0 failed, 3 gated", "judgment memory")
 	if s := h.queryStrings(`SELECT status FROM runs WHERE pipeline = 'judge-deferred' ORDER BY started_at DESC LIMIT 1`); s[0] != "done" {
 		t.Errorf("fresh run status = %s, want done", s[0])
 	}

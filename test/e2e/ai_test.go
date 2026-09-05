@@ -129,7 +129,7 @@ func TestAIStepsFilterComposeAndDeliver(t *testing.T) {
 	if second.code != 0 {
 		t.Fatalf("second run exit = %d\nstderr:\n%s", second.code, second.stderr)
 	}
-	contains(t, second.stderr, "deliver: 0 in, 0 out, 2 cached", "deliver should skip both")
+	contains(t, second.stderr, "deliver: 2 in, 0 out, 2 cached", "deliver should skip both")
 
 	if n := h.queryInt(`SELECT count(*) FROM deliveries`); n != 2 {
 		t.Errorf("deliveries after the second run = %d, want 2", n)

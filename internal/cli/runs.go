@@ -48,6 +48,10 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 			if err != nil {
 				return fail(ExitOther, "%v", err)
 			}
+			status, err := runStatus(ctx, l, run, len(records))
+			if err != nil {
+				return fail(ExitOther, "%v", err)
+			}
 			inFlight := "-"
 			if run.Status == ledger.StatusPending {
 				n, err := l.InFlight(ctx, run.ID)
@@ -56,7 +60,7 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 				}
 				inFlight = fmt.Sprint(n)
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", run.ID, run.Pipeline, runStatus(run), run.StartedAt, len(records), inFlight)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", run.ID, run.Pipeline, status, run.StartedAt, len(records), inFlight)
 		}
 		tw.Flush()
 		return nil
@@ -81,8 +85,16 @@ func cmdRuns(ctx context.Context, env Env, args []string) error {
 // printReceipt reconstructs a run's receipt from the ledger, so it can be read
 // again long after the run finished.
 func printReceipt(ctx context.Context, env Env, l *ledger.Ledger, run ledger.Run) error {
+	recordsIn, err := l.RunRecords(ctx, run.ID)
+	if err != nil {
+		return fail(ExitOther, "%v", err)
+	}
+	status, err := runStatus(ctx, l, run, len(recordsIn))
+	if err != nil {
+		return fail(ExitOther, "%v", err)
+	}
 	fmt.Fprintf(env.Stderr, "run %s\npipeline: %s\nstatus:   %s\nstarted:  %s\n",
-		run.ID, run.Pipeline, runStatus(run), run.StartedAt)
+		run.ID, run.Pipeline, status, run.StartedAt)
 	if run.FinishedAt != "" {
 		fmt.Fprintf(env.Stderr, "finished: %s\n", run.FinishedAt)
 	}
@@ -169,11 +181,27 @@ func money(v float64) string {
 	return fmt.Sprintf("$%.4f", v)
 }
 
-// runStatus is a run's status with its rehearsal marked (SPEC §3, ADR-052
-// (7)): a dry run has its own entry like any other, and says so.
-func runStatus(run ledger.Run) string {
+// runStatus is a run's status with two facts the bare word hides: a
+// rehearsal is marked (SPEC §3, ADR-052 (7)), and a run that spent money and
+// produced no records says so (SPEC §8, ADR-053) — the same words the live
+// receipt used.
+func runStatus(ctx context.Context, l *ledger.Ledger, run ledger.Run, records int) (string, error) {
+	status := run.Status
 	if run.Dry {
-		return run.Status + " (dry)"
+		status += " (dry)"
 	}
-	return run.Status
+	if records == 0 {
+		costs, err := l.CostsByStep(ctx, run.ID)
+		if err != nil {
+			return "", err
+		}
+		var total ledger.CostTotal
+		for _, c := range costs {
+			total.Add(c)
+		}
+		if total.Total() > 0 {
+			status += " — 0 records, " + runner.FormatSpent(total)
+		}
+	}
+	return status, nil
 }

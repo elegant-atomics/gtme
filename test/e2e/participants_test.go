@@ -190,7 +190,7 @@ func TestHumanJudgmentIsCached(t *testing.T) {
 	if res.code != 0 {
 		t.Fatalf("cached exit = %d\nstderr:\n%s", res.code, res.stderr)
 	}
-	contains(t, res.stderr, "grade: 0 in, 0 out, 3 cached", "an unchanged draft is not re-asked")
+	contains(t, res.stderr, "grade: 3 in, 0 out, 3 cached", "an unchanged draft is not re-asked")
 	if n := h.queryInt(`SELECT count(*) FROM step_events WHERE step_id = 'grade' AND event = 'pending'`); n != pended {
 		t.Errorf("pending events = %d, want %d (an unchanged draft must not re-pend)", n, pended)
 	}

@@ -127,6 +127,9 @@ func Print(w io.Writer, p *Plan) {
 				fmt.Fprintf(w, "     on_missing: %s\n", s.OnMissing)
 			}
 		}
+		if !s.IsDeliver && s.OnMissing != "" && s.OnMissing != "run" && len(s.Uses) > 0 {
+			fmt.Fprintf(w, "     on_missing: %s (a declared uses: field absent at run time — ADR-053)\n", s.OnMissing)
+		}
 		if s.Of != "" {
 			fmt.Fprintf(w, "     of:        %s (the referent — its value joins the cache key, its id the provenance; ADR-048)\n", s.Of)
 		}

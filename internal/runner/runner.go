@@ -63,16 +63,21 @@ type Options struct {
 
 // StepStat is one step's contribution to the receipt.
 type StepStat struct {
-	ID            string
-	Use           string
-	Role          string
-	In            int // records dispatched to the adapter
-	Out           int // records that advanced
-	CacheSkips    int
-	Filtered      int // failed a filter verdict
-	Failed        int
-	Gated         int  // excluded by when:
-	Skipped       int  // deliver records held back by on_missing (SPEC §8)
+	ID         string
+	Use        string
+	Role       string
+	In         int // records eligible at this step (SPEC §8, ADR-053): what the line reconciles against
+	Out        int // records that advanced with something contributed
+	Empty      int // records that advanced with nothing written (SPEC §8, ADR-053)
+	CacheSkips int
+	Filtered   int // failed a filter verdict
+	Failed     int
+	Gated      int // excluded by when:
+	Skipped    int // records held back by on_missing: a deliver's withheld send, or a participant step's skip (SPEC §7/§8)
+	// Missing counts records dispatched with a declared uses: field absent
+	// (on_missing: run, SPEC §7, ADR-053); MissingFields tallies which.
+	Missing       int
+	MissingFields map[string]int
 	SimGap        bool // stubbed under --simulate: no fixtures to serve (SPEC §8)
 	SimGapRecords int  // records that passed through the gap untouched
 	// Cost is the step's spend, measured and estimated apart (ADR-046).
@@ -672,7 +677,7 @@ func (r *runner) runSource(ctx context.Context) error {
 	// A source receives no records; END says "there is no input coming".
 	sendErr := sess.SendStream([]protocol.Message{r.openMessage(st, nil), protocol.End()})
 
-	count := 0
+	count, coalesced := 0, 0
 	for {
 		m, err := sess.Next()
 		if errors.Is(err, io.EOF) {
@@ -684,7 +689,14 @@ func (r *runner) runSource(ctx context.Context) error {
 		}
 		switch m.Type {
 		case protocol.TypeRecord:
-			if err := r.ingestSourceRecord(ctx, st, m); err != nil {
+			added, err := r.ingestSourceRecord(ctx, st, m)
+			if err == nil && !added {
+				// Two rows, one identity (SPEC §8, ADR-053): the row is not
+				// lost, it coalesced — recorded above, counted here.
+				coalesced++
+				continue
+			}
+			if err != nil {
 				stat.Failed++
 				fmt.Fprintf(r.stderr, "%s: dropped a record: %v\n", st.ID, err)
 				// SPEC §5: an invalid record fails and the run continues — the
@@ -725,10 +737,21 @@ func (r *runner) runSource(ctx context.Context) error {
 	}
 
 	stat.Out = count
-	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done", map[string]any{"records": count}); err != nil {
+	detail := map[string]any{"records": count}
+	if coalesced > 0 {
+		detail["coalesced"] = coalesced
+	}
+	if err := r.l.LogStepEvent(ctx, r.prov(st.ID), "", "done", detail); err != nil {
 		return err
 	}
-	fmt.Fprintf(r.stderr, "%s: sourced %d records\n", st.ID, count)
+	// The source line reconciles rows read against records sourced (SPEC §8,
+	// ADR-053): the adapter's own [info] line says what it read; this one
+	// says what became a record, and classifies the difference.
+	if coalesced > 0 {
+		fmt.Fprintf(r.stderr, "%s: sourced %d records (%d coalesced into known identities)\n", st.ID, count, coalesced)
+	} else {
+		fmt.Fprintf(r.stderr, "%s: sourced %d records\n", st.ID, count)
+	}
 	return nil
 }
 
@@ -756,7 +779,7 @@ func (r *runner) runGroupSource(ctx context.Context, st *planner.Step, stat *Ste
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
+		if _, err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
 			return err
 		}
 		r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, nil)
@@ -816,16 +839,18 @@ func (r *runner) onceSelection(ctx context.Context, groupID string, limit int) (
 }
 
 // ingestSourceRecord canonicalizes a sourced record into an identity, writes its
-// fields, and adds it to the run.
-func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m protocol.Message) error {
+// fields, and adds it to the run. added is false when the row resolved to an
+// identity already in this run — it coalesced (SPEC §8, ADR-053), and a
+// `coalesced` step event names which row merged into which identity.
+func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m protocol.Message) (bool, error) {
 	if len(m.Fields) == 0 && m.Key == nil {
-		return fmt.Errorf("record has neither fields nor a key")
+		return false, fmt.Errorf("record has neither fields nor a key")
 	}
 	if err := st.Manifest.ValidateProvides(m.Fields); err != nil {
-		return err
+		return false, err
 	}
 	if err := r.checkRegistry(st.EntityType, m.Fields); err != nil {
-		return err
+		return false, err
 	}
 
 	var ident ledger.Identity
@@ -837,30 +862,55 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 		// The adapter knows who this is even though the fields do not say so.
 		ident, err = r.l.EnsureIdentity(ctx, m.Key.EntityType, m.Key.IdentityKey, r.prov(st.ID))
 		if err != nil {
-			return err
+			return false, err
 		}
 	default:
-		return err
+		return false, err
 	}
 
 	if _, err := r.l.WriteFieldMap(ctx, ident.ID, r.source(st), r.prov(st.ID), m.Fields, m.Confidence); err != nil {
-		return err
+		return false, err
 	}
 	if err := r.keepPayload(ctx, st, ident.ID, m); err != nil {
-		return err
+		return false, err
 	}
-	if err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced); err != nil {
-		return err
+	added, err := r.l.AddRunRecord(ctx, r.runID, ident.ID, ledger.StateSourced)
+	if err != nil {
+		return false, err
+	}
+	if !added {
+		// Which row merged into which identity is a ledger fact, not a count
+		// (SPEC §8, ADR-053): the row's own keys, and the identity that won.
+		detail := map[string]any{"into": ident.IdentityKey, "keys": rowKeys(st.EntityType, m)}
+		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), ident.ID, "coalesced", detail); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
 	r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, m.Fields)
 	// Relate the person to their company when the source gave us a domain
 	// (SPEC §10.2 wants the relation; the runner owns identity, so it lives here).
 	if st.EntityType == identity.Person {
 		if err := r.relateCompany(ctx, st, ident.ID, m.Fields); err != nil {
-			return err
+			return true, err
 		}
 	}
-	return nil
+	return true, nil
+}
+
+// rowKeys names the identity keys a sourced row carried, as written — the
+// half of a coalesce event that identifies the row.
+func rowKeys(entityType string, m protocol.Message) []string {
+	var keys []string
+	if cands, err := identity.Candidates(entityType, m.Fields); err == nil {
+		for _, c := range cands {
+			keys = append(keys, c.Value)
+		}
+	}
+	if len(keys) == 0 && m.Key != nil && m.Key.IdentityKey != "" {
+		keys = append(keys, m.Key.IdentityKey)
+	}
+	return keys
 }
 
 func (r *runner) relateCompany(ctx context.Context, st *planner.Step, personID string, fields map[string]any) error {

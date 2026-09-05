@@ -143,6 +143,11 @@ func TestParseErrors(t *testing.T) {
 			want: "unsupported version",
 		},
 		{
+			name: "on_missing vocabulary is run|skip|fail (ADR-053)",
+			yaml: "name: x\nsource:\n  use: a/b\nsteps:\n  - id: s\n    use: ai/compose\n    on_missing: maybe\n",
+			want: "on_missing must be \"run\", \"skip\" or \"fail\"",
+		},
+		{
 			name: "once: is a group-source key (ADR-052)",
 			yaml: "name: x\nsource:\n  use: a/b\n  once: true\n",
 			want: "once: is only valid on a group source",

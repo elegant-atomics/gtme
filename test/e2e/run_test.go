@@ -84,7 +84,7 @@ func TestRunSourceThroughExternalAdapter(t *testing.T) {
 	// Second run: same source, but the ledger already knows every provided field,
 	// so the adapter must not be called at all.
 	second := h.mustRun("run", "pipeline.yaml")
-	contains(t, second.stderr, "mock: 0 in, 0 out, 3 cached", "second run stderr")
+	contains(t, second.stderr, "mock: 3 in, 0 out, 3 cached", "second run stderr")
 	contains(t, second.stderr, "avoided via cache", "second run receipt")
 
 	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'mock.score'`); n != 3 {

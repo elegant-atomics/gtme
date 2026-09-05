@@ -39,27 +39,28 @@ func TestPipelineRecordsReadTerminality(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(l.AddRunRecord(ctx, a.ID, ids["x@acme.com"], StateSourced))
+	mustAdd := func(_ bool, err error) { t.Helper(); must(err) }
+	mustAdd(l.AddRunRecord(ctx, a.ID, ids["x@acme.com"], StateSourced))
 	must(l.SetRunRecordState(ctx, a.ID, ids["x@acme.com"], "send"))
-	must(l.AddRunRecord(ctx, a.ID, ids["y@acme.com"], StateSourced))
+	mustAdd(l.AddRunRecord(ctx, a.ID, ids["y@acme.com"], StateSourced))
 	must(l.SetVerdict(ctx, a.ID, ids["y@acme.com"], "gate", false))
-	must(l.AddRunRecord(ctx, a.ID, ids["z@acme.com"], StateSourced))
+	mustAdd(l.AddRunRecord(ctx, a.ID, ids["z@acme.com"], StateSourced))
 	must(l.FinishRun(ctx, a.ID, StatusDone))
 
 	// Another pipeline's run over the same people is not this pipeline's history.
 	other, err := l.CreateRun(ctx, "elsewhere", snapshot, false)
 	must(err)
-	must(l.AddRunRecord(ctx, other.ID, ids["x@acme.com"], StateSourced))
+	mustAdd(l.AddRunRecord(ctx, other.ID, ids["x@acme.com"], StateSourced))
 
 	// A source-only run finishes at 'sourced'.
 	b, err := l.CreateRun(ctx, "drain", map[string]any{"name": "drain"}, false)
 	must(err)
-	must(l.AddRunRecord(ctx, b.ID, ids["z@acme.com"], StateSourced))
+	mustAdd(l.AddRunRecord(ctx, b.ID, ids["z@acme.com"], StateSourced))
 
 	// A rehearsal's records come back marked dry (ADR-052 (7)).
 	d, err := l.CreateRun(ctx, "drain", snapshot, true)
 	must(err)
-	must(l.AddRunRecord(ctx, d.ID, ids["y@acme.com"], StateSourced))
+	mustAdd(l.AddRunRecord(ctx, d.ID, ids["y@acme.com"], StateSourced))
 	must(l.SetRunRecordState(ctx, d.ID, ids["y@acme.com"], "send"))
 
 	recs, err := l.PipelineRecords(ctx, "drain")
