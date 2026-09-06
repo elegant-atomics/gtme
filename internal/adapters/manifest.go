@@ -15,13 +15,14 @@ import (
 
 // Roles an adapter can play (SPEC §6).
 const (
-	RoleSource  = "source"
-	RoleFilter  = "filter"
-	RoleEnrich  = "enrich"
-	RoleVerify  = "verify"
-	RoleCompose = "compose"
-	RoleReview  = "review"
-	RoleDeliver = "deliver"
+	RoleSource   = "source"
+	RoleTraverse = "traverse" // ADR-054: records of `from` in, records of entity_type out, each related to its parent
+	RoleFilter   = "filter"
+	RoleEnrich   = "enrich"
+	RoleVerify   = "verify"
+	RoleCompose  = "compose"
+	RoleReview   = "review"
+	RoleDeliver  = "deliver"
 )
 
 // ParticipantRole reports one of the three participant roles (SPEC §6,
@@ -33,10 +34,17 @@ func ParticipantRole(role string) bool {
 
 // Manifest is an adapter's contract.
 type Manifest struct {
-	ID          string          `json:"id"`
-	Version     int             `json:"version"`
-	Role        string          `json:"role"`
-	EntityType  string          `json:"entity_type"`
+	ID         string `json:"id"`
+	Version    int    `json:"version"`
+	Role       string `json:"role"`
+	EntityType string `json:"entity_type"`
+	// From is a traverse manifest's input type (SPEC §6, ADR-054): the
+	// planner requires it to equal the current segment's type; needs is
+	// validated against it, provides against entity_type (the output type).
+	From string `json:"from,omitempty"`
+	// Relation is the edge a traverse writes between every emitted record
+	// and the parent it was traversed from (SPEC §6, ADR-054).
+	Relation    *Relation       `json:"relation,omitempty"`
 	Needs       json.RawMessage `json:"needs,omitempty"`
 	Provides    json.RawMessage `json:"provides,omitempty"`
 	Credentials []string        `json:"credentials,omitempty"`
@@ -79,6 +87,21 @@ type Manifest struct {
 
 	needs, provides, config *jsonschema.Schema
 }
+
+// Relation is a traverse manifest's edge declaration (SPEC §6, ADR-054):
+// its name, and which end it starts at — "record" (the emitted record to
+// its parent: authored_by runs from the post to its author) or "parent"
+// (works_at runs from the person to the company traversed from).
+type Relation struct {
+	Name string `json:"name"`
+	From string `json:"from"` // record | parent
+}
+
+// Relation ends.
+const (
+	RelationFromRecord = "record"
+	RelationFromParent = "parent"
+)
 
 // Source is the provenance string written to field_values.source.
 func (m *Manifest) Source() string { return fmt.Sprintf("%s@%d", m.ID, m.Version) }
@@ -198,12 +221,28 @@ func (m *Manifest) compile() error {
 		return fmt.Errorf("adapters: %s: version must be >= 1", m.ID)
 	}
 	switch m.Role {
-	case RoleSource, RoleFilter, RoleEnrich, RoleVerify, RoleCompose, RoleReview, RoleDeliver:
+	case RoleSource, RoleTraverse, RoleFilter, RoleEnrich, RoleVerify, RoleCompose, RoleReview, RoleDeliver:
 	default:
 		return fmt.Errorf("adapters: %s: unknown role %q", m.ID, m.Role)
 	}
 	if m.EntityType == "" {
 		return fmt.Errorf("adapters: %s: entity_type is required", m.ID)
+	}
+	// A traverse names both ends of the crossing and the edge it writes
+	// (SPEC §6, ADR-054); neither end may be entity-agnostic.
+	if m.Role == RoleTraverse {
+		switch {
+		case m.From == "":
+			return fmt.Errorf("adapters: %s: a traverse declares from — the input type (SPEC §6, ADR-054)", m.ID)
+		case m.From == EntityAny || m.EntityType == EntityAny:
+			return fmt.Errorf("adapters: %s: a traverse names the types it crosses; neither from nor entity_type may be \"*\" (SPEC §6)", m.ID)
+		case m.Relation == nil || m.Relation.Name == "":
+			return fmt.Errorf("adapters: %s: a traverse declares relation: {name, from: record | parent} — the edge written between each emitted record and its parent (SPEC §6, ADR-054)", m.ID)
+		case m.Relation.From != RelationFromRecord && m.Relation.From != RelationFromParent:
+			return fmt.Errorf("adapters: %s: relation.from must be record or parent, got %q", m.ID, m.Relation.From)
+		}
+	} else if m.From != "" || m.Relation != nil {
+		return fmt.Errorf("adapters: %s: from and relation are traverse keys (role %q) — SPEC §6", m.ID, m.Role)
 	}
 	var err error
 	// The bare string "dynamic" declares fully config-derived needs (SPEC §6,

@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 	"github.com/elegant-atomics/gtme/internal/pipeline"
 	"github.com/elegant-atomics/gtme/internal/registry"
@@ -116,6 +116,18 @@ type Step struct {
 	IsSource  bool
 	IsDeliver bool
 
+	// IsTraverse marks a traverse step (SPEC §6/§7, ADR-054): records of
+	// From in, records of EntityType out, each related to its parent by
+	// Relation; the run opens a new segment after it. Segment is the
+	// index of the segment a step belongs to (0 = the source's); after a
+	// traverse it increments. Writes lists the relations a step's provides
+	// will write through reference fields (SPEC §4a), for the plan.
+	IsTraverse bool
+	From       string
+	Relation   *adapters.Relation
+	Segment    int
+	Writes     []string
+
 	// IsSQL marks a runner-owned SQL step (SPEC §10a, ADR-027): no adapter,
 	// declared contracts (uses:/provides: in config), one read-only query per
 	// step. Query is its SQL.
@@ -158,6 +170,11 @@ type Plan struct {
 	Steps     []Step
 	Available []string
 	Wildcard  bool
+	// FinalType is the type of the run's last segment (SPEC §7, ADR-054):
+	// the source's, or the last traverse's output type — what the terminus
+	// group takes. "" for an entity-blind pipeline (an untyped legacy group
+	// source).
+	FinalType string
 	// Warnings are plan-level observations that do not block (SPEC §7): the
 	// one-commit-point rule (ADR-032) is the first.
 	Warnings []string
@@ -230,6 +247,7 @@ type Scope struct {
 const (
 	SQLTransformID = "sql/transform"
 	SQLFilterID    = "sql/filter"
+	SQLTraverseID  = "sql/traverse" // ADR-054: the runner-owned traverse over relations
 	SQLEnrichID    = "sql/enrich"
 )
 
@@ -360,17 +378,79 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 	available := map[string]bool{}
 	steps := p.AllSteps()
 	scope := Scope{Ctx: ctx, Pipeline: p.Name, Ledger: l}
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, &Errors{Problems: []Problem{{Kind: KindAdapter, Msg: err.Error()}}}
+	}
 
+	segment := 0
+	// lastTraverse names the traverse that opened the current segment — what
+	// a cross-segment when: is told to gate at instead.
+	lastTraverse := ""
 	for i, s := range steps {
 		isSource := i == 0
 
 		ps, stepProblems := ResolveStep(s, isSource, scope)
 		problems = append(problems, stepProblems...)
+		ps.Segment = segment
 		if isSource {
-			// The pipeline's entity type is its source's; a group source has
-			// none to offer (members may be of any type), so steps after it
-			// validate names entity-blind, as SQL steps always have.
+			// The pipeline's entity type is its source's, or its group's
+			// (ADR-054); an untyped legacy group offers none, so steps after
+			// it validate names entity-blind, as SQL steps always have.
 			scope.EntityType = ps.EntityType
+		}
+		// A run is a sequence of typed segments (SPEC §7, ADR-054): every
+		// step is validated against the type of its segment — its manifest's
+		// entity_type equals it or is "*" — and a traverse's from must equal
+		// it. After a traverse only its output type moves forward.
+		if !isSource && scope.EntityType != "" && reg != nil {
+			switch {
+			case ps.IsTraverse && ps.From != scope.EntityType:
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("%s traverses from %s, but the records here are %s (SPEC §7, ADR-054)", ps.Use, ps.From, scope.EntityType)})
+			case !ps.IsTraverse && ps.EntityType != "" && ps.EntityType != scope.EntityType:
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("%s is a %s adapter, but the records here are %s (SPEC §7, ADR-054) — its manifest's entity_type must equal the segment's type or be \"*\"", ps.Use, ps.EntityType, scope.EntityType)})
+			}
+		}
+		if !isSource && ps.IsTraverse && scope.EntityType == "" {
+			group := "<group>"
+			if len(plan.Steps) > 0 && plan.Steps[0].IsGroupSource {
+				group = plan.Steps[0].SourceGroup
+			}
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("a traverse needs a typed segment to traverse from — this pipeline is entity-blind (an untyped group source); set the group's type with `gtme groups add %s --type %s` (SPEC §7, ADR-054)", group, ps.From)})
+		}
+		// A deliver adapter naming a signal type is a plan error (SPEC §4a):
+		// a signal is found and traversed from, never delivered to.
+		if ps.IsDeliver && ps.Manifest != nil && reg != nil {
+			if t, err := reg.Resolve(ps.Manifest.EntityType); err == nil && t.IsSignal() {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("%s delivers %s records, but %s is a signal type — found and traversed from, never delivered to (SPEC §4a, ADR-054)", ps.Use, t.EntityType, t.EntityType)})
+			}
+		}
+		// when: names a step in the current segment only (SPEC §7): a verdict
+		// is a fact about the parent, not the child.
+		if ps.WhenStep != "" {
+			if ref := plan.StepByID(ps.WhenStep); ref != nil && ref.Segment != segment {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+					Msg: fmt.Sprintf("when: %s.passed names a step before the traverse %q — a verdict is a fact about the parent, not the child (SPEC §7, ADR-054); gate at the traverse instead (when: %s.passed on %q mints only children of passing parents)",
+						ps.WhenStep, lastTraverse, ps.WhenStep, lastTraverse)})
+			}
+		}
+		// The relations a step's provides will write (SPEC §4a references).
+		if reg != nil && ps.EntityType != "" && !ps.IsTraverse {
+			if t, err := reg.Resolve(ps.EntityType); err == nil {
+				have := map[string]bool{}
+				for _, f := range ps.Provides {
+					have[f] = true
+				}
+				for _, f := range t.References() {
+					if have[f.Name] {
+						ps.Writes = append(ps.Writes, fmt.Sprintf("%s → %s (from %s)", f.Reference.Relation, f.Reference.Type, f.Name))
+					}
+				}
+			}
 		}
 		// A deliver step's touch scope defaults to the pipeline name (SPEC §8,
 		// ADR-031: per deliver step — steps sharing the default share the
@@ -405,47 +485,53 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 				}
 			}
 		}
-		// An entity_type with no §4 key derivation fails the plan outright: the
-		// runner would drop every sourced record at the identity boundary,
-		// after the source has been called and billed (#27). Static, so it is
-		// judged here, with no network and no spend.
-		if isSource && ps.EntityType != "" && !identity.Supported(ps.EntityType) {
-			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-				Msg: fmt.Sprintf("entity_type %q has no identity derivation in this build (SPEC §4 defines %s) — every sourced record would be dropped at the identity boundary",
-					ps.EntityType, strings.Join(identity.SupportedTypes(), ", "))})
-		} else if isSource && ps.Manifest != nil && !ps.Wildcard && len(ps.Provides) > 0 {
-			// A source with an exact (probed, closed) schema is checked for an
-			// identity-key path (SPEC §7, ADR-018): no derivable tier is an
-			// error, only the name-hash fallback is a note. Judged here and
-			// only here — downstream sufficiency is each following step's own
-			// needs check.
-			strong, weak := identityPath(ps.EntityType, ps.Provides)
-			switch {
-			case !strong && !weak:
-				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-					Msg: fmt.Sprintf("no identity-key path: none of the source's fields (%s) can derive a %s identity (SPEC §4) — map a column to an identity field with columns:",
-						strings.Join(ps.Provides, ", "), ps.EntityType)})
-			case !strong:
+		// The adapter–type contract (SPEC §4a, ADR-054): the type resolves to
+		// one file, provides is canonical for it, and a source can key what
+		// it emits — judged here, with no network and no spend, so an
+		// unkeyable source fails the plan rather than the run, after the
+		// vendor has billed (#27). Only the name-hash fallback is a note.
+		if isSource && ps.EntityType != "" && ps.Manifest != nil && reg != nil {
+			contract, weak := reg.Contract(ps.Manifest, ps.EntityType, ps.Provides, ps.Wildcard)
+			for _, cp := range contract {
+				kind := KindContract
+				if cp.Check == "provides" {
+					kind = KindAdapter
+				}
+				msg := cp.Msg
+				if cp.Check == "key" {
+					msg += " — map a column to an identity field with columns:"
+				}
+				problems = append(problems, Problem{Step: s.ID, Kind: kind, Msg: msg})
+			}
+			if weak {
 				ps.Notes = append(ps.Notes,
 					"only the name-hash fallback identity tier is derivable from this source; dedupe will be weak until something provides an email or public profile URL")
 			}
 			// Near-miss columns (SPEC §7): a csv.* leftover a small edit away
 			// from a canonical name is SUGGESTED, never silently mapped.
-			if reg, err := registry.Load(); err == nil {
-				for _, f := range ps.Provides {
-					bare, ok := strings.CutPrefix(f, "csv.")
-					if !ok {
-						continue
-					}
-					if s := reg.Suggest(ps.EntityType, bare); s != "" {
-						ps.Notes = append(ps.Notes,
-							fmt.Sprintf("column %q looks like canonical %q — map it explicitly with columns: {%s: <your header>}", bare, s, s))
-					}
+			for _, f := range ps.Provides {
+				bare, ok := strings.CutPrefix(f, "csv.")
+				if !ok {
+					continue
+				}
+				if s := reg.Suggest(ps.EntityType, bare); s != "" {
+					ps.Notes = append(ps.Notes,
+						fmt.Sprintf("column %q looks like canonical %q — map it explicitly with columns: {%s: <your header>}", bare, s, s))
 				}
 			}
 		}
 		if ps.Wildcard {
 			plan.Wildcard = true
+		}
+		if ps.IsTraverse {
+			// The next segment: only records of the output type continue, and
+			// the available-field set is what the traverse provides (SPEC §7).
+			// A sql/traverse's children are ledger identities projected whole,
+			// so its set is open, like a group source's.
+			available = map[string]bool{}
+			scope.EntityType = ps.EntityType
+			segment++
+			lastTraverse = ps.ID
 		}
 		for _, f := range ps.Provides {
 			available[f] = true
@@ -519,6 +605,7 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 	}
 
 	plan.Available = keys(available)
+	plan.FinalType = scope.EntityType
 
 	// One commit point (SPEC §7, ADR-032): arming is all-or-nothing
 	// (ADR-031), so a handoff and a network-side send in one pipeline means
@@ -709,12 +796,43 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		gateDeliverKeys(false)
 		return ps, problems
 	}
-	if s.Use == SQLTransformID || s.Use == SQLFilterID {
+	if s.Use == SQLTransformID || s.Use == SQLFilterID || s.Use == SQLTraverseID {
 		ps.IsSQL = true
-		if s.Use == SQLTransformID {
+		// A SQL step takes its segment's type (SPEC §7, ADR-054), so its
+		// declared uses:/provides: validate against the vocabulary the
+		// records actually belong to; an entity-blind pipeline leaves it "".
+		ps.EntityType = scope.EntityType
+		switch s.Use {
+		case SQLTransformID:
 			ps.Role = adapters.RoleEnrich
-		} else {
+		case SQLFilterID:
 			ps.Role = adapters.RoleFilter
+		default:
+			// sql/traverse (SPEC §10a, ADR-054): the runner-owned traverse —
+			// follows relations the ledger already holds, mints nothing,
+			// writes no relation. Its output type is declared; its input type
+			// is the segment's; the query yields identity_id and parent_id.
+			ps.Role = adapters.RoleTraverse
+			ps.IsTraverse = true
+			ps.From = scope.EntityType
+			ps.Limit = s.Limit
+			out, _ := ps.Config["entity_type"].(string)
+			ps.EntityType = strings.TrimSpace(out)
+			ps.Wildcard = true // children are ledger identities, projected whole
+			if ps.EntityType == "" {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+					Msg: SQLTraverseID + " needs config.entity_type — the output type (SPEC §10a, ADR-054)"})
+			} else if reg, err := registry.Load(); err == nil {
+				if _, err := reg.Resolve(ps.EntityType); err != nil {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: err.Error()})
+				}
+			}
+			for k := range ps.Config {
+				if k != "entity_type" && k != "query" {
+					problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+						Msg: fmt.Sprintf("%s takes only with.entity_type and with.query (got %q)", SQLTraverseID, k)})
+				}
+			}
 		}
 		q, _ := ps.Config["query"].(string)
 		ps.Query = strings.TrimSpace(q)
@@ -739,6 +857,15 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		}
 		ps.Needs = configStrings(ps.Config["uses"])
 		ps.Required = append([]string(nil), ps.Needs...)
+		if ps.IsTraverse {
+			gateDeliverKeys(false)
+			gateProvides(false)
+			gateOf()
+			if isSource {
+				problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: s.Use + " cannot be the source"})
+			}
+			return ps, problems
+		}
 		provides := configStrings(ps.Config["provides"])
 		if s.Use == SQLTransformID && len(provides) == 0 {
 			problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
@@ -778,6 +905,19 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
+		// The pipeline takes the group's type (SPEC §9, ADR-054), so every
+		// later step's names validate against it. A group with no type —
+		// created before ADR-054 — leaves the plan entity-blind, said so.
+		if scope.Ledger != nil {
+			if g, err := scope.Ledger.GetGroup(scope.Ctx, ps.SourceGroup); err == nil {
+				ps.EntityType = g.EntityType
+				if g.EntityType == "" {
+					ps.Notes = append(ps.Notes, fmt.Sprintf(
+						"group %q has no entity type (created before ADR-054), so this plan is entity-blind: field names are not validated until run time — set it once with `gtme groups add %s --type <type>`",
+						ps.SourceGroup, ps.SourceGroup))
+				}
+			}
+		}
 		gateDeliverKeys(false)
 		gateProvides(false)
 		gateOf()
@@ -793,6 +933,22 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	ps.Role = resolved.Manifest.Role
 	ps.IsDeliver = ps.Role == adapters.RoleDeliver && !isSource
 	ps.EntityType = resolved.EntityType(ps.Config)
+	// A traverse (SPEC §6, ADR-054) crosses from its from type to its
+	// entity_type; the step-level limit: is the engine's cap per parent, as
+	// with: {limit: N} is on a source (ADR-047).
+	if ps.Role == adapters.RoleTraverse {
+		ps.IsTraverse = true
+		ps.From = resolved.Manifest.From
+		ps.Relation = resolved.Manifest.Relation
+		ps.Limit = s.Limit
+		if isSource {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
+				Msg: fmt.Sprintf("%s is a traverse and cannot be the source — it traverses from the records a source (or a group) provides (SPEC §6)", s.Use)})
+		}
+	} else if s.Limit > 0 && !isSource {
+		problems = append(problems, Problem{Step: s.ID, Kind: KindConfig,
+			Msg: fmt.Sprintf("limit: is only valid on a group source or a traverse step (%s has role %q) — SPEC §9", s.Use, ps.Role)})
+	}
 	// An entity-agnostic manifest (SPEC §6, ADR-033 — the participant steps)
 	// takes the pipeline's entity type, so uses:/provides: and its static
 	// schemas validate against the registry the records actually belong to.
@@ -1024,9 +1180,14 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 				fmt.Sprintf("needs vendor-namespaced field %q — this pipeline is coupled to that vendor", name))
 		}
 		// Manifest static schemas get the same check (an external adapter's
-		// authoring error surfaces here rather than as a silent mismatch).
+		// authoring error surfaces here rather than as a silent mismatch). A
+		// traverse's needs are of its from type (SPEC §6, ADR-054).
+		needsType := ps.EntityType
+		if ps.IsTraverse {
+			needsType = ps.From
+		}
 		for _, name := range resolved.Manifest.NeedsFields() {
-			if err := reg.ValidateName(ps.EntityType, name); err != nil {
+			if err := reg.ValidateName(needsType, name); err != nil {
 				problems = append(problems, Problem{Step: s.ID, Kind: KindAdapter,
 					Msg: fmt.Sprintf("manifest needs: %v", err)})
 			}
@@ -1146,6 +1307,22 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 	}
 	ps.Provides = schemaProperties(ps.ProvidesSchema)
 	ps.Wildcard = adapters.Wildcard(ps.ProvidesSchema)
+	// The adapter–type contract for a traverse (SPEC §4a, ADR-054): the
+	// types resolve, provides is canonical for the output type, and every
+	// emitted child can be keyed. A source's contract is judged in Build.
+	if ps.IsTraverse && reg != nil {
+		if _, err := reg.Resolve(ps.From); err != nil {
+			problems = append(problems, Problem{Step: s.ID, Kind: KindContract, Msg: "from: " + err.Error()})
+		}
+		contract, _ := reg.Contract(resolved.Manifest, ps.EntityType, ps.Provides, ps.Wildcard)
+		for _, cp := range contract {
+			kind := KindContract
+			if cp.Check == "provides" {
+				kind = KindAdapter
+			}
+			problems = append(problems, Problem{Step: s.ID, Kind: kind, Msg: cp.Msg})
+		}
+	}
 
 	// Credentials must be resolvable before we start (SPEC §7.3).
 	creds, missing := secrets.Resolve(resolved.Manifest.Credentials)
@@ -1336,6 +1513,37 @@ func (p *Plan) CheckGroups(ctx context.Context, l *ledger.Ledger) error {
 			return err
 		}
 	}
+	// The terminus and every group/deliver are checked against their
+	// group's type (SPEC §7, ADR-054): a company run ending in a group of
+	// people fails naming the group, its type, and the pipeline's type. A
+	// group created on demand takes the type at run time.
+	check := func(step, name, entityType string) error {
+		g, err := l.GetGroup(ctx, name)
+		if errors.Is(err, ledger.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if g.EntityType != "" && entityType != "" && g.EntityType != entityType {
+			problems = append(problems, Problem{Step: step, Kind: KindContract,
+				Msg: fmt.Sprintf("group %q holds %s records, but this pipeline would add %s records to it (SPEC §7, ADR-054) — end in a group of the pipeline's type, or traverse to %s first",
+					name, g.EntityType, entityType, g.EntityType)})
+		}
+		return nil
+	}
+	if name := strings.TrimSpace(p.Pipeline.Group); name != "" {
+		if err := check("", name, p.FinalType); err != nil {
+			return err
+		}
+	}
+	for i := range p.Steps {
+		if st := &p.Steps[i]; st.IsGroupDeliver {
+			if err := check(st.ID, st.TargetGroup, st.EntityType); err != nil {
+				return err
+			}
+		}
+	}
 	if len(problems) > 0 {
 		return &Errors{Problems: problems}
 	}
@@ -1476,27 +1684,6 @@ func describeBranches(branches [][]string, available map[string]bool) string {
 	return strings.Join(parts, " or ")
 }
 
-// identityPath reports which SPEC §4 identity tiers a field set can derive:
-// strong is any non-name-hash tier, weak the name-hash fallback.
-func identityPath(entityType string, fields []string) (strong, weak bool) {
-	have := map[string]bool{}
-	for _, f := range fields {
-		have[f] = true
-	}
-	switch entityType {
-	case "person", "":
-		strong = have["email"] || have["linkedin_url"] || have["github_username"] || have["twitter_handle"]
-		weak = have["full_name"] || have["name"] || (have["first_name"] && have["last_name"])
-	case "company":
-		strong = have["company_domain"] || have["domain"] || have["website"]
-		weak = have["company_name"] || have["name"]
-	default:
-		// An extensible entity type with no registry vocabulary: nothing to judge.
-		return true, true
-	}
-	return strong, weak
-}
-
 // appendMissing adds s to list unless it is already there.
 func appendMissing(list []string, s string) []string {
 	if containsStr(list, s) {
@@ -1582,6 +1769,22 @@ func explainQuery(scope Scope, query string) error {
 		return err
 	}
 	return rows.Close()
+}
+
+var groupNamePattern = regexp.MustCompile(`group_name\s*=\s*'([^']+)'`)
+
+// groupsRead names the groups a query over group_membership reads, by the
+// group_name literals it compares against — the vocabulary view's key
+// (SPEC §10a). Empty when the query does not read group_membership.
+func groupsRead(query string) []string {
+	if !regexp.MustCompile(`\bgroup_membership\b`).MatchString(query) {
+		return nil
+	}
+	var out []string
+	for _, m := range groupNamePattern.FindAllStringSubmatch(query, -1) {
+		out = append(out, strconv.Quote(m[1]))
+	}
+	return out
 }
 
 // maxShownRows bounds how many resolved values a plan note lists.
@@ -1723,10 +1926,15 @@ func resolveConfigQuery(scope Scope, path, kind, text string) (any, string, erro
 		}
 		shown = append(shown, fmt.Sprint(v))
 	}
-	if len(values) == 1 {
-		return values[0], fmt.Sprintf("%s → 1 row (scalar): %s", label, shown[0]), nil
+	reads := ""
+	if groups := groupsRead(query); len(groups) > 0 {
+		// The group a {query:} reads (SPEC §7, ADR-054): the chain, visible.
+		reads = fmt.Sprintf(" (reads group %s)", strings.Join(groups, ", "))
 	}
-	return values, fmt.Sprintf("%s → %d rows (list): %s", label, len(values), strings.Join(shown, ", ")), nil
+	if len(values) == 1 {
+		return values[0], fmt.Sprintf("%s → 1 row (scalar): %s%s", label, shown[0], reads), nil
+	}
+	return values, fmt.Sprintf("%s → %d rows (list): %s%s", label, len(values), strings.Join(shown, ", "), reads), nil
 }
 
 // withoutReservedKeys drops the engine-owned keys a source binding's
@@ -1734,7 +1942,7 @@ func resolveConfigQuery(scope Scope, path, kind, text string) (any, string, erro
 // binding that declares the key keeps it, so its own schema and templates
 // see it unchanged.
 func withoutReservedKeys(resolved *adapters.Resolved, config map[string]any) map[string]any {
-	if !resolved.Binding || resolved.Manifest.Role != adapters.RoleSource {
+	if !resolved.Binding || (resolved.Manifest.Role != adapters.RoleSource && resolved.Manifest.Role != adapters.RoleTraverse) {
 		return config
 	}
 	if _, declared := config["limit"]; !declared || resolved.Manifest.DeclaresConfig("limit") {

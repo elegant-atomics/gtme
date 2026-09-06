@@ -49,6 +49,10 @@ type item struct {
 	// referent is the field_values.id of the of: value (ADR-048) — what a
 	// review's or edit's outputs record as what they were about.
 	referent string
+	// children counts the records a traverse step minted or coalesced from
+	// this parent (ADR-054): what its done event and the receipt's out/empty
+	// read.
+	children int
 }
 
 // bump mutates a step's stats under the lock.
@@ -90,6 +94,12 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	if err != nil {
 		return err
 	}
+	// After a traverse only its children move forward (SPEC §7, ADR-054):
+	// its parents share their state but finished there.
+	segment, err := r.segmentMembers(ctx, i-1)
+	if err != nil {
+		return err
+	}
 	var work []*item
 	var sqlWork []string
 	for _, rr := range records {
@@ -104,6 +114,9 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 		// Strict ordering: a record is eligible for this step only if the previous
 		// step completed it. This is also what makes --resume skip done work.
 		if rr.State != prev {
+			continue
+		}
+		if segment != nil && !segment[rr.IdentityID] {
 			continue
 		}
 		// in counts every record eligible at this step (SPEC §8, ADR-053), so
@@ -154,6 +167,13 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	}
 
 	if stub {
+		r.printStepLine(st)
+		return nil
+	}
+	if st.IsSQL && st.IsTraverse {
+		if err := r.runSQLTraverse(ctx, st, sqlWork); err != nil {
+			return err
+		}
 		r.printStepLine(st)
 		return nil
 	}
@@ -732,6 +752,11 @@ func (r *runner) printStepLine(st *planner.Step) {
 	if stat.Missing > 0 {
 		line += " (" + missingNote(stat) + ")"
 	}
+	if st.IsTraverse {
+		// Two populations (SPEC §8, ADR-054): in counts parents and
+		// reconciles as for any step; traversed and coalesced count children.
+		line += fmt.Sprintf(" — %d traversed (%s), %d coalesced", stat.Traversed, stat.ChildType, stat.Coalesced)
+	}
 	fmt.Fprintln(r.stderr, line)
 }
 
@@ -938,6 +963,13 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 
 		switch m.Type {
 		case protocol.TypeRecord:
+			if st.IsTraverse {
+				// One parent per session: the child RECORD belongs to it.
+				if err := r.applyTraverseRecord(ctx, st, items[0], m); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := r.applyRecord(ctx, st, byKey, m); err != nil {
 				return err
 			}
@@ -995,6 +1027,15 @@ func (r *runner) processChunk(ctx context.Context, st *planner.Step, items []*it
 	// a PENDING covered is neither — it is in flight.
 	for _, it := range items {
 		if it.advanced || it.pending {
+			continue
+		}
+		if st.IsTraverse {
+			// The parent is finished at the traverse (SPEC §7, ADR-054),
+			// whether it yielded children or none; its done event counts
+			// them, which is what once: and the receipt read.
+			if err := r.advance(ctx, st, it, map[string]any{"children": it.children}, nil); err != nil {
+				return err
+			}
 			continue
 		}
 		if st.Role == adapters.RoleFilter {
@@ -1196,6 +1237,11 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 			// Not every enrichment carries identifying fields; that is fine.
 			_ = err
 		}
+		// A reference field just written names another identity (SPEC §4a,
+		// ADR-054): the relation is written wherever the field is.
+		if err := r.writeReferences(ctx, st, it.key.EntityType, it.identityID, m.Fields); err != nil {
+			return err
+		}
 	}
 	// A filter's RECORD carries its declared provides (SPEC §5, ADR-033) —
 	// stored like any output, pass or fail — but only its VERDICT advances.
@@ -1259,7 +1305,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		// The handoff itself (SPEC §8, ADR-032): membership in the target
 		// group, created on demand. An existing member is not re-asserted.
 		if st.IsGroupDeliver {
-			g, err := r.l.EnsureGroup(ctx, st.TargetGroup)
+			g, err := r.l.EnsureGroup(ctx, st.TargetGroup, st.EntityType)
 			if err != nil {
 				return err
 			}
@@ -1280,7 +1326,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		// default), created on demand. Only armed runs reach this path — dry
 		// and simulated deliveries never invoke the adapter.
 		if st.RecordGroup != "" {
-			g, err := r.l.EnsureGroup(ctx, st.RecordGroup)
+			g, err := r.l.EnsureGroup(ctx, st.RecordGroup, st.EntityType)
 			if err != nil {
 				return err
 			}
@@ -1295,12 +1341,20 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 	// field-writing step that advanced a record without writing a field
 	// counts it empty. A filter's output is a verdict and a deliver's a
 	// send, so their advances are always out.
-	if writesFields(st) && fieldsWritten(detail) == 0 {
+	switch {
+	case st.IsTraverse && it.children == 0:
+		// A parent that yielded nothing counts empty (SPEC §8, ADR-054).
 		r.bump(st, func(s *StepStat) { s.Empty++ })
-	} else {
+	case st.IsTraverse:
+		r.bump(st, func(s *StepStat) { s.Out++ })
+	case writesFields(st) && fieldsWritten(detail) == 0:
+		r.bump(st, func(s *StepStat) { s.Empty++ })
+	default:
 		r.bump(st, func(s *StepStat) { s.Out++ })
 	}
-	r.emit(it.key, fields)
+	if !st.IsTraverse {
+		r.emit(it.key, fields)
+	}
 	return nil
 }
 
@@ -1368,6 +1422,11 @@ func isBrokenPipe(err error) bool {
 // exactly batch_size (one invocation per batch, SPEC §9); everything else splits
 // the work across the pool.
 func chunkSize(st *planner.Step, n, conc int) int {
+	if st.IsTraverse {
+		// One parent per session (ADR-054): a child RECORD carries no parent
+		// reference on the wire, so the session is the attribution.
+		return 1
+	}
 	if st.Batch {
 		if st.BatchSize > 0 {
 			return st.BatchSize

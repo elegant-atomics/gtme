@@ -12,6 +12,13 @@ import "embed"
 //go:embed fields/*.json
 var Fields embed.FS
 
+// TypeSchema is the schema every type file validates against (SPEC §4a,
+// ADR-054): the embedded files are checked by the conformance suite, and
+// a discovered file (~/.gtme/types/, a binding's types/) at load.
+//
+//go:embed schemas/field-registry.schema.json
+var TypeSchema []byte
+
 // BindingSchema is the schema every declarative binding validates against
 // (SPEC §10a, ADR-022).
 //

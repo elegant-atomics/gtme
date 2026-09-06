@@ -20,7 +20,6 @@ import (
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/ai"
 	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 	participantpkg "github.com/elegant-atomics/gtme/internal/participant"
 	"github.com/elegant-atomics/gtme/internal/planner"
@@ -121,6 +120,14 @@ type StepStat struct {
 	// Answered counts the records a participant answered in this
 	// invocation — in-run at a terminal, or collected from the ledger.
 	Answered int
+
+	// Traverse (SPEC §8, ADR-054): the children a traverse step minted
+	// (Traversed) and the children that resolved to an identity already in
+	// the run (Coalesced), of ChildType — counted apart from the parents the
+	// line reconciles.
+	Traversed int
+	Coalesced int
+	ChildType string
 
 	// Preflight (SPEC §8, ADR-040): the target's answer before anything
 	// sent — "" when the adapter does not preflight.
@@ -414,12 +421,19 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The terminus adds the last segment's completers (SPEC §7, ADR-054):
+	// when the final step is a traverse, its parents share the children's
+	// state but finished there, so only its children complete.
+	children, err := r.segmentMembers(ctx, len(r.plan.Steps)-1)
+	if err != nil {
+		return err
+	}
 	// A withheld send (on_missing skip, suppression) leaves a deliver-step fail
 	// verdict but the record advanced — it completes and joins; the terminus
 	// captures completers, not sends (SPEC §8, ADR-031).
 	var completers []string
 	for _, rr := range records {
-		if rr.State == final && !r.stopped(rr) {
+		if rr.State == final && !r.stopped(rr) && (children == nil || children[rr.IdentityID]) {
 			completers = append(completers, rr.IdentityID)
 		}
 	}
@@ -428,7 +442,9 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 		r.terminusWould = len(completers)
 		return nil
 	}
-	g, err := r.l.EnsureGroup(ctx, name)
+	// The terminus group takes the run's final type when created (SPEC §8,
+	// ADR-054); plan already refused a typed group of another type.
+	g, err := r.l.EnsureGroup(ctx, name, r.plan.FinalType)
 	if err != nil {
 		return err
 	}
@@ -447,6 +463,17 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 		r.terminusAdded++
 	}
 	return nil
+}
+
+// segmentMembers is the set of records that belong to the segment step i
+// opens into, when step i is a traverse: the children it minted or
+// coalesced (SPEC §7, ADR-054). Nil means every record at that state
+// belongs — the step is not a traverse, or i is the source.
+func (r *runner) segmentMembers(ctx context.Context, i int) (map[string]bool, error) {
+	if i <= 0 || i >= len(r.plan.Steps) || !r.plan.Steps[i].IsTraverse {
+		return nil, nil
+	}
+	return r.l.TraverseChildren(ctx, r.runID, r.plan.Steps[i].ID)
 }
 
 // stopped reports whether a verdict froze this record. A filter's fail stops
@@ -539,10 +566,16 @@ func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 		pending = &protocol.PendingRef{Token: items[0].token}
 	}
 	fetched := fetchedFields(items)
-	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 || st.Of != "" {
+	traverseLimit := st.IsTraverse && st.Limit > 0
+	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 || st.Of != "" || traverseLimit {
 		config = make(map[string]any, len(st.Config)+4)
 		for k, v := range st.Config {
 			config[k] = v
+		}
+		if traverseLimit {
+			// The step-level cap on children per parent (SPEC §9, ADR-054),
+			// the engine's key on a traverse as on a source (ADR-047).
+			config["limit"] = st.Limit
 		}
 		if st.Of != "" {
 			// The referent (ADR-048) rides in like the derived provides: the
@@ -881,28 +914,21 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 	if !added {
 		// Which row merged into which identity is a ledger fact, not a count
 		// (SPEC §8, ADR-053): the row's own keys, and the identity that won.
-		detail := map[string]any{"into": ident.IdentityKey, "keys": rowKeys(st.EntityType, m)}
+		detail := map[string]any{"into": ident.IdentityKey, "keys": rowKeys(r.reg, st.EntityType, m)}
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), ident.ID, "coalesced", detail); err != nil {
 			return false, err
 		}
 		return false, nil
 	}
 	r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, m.Fields)
-	// Relate the person to their company when the source gave us a domain
-	// (SPEC §10.2 wants the relation; the runner owns identity, so it lives here).
-	if st.EntityType == identity.Person {
-		if err := r.relateCompany(ctx, st, ident.ID, m.Fields); err != nil {
-			return true, err
-		}
-	}
-	return true, nil
+	return true, r.writeReferences(ctx, st, ident.EntityType, ident.ID, m.Fields)
 }
 
 // rowKeys names the identity keys a sourced row carried, as written — the
 // half of a coalesce event that identifies the row.
-func rowKeys(entityType string, m protocol.Message) []string {
+func rowKeys(reg *registry.Registry, entityType string, m protocol.Message) []string {
 	var keys []string
-	if cands, err := identity.Candidates(entityType, m.Fields); err == nil {
+	if cands, err := reg.Candidates(entityType, m.Fields); err == nil {
 		for _, c := range cands {
 			keys = append(keys, c.Value)
 		}
@@ -913,23 +939,43 @@ func rowKeys(entityType string, m protocol.Message) []string {
 	return keys
 }
 
-func (r *runner) relateCompany(ctx context.Context, st *planner.Step, personID string, fields map[string]any) error {
-	domain := identity.NormalizeDomain(str(fields["company_domain"]))
-	if domain == "" {
+// writeReferences applies the type file's reference declarations (SPEC §4a,
+// ADR-054) to fields just written: for every field carrying a reference, the
+// identity it names is resolved-or-minted from the listed fields, populated
+// under the same names, and the relation is written from the record to it.
+// `company_domain` on a person declares works_at → company, which is how the
+// edge has always been written; the declaration is now the registry's, and
+// this is the one generic path. A referenced identity is a ledger fact, never
+// a run member. A referenced identity that cannot be keyed is not worth
+// failing the record over.
+func (r *runner) writeReferences(ctx context.Context, st *planner.Step, entityType, identityID string, fields map[string]any) error {
+	t, err := r.reg.Resolve(entityType)
+	if err != nil {
 		return nil
 	}
-	company := map[string]any{"domain": domain}
-	if name := str(fields["company_name"]); name != "" {
-		company["name"] = name
+	for _, f := range t.References() {
+		if stringify(fields[f.Name]) == "" {
+			continue
+		}
+		ref := f.Reference
+		sub := map[string]any{}
+		for _, name := range ref.Fields {
+			if v, ok := fields[name]; ok && stringify(v) != "" {
+				sub[name] = v
+			}
+		}
+		res, err := r.l.UpsertIdentity(ctx, ref.Type, sub, r.prov(st.ID))
+		if err != nil {
+			continue
+		}
+		if _, err := r.l.WriteFieldMap(ctx, res.Identity.ID, r.source(st), r.prov(st.ID), sub, nil); err != nil {
+			return err
+		}
+		if err := r.l.Relate(ctx, identityID, ref.Relation, res.Identity.ID); err != nil {
+			return err
+		}
 	}
-	res, err := r.l.UpsertIdentity(ctx, identity.Company, company, r.prov(st.ID))
-	if err != nil {
-		return nil // a company we cannot key is not worth failing a person over
-	}
-	if _, err := r.l.WriteFieldMap(ctx, res.Identity.ID, st.Manifest.Source(), r.prov(st.ID), company, nil); err != nil {
-		return err
-	}
-	return r.l.Relate(ctx, personID, "works_at", res.Identity.ID)
+	return nil
 }
 
 func str(v any) string {

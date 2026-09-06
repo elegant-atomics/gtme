@@ -1,0 +1,22 @@
+{
+  "id": "mock/engagers",
+  "version": 1,
+  "role": "traverse",
+  "from": "post",
+  "entity_type": "person",
+  "relation": {"name": "engaged_with", "from": "record"},
+  "needs": {
+    "type": "object",
+    "required": ["mock.post_id"],
+    "properties": {"mock.post_id": {"type": "string"}}
+  },
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "email": {"type": "string"},
+      "full_name": {"type": "string"}
+    }
+  },
+  "cost_estimate_usd": 0
+}

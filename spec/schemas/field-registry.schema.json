@@ -1,23 +1,33 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://gtme.spec/schemas/field-registry.schema.json",
-  "title": "Canonical field registry (spec/fields/<entity_type>.json)",
-  "description": "The shared vocabulary per entity type (SPEC.md §4a, ADR-017). A field name crossing an adapter boundary must appear here or be vendor-namespaced (<vendor>.<field>). Canonical names must not contain a dot; a dot marks a namespaced name.",
+  "title": "Type file (spec/fields/<entity_type>.json)",
+  "description": "A type's whole definition (SPEC.md §4a, ADR-017, ADR-054): its kind, the ordered identity tiers SPEC.md §4 reads, the shared vocabulary per entity type, and the references its fields declare. A field name crossing an adapter boundary must appear here or be vendor-namespaced (<vendor>.<field>). Canonical names must not contain a dot; a dot marks a namespaced name. Types are discovered from the binary (person, company, post), from ~/.gtme/types/<name>.json, and from an installed binding's types/<name>.json in place; embedded names are reserved.",
   "type": "object",
-  "required": ["entity_type", "version", "fields"],
+  "required": ["entity_type", "version", "kind", "identity", "fields"],
   "additionalProperties": false,
   "properties": {
     "entity_type": {
       "type": "string",
-      "minLength": 1,
-      "description": "'person' | 'company' (extensible, SPEC.md §3)."
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "The type's name — what a manifest's entity_type and a RECORD's key.entity_type say (SPEC.md §3). Must equal the file's basename."
     },
     "version": {
       "type": "integer",
       "minimum": 1,
       "description": "Registry version. Additive changes do not bump it; renames (breaking) do."
     },
+    "kind": {
+      "enum": ["subject", "signal"],
+      "description": "ADR-054: a subject (person, company) is what a pipeline delivers to; a signal (post) is what a pipeline finds and traverses from — keyed on a platform-public identifier, related to a subject, never the target of a deliver step. A signal declares no hash tier."
+    },
     "description": {"type": "string"},
+    "identity": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The ordered key tiers SPEC.md §4 reads, strongest first: the runner takes the first tier that yields a value, and a record matching an existing identity under a weaker tier upgrades it in place. A field tier names a registry field in this file whose normalization is a public-identifier rule (email, domain, linkedin_url, handle, url); its key is that rule's key form (for linkedin_url, the path slug — SPEC.md §4). A hash tier is the nh: fallback: the components' normalized values, lowercased with whitespace collapsed, joined with '|' and sha256-hashed; the first component is required, later ones contribute their value or an empty string. A vendor's record id is never a tier.",
+      "items": {"$ref": "#/definitions/tier"}
+    },
     "fields": {
       "type": "array",
       "minItems": 1,
@@ -25,6 +35,76 @@
     }
   },
   "definitions": {
+    "tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "A registry field in this file whose normalization is one of email, domain, linkedin_url, handle, url."
+        },
+        "hash": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The components of a name-hash tier, in order.",
+          "items": {"$ref": "#/definitions/hashComponent"}
+        },
+        "prefix": {
+          "type": "string",
+          "description": "A literal key prefix (gh:, tw:, nh:), so tiers whose values could collide stay distinct in one identity_key column."
+        }
+      },
+      "oneOf": [
+        {"required": ["field"]},
+        {"required": ["hash"]}
+      ]
+    },
+    "hashComponent": {
+      "description": "One component of a hash tier: a field name; {any: [...]} — the first alternative that yields a value; or {join: [...]} — the named fields' values joined with a space, present only when every one is.",
+      "oneOf": [
+        {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"$ref": "#/definitions/hashComponent"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["join"],
+          "properties": {
+            "join": {
+              "type": "array",
+              "minItems": 2,
+              "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+            }
+          }
+        }
+      ]
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "relation", "fields"],
+      "description": "ADR-054: a record carrying this field also names an identity of `type`, keyed and populated from `fields` carried under the same names; the runner resolves-or-mints it and writes `relation` from the record to it. A referenced identity is a ledger fact, never a run member.",
+      "properties": {
+        "type": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "relation": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+        }
+      }
+    },
     "field": {
       "type": "object",
       "required": ["name", "tier", "type", "normalization", "description", "example"],
@@ -37,7 +117,7 @@
         },
         "tier": {
           "enum": ["identity", "core"],
-          "description": "identity = backs key derivation (SPEC.md §4, mandatory set per ADR-017); core = canonical shared vocabulary. The third tier (vendor namespace) is everything not in this file."
+          "description": "identity = backs key derivation (SPEC.md §4, mandatory set per ADR-017): the fields the identity list names; core = canonical shared vocabulary. The third tier (vendor namespace) is everything not in this file."
         },
         "type": {
           "enum": ["string", "integer", "number", "boolean", "array"],
@@ -45,14 +125,14 @@
         },
         "format": {
           "type": "string",
-          "description": "Optional format hint (email, uri)."
+          "description": "Optional format hint (email, uri, date-time)."
         },
         "items_type": {
           "enum": ["string", "integer", "number", "boolean"],
           "description": "Element type when type is array."
         },
         "normalization": {
-          "enum": ["none", "trim", "lower", "email", "domain", "linkedin_url", "handle"],
+          "enum": ["none", "trim", "lower", "email", "domain", "linkedin_url", "handle", "url"],
           "description": "Named normalization rule (SPEC.md §4a); each id maps to exactly one implementation, shared with identity-key derivation. A stored canonical value must be a fixed point of its rule."
         },
         "enum": {
@@ -65,6 +145,7 @@
           "type": "boolean",
           "description": "Declared for tier ordering but provided by no v0 adapter (the ADR-020 handle tiers)."
         },
+        "reference": {"$ref": "#/definitions/reference"},
         "description": {"type": "string", "minLength": 1},
         "example": {
           "description": "An example value in normalized form."

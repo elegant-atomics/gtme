@@ -24,10 +24,14 @@ type Group struct {
 	Name      string
 	Note      string
 	CreatedAt time.Time
+	// EntityType is the members' type (SPEC §3, ADR-054), set once at
+	// creation; "" for a group created before ADR-054 (entity-blind until
+	// `gtme groups add NAME --type TYPE` sets it).
+	EntityType string
 }
 
-// GroupInfo is a group with its derived character: tallies, never a stored
-// type (ADR-021).
+// GroupInfo is a group with its derived character: tallies (ADR-021). The
+// entity type is the one stored fact beyond the name (ADR-054).
 type GroupInfo struct {
 	Group
 	Members int
@@ -60,8 +64,8 @@ func (l *Ledger) GetGroup(ctx context.Context, name string) (Group, error) {
 	var g Group
 	var created string
 	err := l.db.QueryRowContext(ctx,
-		`SELECT id, name, COALESCE(note,''), created_at FROM groups WHERE name = ?`,
-		strings.TrimSpace(name)).Scan(&g.ID, &g.Name, &g.Note, &created)
+		`SELECT id, name, COALESCE(note,''), created_at, COALESCE(entity_type,'') FROM groups WHERE name = ?`,
+		strings.TrimSpace(name)).Scan(&g.ID, &g.Name, &g.Note, &created, &g.EntityType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, fmt.Errorf("group %q: %w", name, ErrNotFound)
 	}
@@ -73,29 +77,54 @@ func (l *Ledger) GetGroup(ctx context.Context, name string) (Group, error) {
 }
 
 // EnsureGroup finds or creates a group (record: targets and the membership
-// terminus create on demand, SPEC §7).
-func (l *Ledger) EnsureGroup(ctx context.Context, name string) (Group, error) {
+// terminus create on demand, SPEC §7). entityType is the members' type a
+// group created here takes (SPEC §3, ADR-054); an existing group keeps the
+// type it has — a legacy untyped group stays untyped until --type sets it —
+// and an existing group of another type is an error naming both.
+func (l *Ledger) EnsureGroup(ctx context.Context, name, entityType string) (Group, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Group{}, fmt.Errorf("ledger: a group needs a name")
 	}
 	g, err := l.GetGroup(ctx, name)
 	if err == nil {
+		if g.EntityType != "" && entityType != "" && g.EntityType != entityType {
+			return Group{}, fmt.Errorf("ledger: group %q holds %s records, not %s (SPEC §3, ADR-054)", name, g.EntityType, entityType)
+		}
 		return g, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return Group{}, err
 	}
-	g = Group{ID: ulid.New(), Name: name, CreatedAt: l.now()}
+	g = Group{ID: ulid.New(), Name: name, CreatedAt: l.now(), EntityType: entityType}
+	var typeArg any
+	if entityType != "" {
+		typeArg = entityType
+	}
 	_, err = l.db.ExecContext(ctx,
-		`INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)
+		`INSERT INTO groups (id, name, created_at, entity_type) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(name) DO NOTHING`,
-		g.ID, g.Name, l.stamp(g.CreatedAt))
+		g.ID, g.Name, l.stamp(g.CreatedAt), typeArg)
 	if err != nil {
 		return Group{}, err
 	}
 	// A concurrent insert may have won the conflict; read back the truth.
 	return l.GetGroup(ctx, name)
+}
+
+// SetGroupType sets an untyped group's entity type once (SPEC §8, ADR-054:
+// `gtme groups add NAME --type TYPE` on a group created before the type
+// existed). A typed group's type is never changed.
+func (l *Ledger) SetGroupType(ctx context.Context, groupID, entityType string) error {
+	res, err := l.db.ExecContext(ctx,
+		`UPDATE groups SET entity_type = ? WHERE id = ? AND entity_type IS NULL`, entityType, groupID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("ledger: group's type is already set")
+	}
+	return nil
 }
 
 // AddGroupEvent appends one event to a group's trail. Membership edits and
@@ -105,6 +134,20 @@ func (l *Ledger) AddGroupEvent(ctx context.Context, groupID, identityID, event s
 	case GroupAdded, GroupRemoved, GroupTouched:
 	default:
 		return fmt.Errorf("ledger: unknown group event %q", event)
+	}
+	// Homogeneity (SPEC §3, ADR-054): a typed group admits members of its
+	// type only, refused naming both types.
+	if event == GroupAdded {
+		var groupType, identityType sql.NullString
+		err := l.db.QueryRowContext(ctx,
+			`SELECT g.entity_type, i.entity_type FROM groups g, identities i WHERE g.id = ? AND i.id = ?`,
+			groupID, identityID).Scan(&groupType, &identityType)
+		if err != nil {
+			return fmt.Errorf("ledger: adding to group: %w", err)
+		}
+		if groupType.Valid && groupType.String != "" && groupType.String != identityType.String {
+			return fmt.Errorf("ledger: the group holds %s records; a %s cannot join it (SPEC §8, ADR-054)", groupType.String, identityType.String)
+		}
 	}
 	var detailJSON any
 	if len(detail) > 0 {
@@ -220,11 +263,10 @@ func (l *Ledger) LastTouched(ctx context.Context, groupID, identityID string) (t
 	return t, true, nil
 }
 
-// Groups lists every group with its derived character (SPEC §8: counts,
-// never a stored type).
+// Groups lists every group with its type and derived character (SPEC §8).
 func (l *Ledger) Groups(ctx context.Context) ([]GroupInfo, error) {
 	rows, err := l.db.QueryContext(ctx, `
-		SELECT g.id, g.name, COALESCE(g.note,''), g.created_at,
+		SELECT g.id, g.name, COALESCE(g.note,''), g.created_at, COALESCE(g.entity_type,''),
 		       (SELECT count(*) FROM group_members m WHERE m.group_id = g.id),
 		       (SELECT count(*) FROM group_events e WHERE e.group_id = g.id AND e.event = 'added'),
 		       (SELECT count(*) FROM group_events e WHERE e.group_id = g.id AND e.event = 'removed'),
@@ -238,7 +280,7 @@ func (l *Ledger) Groups(ctx context.Context) ([]GroupInfo, error) {
 	for rows.Next() {
 		var gi GroupInfo
 		var created string
-		if err := rows.Scan(&gi.ID, &gi.Name, &gi.Note, &created,
+		if err := rows.Scan(&gi.ID, &gi.Name, &gi.Note, &created, &gi.EntityType,
 			&gi.Members, &gi.Added, &gi.Removed, &gi.Touched); err != nil {
 			return nil, err
 		}
@@ -323,6 +365,45 @@ func (l *Ledger) IdentityIDsFromSQL(ctx context.Context, query string) ([]string
 		if id.Valid && id.String != "" {
 			out = append(out, id.String)
 		}
+	}
+	return out, rows.Err()
+}
+
+// GroupProducers lists the pipelines whose runs wrote to a group — added or
+// touched events carrying a run_id, joined to runs — and GroupConsumers the
+// pipelines whose runs sourced from it (the run snapshot's source.group).
+// Derived, never stored (SPEC §8, ADR-054): the chain a group sits in.
+func (l *Ledger) GroupProducers(ctx context.Context, groupID string) ([]string, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT DISTINCT r.pipeline FROM group_events e JOIN runs r ON r.id = e.run_id
+		 WHERE e.group_id = ? ORDER BY r.pipeline`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanStrings(rows)
+}
+
+// GroupConsumers lists the pipelines that sourced from a group by name.
+func (l *Ledger) GroupConsumers(ctx context.Context, name string) ([]string, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT DISTINCT pipeline FROM runs
+		 WHERE json_extract(config_json, '$.source.group') = ? ORDER BY pipeline`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanStrings(rows)
+}
+
+func scanStrings(rows *sql.Rows) ([]string, error) {
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
 	}
 	return out, rows.Err()
 }

@@ -253,7 +253,7 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "description": "ADR-032: group source only — at most N current members, oldest-added first."
+          "description": "ADR-032: on a group source, at most N current members, oldest-added first. ADR-054: on a traverse step, the engine-owned cap on children per parent, as on a source binding. Valid nowhere else."
         },
         "once": {
           "type": "boolean",

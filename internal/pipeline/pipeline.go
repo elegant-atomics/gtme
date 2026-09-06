@@ -99,8 +99,10 @@ type Step struct {
 	// ledger like any record.
 	Group string `yaml:"group,omitempty" json:"group,omitempty"`
 	// Limit caps a group source (SPEC §9, ADR-032): at most N current
-	// members, oldest-added first — the budget for "work thirty today".
-	// Valid only on a group source.
+	// members, oldest-added first — the budget for "work thirty today". On a
+	// traverse step (ADR-054) it is the engine-owned cap on children per
+	// parent, as on a source binding. Valid nowhere else; the planner, which
+	// knows roles, refuses it on other interior steps.
 	Limit int `yaml:"limit,omitempty" json:"limit,omitempty"`
 	// Once makes a group source select only members this pipeline has not
 	// already finished (SPEC §8/§9, ADR-052): completed the final step, or
@@ -290,7 +292,9 @@ func (p *Pipeline) normalize() error {
 	if p.Source.Respend {
 		return fmt.Errorf("pipeline: %s: respend: is not valid on the source step — a source's spend is its query (SPEC §7)", p.Source.ID)
 	}
-	// limit: (ADR-032) bounds a group source and nothing else.
+	// limit: (ADR-032) bounds a group source, and (ADR-054) a traverse step;
+	// a source adapter's limit is config (ADR-047). Which interior steps are
+	// traverses is a role fact the planner knows, so it judges those.
 	for _, s := range p.AllSteps() {
 		if s.Limit == 0 {
 			continue
@@ -298,8 +302,8 @@ func (p *Pipeline) normalize() error {
 		if s.Limit < 0 {
 			return fmt.Errorf("pipeline: %s: limit must be >= 1 (got %d)", s.ID, s.Limit)
 		}
-		if strings.TrimSpace(s.Group) == "" || s.ID != p.Source.ID {
-			return fmt.Errorf("pipeline: %s: limit: is only valid on a group source (SPEC §9, ADR-032)", s.ID)
+		if s.ID == p.Source.ID && strings.TrimSpace(s.Group) == "" {
+			return fmt.Errorf("pipeline: %s: limit: is only valid on a group source or a traverse step (SPEC §9, ADR-032, ADR-054) — a source adapter's cap is with: {limit: N} (ADR-047)", s.ID)
 		}
 	}
 	// once: (ADR-052) selects a group source's unfinished members and nothing else.

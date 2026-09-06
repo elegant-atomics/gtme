@@ -67,7 +67,25 @@ func Print(w io.Writer, p *Plan) {
 		if s.IsGroupDeliver {
 			fmt.Fprintf(w, "     handoff:   → group %q (created on demand)\n", s.TargetGroup)
 		}
-		fmt.Fprintf(w, "     entity:    %s\n", s.EntityType)
+		switch {
+		case s.IsTraverse && s.Relation != nil:
+			// The type change and the edge it writes (SPEC §7, ADR-054).
+			fmt.Fprintf(w, "     traverse:  %s → %s via %s (%s)\n", s.From, s.EntityType, s.Use, s.Relation.Name)
+			if s.Limit > 0 {
+				fmt.Fprintf(w, "     limit:     %d child(ren) per parent (engine-owned)\n", s.Limit)
+			}
+		case s.IsTraverse:
+			fmt.Fprintf(w, "     traverse:  %s → %s via %s (follows an existing relation; mints nothing)\n", s.From, s.EntityType, s.Use)
+		case s.IsGroupSource && s.EntityType != "":
+			fmt.Fprintf(w, "     entity:    %s (group %q)\n", s.EntityType, s.SourceGroup)
+		case s.IsGroupSource:
+			fmt.Fprintf(w, "     entity:    (untyped group — entity-blind)\n")
+		default:
+			fmt.Fprintf(w, "     entity:    %s\n", s.EntityType)
+		}
+		for _, wr := range s.Writes {
+			fmt.Fprintf(w, "     writes:    %s\n", wr)
+		}
 		if !s.IsSource {
 			projects := list(s.Needs)
 			if s.NeedsAll {
@@ -205,7 +223,11 @@ func Print(w io.Writer, p *Plan) {
 	}
 
 	if p.Pipeline.Group != "" {
-		fmt.Fprintf(w, "\nterminus: records completing the run are added to group %q (ADR-021)\n", p.Pipeline.Group)
+		if p.FinalType != "" {
+			fmt.Fprintf(w, "\nterminus: records completing the run are added to group %q as %s (ADR-021, ADR-054)\n", p.Pipeline.Group, p.FinalType)
+		} else {
+			fmt.Fprintf(w, "\nterminus: records completing the run are added to group %q (ADR-021)\n", p.Pipeline.Group)
+		}
 	}
 	fmt.Fprintf(w, "\navailable fields after the last step: %s\n", list(p.Available))
 	if p.Wildcard {

@@ -360,6 +360,12 @@ type PipelineRecord struct {
 	// Dry marks a rehearsal's record (ADR-052 (7)): it finishes nothing.
 	Dry       bool
 	FinalStep string
+	// FinishedAtTraverse marks a parent finished at a traverse (ADR-054
+	// (6)): its state is a step whose `done` event on it counts children —
+	// terminal in ADR-052's sense whether it yielded children or none. A
+	// parent reached again as a child continues, so its state moves on and
+	// this stays false for it.
+	FinishedAtTraverse bool
 	RunRecord
 }
 
@@ -369,7 +375,11 @@ type PipelineRecord struct {
 // planner does it.
 func (l *Ledger) PipelineRecords(ctx context.Context, pipeline string) ([]PipelineRecord, error) {
 	rows, err := l.db.QueryContext(ctx,
-		`SELECT r.id, r.status, r.dry, r.config_json, rr.identity_id, rr.state, rr.verdicts
+		`SELECT r.id, r.status, r.dry, r.config_json, rr.identity_id, rr.state, rr.verdicts,
+		        EXISTS (SELECT 1 FROM step_events e
+		                WHERE e.run_id = rr.run_id AND e.identity_id = rr.identity_id
+		                  AND e.step_id = rr.state AND e.event = 'done'
+		                  AND json_extract(e.detail, '$.children') IS NOT NULL)
 		 FROM run_records rr JOIN runs r ON r.id = rr.run_id
 		 WHERE r.pipeline = ?
 		 ORDER BY r.started_at, r.id, rr.identity_id`, pipeline)
@@ -382,7 +392,7 @@ func (l *Ledger) PipelineRecords(ctx context.Context, pipeline string) ([]Pipeli
 	for rows.Next() {
 		var pr PipelineRecord
 		var config, raw string
-		if err := rows.Scan(&pr.RunID, &pr.RunStatus, &pr.Dry, &config, &pr.IdentityID, &pr.State, &raw); err != nil {
+		if err := rows.Scan(&pr.RunID, &pr.RunStatus, &pr.Dry, &config, &pr.IdentityID, &pr.State, &raw, &pr.FinishedAtTraverse); err != nil {
 			return nil, fmt.Errorf("ledger: listing pipeline records: %w", err)
 		}
 		final, ok := finals[pr.RunID]
@@ -711,6 +721,31 @@ func (l *Ledger) Deliveries(ctx context.Context, identityID string) ([]Delivery,
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// TraverseChildren lists the identities a traverse step minted or coalesced
+// in a run (SPEC §7, ADR-054): the `traversed` and `coalesced` events at that
+// step. A parent finished at the traverse shares the children's state, so
+// the segment after it is exactly this set — one row per identity, its
+// state advancing, which is how a parent reached again as a child continues.
+func (l *Ledger) TraverseChildren(ctx context.Context, runID, stepID string) (map[string]bool, error) {
+	rows, err := l.db.QueryContext(ctx,
+		`SELECT DISTINCT identity_id FROM step_events
+		 WHERE run_id = ? AND step_id = ? AND event IN ('traversed', 'coalesced') AND identity_id IS NOT NULL`,
+		runID, stepID)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: reading traverse children: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
 	}
 	return out, rows.Err()
 }

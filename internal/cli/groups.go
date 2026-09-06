@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/elegant-atomics/gtme/internal/registry"
 )
 
 func cmdGroups(ctx context.Context, env Env, args []string) error {
@@ -33,7 +34,7 @@ func cmdGroups(ctx context.Context, env Env, args []string) error {
 		return groupsEdit(ctx, env, rest, ledger.GroupRemoved)
 	default:
 		return fail(ExitValidation,
-			"usage: gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]")
+			"usage: gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL|--type TYPE | remove NAME KEY... [--note TEXT]]")
 	}
 }
 
@@ -52,10 +53,10 @@ func groupsList(ctx context.Context, env Env) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(env.Stderr, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "group\tmembers\tadded\tremoved\ttouched\tcreated")
+	fmt.Fprintln(tw, "group\ttype\tmembers\tadded\tremoved\ttouched\tcreated")
 	for _, g := range groups {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%s\n",
-			g.Name, g.Members, g.Added, g.Removed, g.Touched, g.CreatedAt.Format("2006-01-02"))
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%d\t%s\n",
+			g.Name, groupType(g.EntityType), g.Members, g.Added, g.Removed, g.Touched, g.CreatedAt.Format("2006-01-02"))
 	}
 	return tw.Flush()
 }
@@ -74,10 +75,22 @@ func groupsShow(ctx context.Context, env Env, name string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(env.Stderr, "group %s — %d member(s)\n", g.Name, len(members))
+	fmt.Fprintf(env.Stderr, "group %s (%s) — %d member(s)\n", g.Name, groupType(g.EntityType), len(members))
 	for _, m := range members {
 		fmt.Fprintf(env.Stderr, "  %s:%s\n", m.EntityType, m.IdentityKey)
 	}
+	// The chain the group sits in (SPEC §8, ADR-054): derived from
+	// group_events.run_id and runs, never stored.
+	producers, err := l.GroupProducers(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	consumers, err := l.GroupConsumers(ctx, g.Name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stderr, "written by:  %s\n", orNone(producers))
+	fmt.Fprintf(env.Stderr, "sourced by:  %s\n", orNone(consumers))
 	events, err := l.GroupEvents(ctx, g.ID, 10)
 	if err != nil {
 		return err
@@ -102,7 +115,7 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 	fs.SetOutput(env.Stderr)
 	fromSegment := fs.String("from-segment", "", "snapshot a saved segment's identity_id column into membership")
 	query := fs.String("query", "", "snapshot a read-only SELECT's identity_id column into membership")
-	entityType := fs.String("type", "", "entity type, when a key matches more than one")
+	entityType := fs.String("type", "", "the group's entity type (ADR-054): required when a key matches more than one type or no key is given; sets an untyped group's type once")
 	note := fs.String("note", "", "remove only: the reason, recorded in the event's detail (ADR-032)")
 	positional, err := parseFlags(fs, args)
 	if err != nil {
@@ -112,7 +125,7 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 		if event == ledger.GroupRemoved {
 			return fail(ExitValidation, "usage: gtme groups remove NAME KEY... [--note TEXT]")
 		}
-		return fail(ExitValidation, "usage: gtme groups add NAME [KEY...] [--from-segment NAME | --query SQL]")
+		return fail(ExitValidation, "usage: gtme groups add NAME [KEY...] [--from-segment NAME | --query SQL] [--type TYPE]")
 	}
 	name, keys := positional[0], positional[1:]
 	if event == ledger.GroupRemoved && (*fromSegment != "" || *query != "") {
@@ -121,8 +134,18 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 	if event == ledger.GroupAdded && *note != "" {
 		return fail(ExitValidation, "--note records why a record was removed; add has no reason to record (SPEC §8)")
 	}
-	if len(keys) == 0 && *fromSegment == "" && *query == "" {
-		return fail(ExitValidation, "nothing to %s: give identity keys, --from-segment, or --query", verbFor(event))
+	typed := strings.TrimSpace(*entityType)
+	if len(keys) == 0 && *fromSegment == "" && *query == "" && !(event == ledger.GroupAdded && typed != "") {
+		return fail(ExitValidation, "nothing to %s: give identity keys, --from-segment, --query, or (add) --type", verbFor(event))
+	}
+	if typed != "" {
+		reg, err := registry.Load()
+		if err != nil {
+			return err
+		}
+		if _, err := reg.Resolve(typed); err != nil {
+			return fail(ExitValidation, "--type: %v", err)
+		}
 	}
 
 	l, err := openLedger(ctx)
@@ -131,19 +154,9 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 	}
 	defer l.Close()
 
-	var g ledger.Group
-	if event == ledger.GroupAdded {
-		if g, err = l.EnsureGroup(ctx, name); err != nil {
-			return err
-		}
-	} else if g, err = l.GetGroup(ctx, name); err != nil {
-		return fail(ExitValidation, "%v", err)
-	}
-	members, err := l.GroupMembership(ctx, g.ID)
-	if err != nil {
-		return err
-	}
-
+	// Resolve the members first: a new group takes its type from them when
+	// no --type says (SPEC §8, ADR-054) — an unambiguous key match, or the
+	// query's identities.
 	var ids []string
 	detail := map[string]any{"via": "cli"}
 	if strings.TrimSpace(*note) != "" {
@@ -166,11 +179,49 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 		detail = map[string]any{"query": *query, "evaluated_at": nowStamp()}
 	}
 	for _, key := range keys {
-		ident, err := lookupIdentity(ctx, l, key, *entityType)
+		ident, err := lookupIdentity(ctx, l, key, typed)
 		if err != nil {
 			return fail(ExitValidation, "%v", err)
 		}
 		ids = append(ids, ident.ID)
+	}
+	memberType, err := identityTypeOf(ctx, l, ids)
+	if err != nil {
+		return fail(ExitValidation, "%v", err)
+	}
+	if typed != "" && memberType != "" && memberType != typed {
+		return fail(ExitValidation, "--type %s, but the records to add are %s", typed, memberType)
+	}
+
+	var g ledger.Group
+	if event == ledger.GroupAdded {
+		groupType := typed
+		if groupType == "" {
+			groupType = memberType
+		}
+		if g, err = l.EnsureGroup(ctx, name, groupType); err != nil {
+			return fail(ExitValidation, "%v", err)
+		}
+		if g.EntityType == "" && groupType != "" {
+			// A group created before ADR-054: --type (or the first typed
+			// members after it, only when --type says so) sets it once.
+			if typed != "" {
+				if err := l.SetGroupType(ctx, g.ID, typed); err != nil {
+					return err
+				}
+				g.EntityType = typed
+				fmt.Fprintf(env.Stderr, "group %s: type set to %s\n", g.Name, typed)
+			}
+		}
+	} else if g, err = l.GetGroup(ctx, name); err != nil {
+		return fail(ExitValidation, "%v", err)
+	}
+	if g.EntityType != "" && memberType != "" && memberType != g.EntityType {
+		return fail(ExitValidation, "group %s holds %s records; a %s cannot join it (SPEC §8, ADR-054)", g.Name, g.EntityType, memberType)
+	}
+	members, err := l.GroupMembership(ctx, g.ID)
+	if err != nil {
+		return err
 	}
 
 	changed := 0
@@ -187,6 +238,39 @@ func groupsEdit(ctx context.Context, env Env, args []string, event string) error
 	}
 	fmt.Fprintf(env.Stderr, "group %s: %d %s, %d unchanged\n", g.Name, changed, event, len(ids)-changed)
 	return nil
+}
+
+// identityTypeOf reports the one entity type a set of identities share, ""
+// for none, and an error when they mix (a group holds one type, ADR-054).
+func identityTypeOf(ctx context.Context, l *ledger.Ledger, ids []string) (string, error) {
+	seen := ""
+	for _, id := range ids {
+		ident, err := l.IdentityByID(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		switch {
+		case seen == "":
+			seen = ident.EntityType
+		case seen != ident.EntityType:
+			return "", fmt.Errorf("the records to add mix %s and %s; a group holds one type (SPEC §8, ADR-054)", seen, ident.EntityType)
+		}
+	}
+	return seen, nil
+}
+
+func groupType(t string) string {
+	if t == "" {
+		return "(untyped)"
+	}
+	return t
+}
+
+func orNone(list []string) string {
+	if len(list) == 0 {
+		return "(none)"
+	}
+	return strings.Join(list, ", ")
 }
 
 func lookupIdentity(ctx context.Context, l *ledger.Ledger, key, entityType string) (ledger.Identity, error) {

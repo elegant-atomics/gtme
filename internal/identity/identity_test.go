@@ -1,192 +1,76 @@
 package identity
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"testing"
-)
+import "testing"
 
-func nh(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return "nh:" + hex.EncodeToString(sum[:])
-}
+// The rules (SPEC §4a): each exists exactly once, here, shared by key
+// derivation and ingress normalization. Which rules a type keys on is its
+// type file's business (internal/registry); this file tests the rules.
 
-func TestKeyFor(t *testing.T) {
-	cases := []struct {
-		name       string
-		entityType string
-		fields     map[string]any
-		want       string
-		wantStr    Strength
-		wantErr    bool
-	}{
-		{
-			name:       "person email wins and is lowercased",
-			entityType: Person,
-			fields:     map[string]any{"email": "  Jane.Doe@Example.COM ", "linkedin_url": "https://linkedin.com/in/jane"},
-			want:       "jane.doe@example.com",
-			wantStr:    StrengthEmail,
-		},
-		{
-			name:       "person linkedin when no email",
-			entityType: Person,
-			fields:     map[string]any{"linkedin_url": "https://www.linkedin.com/in/Jane-Doe/?trk=public"},
-			want:       "in/jane-doe",
-			wantStr:    StrengthSlug,
-		},
-		{
-			name:       "linkedin without scheme or host",
-			entityType: Person,
-			fields:     map[string]any{"linkedin_url": "in/Jane-Doe"},
-			want:       "in/jane-doe",
-			wantStr:    StrengthSlug,
-		},
-		{
-			name:       "linkedin with locale subdomain and fragment",
-			entityType: Person,
-			fields:     map[string]any{"linkedin_url": "HTTP://de.linkedin.com/in/jane-doe#about"},
-			want:       "in/jane-doe",
-			wantStr:    StrengthSlug,
-		},
-		{
-			name:       "linkedin percent escapes are decoded",
-			entityType: Person,
-			fields:     map[string]any{"linkedin_url": "https://linkedin.com/in/jos%C3%A9-p"},
-			want:       "in/josé-p",
-			wantStr:    StrengthSlug,
-		},
-		{
-			name:       "empty email string is not a key",
-			entityType: Person,
-			fields:     map[string]any{"email": "   ", "linkedin_url": "linkedin.com/in/x"},
-			want:       "in/x",
-			wantStr:    StrengthSlug,
-		},
-		{
-			name:       "malformed email falls through to name hash",
-			entityType: Person,
-			fields:     map[string]any{"email": "not-an-email", "full_name": "Jane Doe", "company_domain": "acme.com"},
-			want:       nh("jane doe|acme.com"),
-			wantStr:    StrengthNameHash,
-		},
-		{
-			name:       "name hash normalizes whitespace and domain",
-			entityType: Person,
-			fields:     map[string]any{"name": " Jane   DOE ", "company_domain": "https://www.Acme.com/careers"},
-			want:       nh("jane doe|acme.com"),
-			wantStr:    StrengthNameHash,
-		},
-		{
-			name:       "name hash from first and last name",
-			entityType: Person,
-			fields:     map[string]any{"first_name": "Jane", "last_name": "Doe"},
-			want:       nh("jane doe|"),
-			wantStr:    StrengthNameHash,
-		},
-		{
-			name:       "person with nothing identifying",
-			entityType: Person,
-			fields:     map[string]any{"title": "VP Marketing"},
-			wantErr:    true,
-		},
-		{
-			name:       "company registrable domain from url",
-			entityType: Company,
-			fields:     map[string]any{"domain": "https://blog.Acme.co.uk/posts?x=1"},
-			want:       "acme.co.uk",
-			wantStr:    StrengthDomain,
-		},
-		{
-			name:       "company domain from website with port",
-			entityType: Company,
-			fields:     map[string]any{"website": "www.acme.com:8443"},
-			want:       "acme.com",
-			wantStr:    StrengthDomain,
-		},
-		{
-			name:       "company name hash when no domain",
-			entityType: Company,
-			fields:     map[string]any{"name": "Acme  Inc"},
-			want:       nh("acme inc"),
-			wantStr:    StrengthNameHash,
-		},
-		{
-			name:       "bare hostname without dot is not a domain",
-			entityType: Company,
-			fields:     map[string]any{"domain": "localhost", "name": "Acme Inc"},
-			want:       nh("acme inc"),
-			wantStr:    StrengthNameHash,
-		},
-		{
-			name:       "company with nothing identifying",
-			entityType: Company,
-			fields:     map[string]any{"employees": 50},
-			wantErr:    true,
-		},
+func TestNormalizeURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"HTTPS://WWW.LinkedIn.com/posts/jane_x-7123/", "https://www.linkedin.com/posts/jane_x-7123"},
+		{" https://x.com/jane/status/1?s=20#top ", "https://x.com/jane/status/1?s=20"},
+		{"https://example.com/Path/With/Case", "https://example.com/Path/With/Case"},
+		{"https://example.com", "https://example.com"},
+		{"https://example.com/", "https://example.com"},
+		{"example.com/no-scheme", ""},
+		{"ftp://example.com/x", ""},
+		{"", ""},
+		{"not a url", ""},
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := KeyFor(tc.entityType, tc.fields)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("want error, got key %q", got.Value)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("KeyFor: %v", err)
-			}
-			if got.Value != tc.want {
-				t.Errorf("key = %q, want %q", got.Value, tc.want)
-			}
-			if got.Strength != tc.wantStr {
-				t.Errorf("strength = %d, want %d", got.Strength, tc.wantStr)
-			}
-			if got.EntityType != tc.entityType {
-				t.Errorf("entity_type = %q, want %q", got.EntityType, tc.entityType)
-			}
-		})
-	}
-}
-
-func TestKeyForUnknownEntityType(t *testing.T) {
-	if _, err := KeyFor("robot", map[string]any{"email": "a@b.com"}); err == nil {
-		t.Fatal("want error for unknown entity type")
-	}
-}
-
-func TestCandidatesOrderedStrongestFirst(t *testing.T) {
-	got, err := Candidates(Person, map[string]any{
-		"email":          "Jane@Example.com",
-		"linkedin_url":   "https://www.linkedin.com/in/jane-doe/",
-		"full_name":      "Jane Doe",
-		"company_domain": "acme.com",
-	})
-	if err != nil {
-		t.Fatalf("Candidates: %v", err)
-	}
-	want := []string{"jane@example.com", "in/jane-doe", nh("jane doe|acme.com")}
-	if len(got) != len(want) {
-		t.Fatalf("got %d candidates, want %d: %+v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i].Value != want[i] {
-			t.Errorf("candidate %d = %q, want %q", i, got[i].Value, want[i])
+	for _, c := range cases {
+		if got := NormalizeURL(c.in); got != c.want {
+			t.Errorf("NormalizeURL(%q) = %q, want %q", c.in, got, c.want)
 		}
-		if i > 0 && got[i-1].Strength < got[i].Strength {
-			t.Errorf("candidates not ordered strongest first: %+v", got)
+	}
+	// A stored canonical value is a fixed point of its rule.
+	for _, c := range cases {
+		if c.want == "" {
+			continue
+		}
+		if got := NormalizeURL(c.want); got != c.want {
+			t.Errorf("NormalizeURL is not idempotent on %q: got %q", c.want, got)
 		}
 	}
 }
 
-func TestNonStringScalarsAreUsable(t *testing.T) {
+func TestKeyFormPerRule(t *testing.T) {
+	cases := []struct{ rule, in, want string }{
+		{"email", " Jane.Doe@Example.COM ", "jane.doe@example.com"},
+		{"email", "not-an-email", ""},
+		{"domain", "https://blog.Acme.co.uk/posts?x=1", "acme.co.uk"},
+		{"domain", "www.acme.com:8443", "acme.com"},
+		{"domain", "localhost", ""},
+		// linkedin_url keys on the public slug, not the stored URL (SPEC §4).
+		{"linkedin_url", "https://www.linkedin.com/in/Jane-Doe/?trk=public", "in/jane-doe"},
+		{"linkedin_url", "in/Jane-Doe", "in/jane-doe"},
+		{"linkedin_url", "HTTP://de.linkedin.com/in/jane-doe#about", "in/jane-doe"},
+		{"linkedin_url", "https://linkedin.com/in/jos%C3%A9-p", "in/josé-p"},
+		{"linkedin_url", "https://www.linkedin.com/sales/lead/ACwAAAbQxKB9,NAME", ""},
+		{"handle", "@JaneDoe", "janedoe"},
+		{"handle", "https://github.com/JaneDoe/", "janedoe"},
+		{"url", "https://X.com/jane/status/1/", "https://x.com/jane/status/1"},
+		{"trim", "anything", ""}, // not a key rule
+	}
+	for _, c := range cases {
+		if got := KeyForm(c.rule, c.in); got != c.want {
+			t.Errorf("KeyForm(%s, %q) = %q, want %q", c.rule, c.in, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeName(t *testing.T) {
+	if got := NormalizeName("  Jane   DOE "); got != "jane doe" {
+		t.Errorf("NormalizeName = %q", got)
+	}
+}
+
+func TestStrFormatsScalars(t *testing.T) {
 	// CSV and JSON sources hand us numbers now and then.
-	got, err := KeyFor(Company, map[string]any{"name": 3600})
-	if err != nil {
-		t.Fatalf("KeyFor: %v", err)
+	if got := Str(map[string]any{"n": 3600}, "n"); got != "3600" {
+		t.Errorf("Str = %q", got)
 	}
-	if got.Value != nh("3600") {
-		t.Errorf("key = %q, want %q", got.Value, nh("3600"))
+	if got := Str(map[string]any{"n": nil}, "n"); got != "" {
+		t.Errorf("Str(nil) = %q", got)
 	}
 }

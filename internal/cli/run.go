@@ -81,10 +81,10 @@ func cmdRun(ctx context.Context, env Env, args []string) error {
 	// Group references resolve against the ledger before anything runs
 	// (SPEC §7, ADR-021) — enforced under --simulate too: a missing group is
 	// a contract error, not a credential.
-	if len(plan.ReferencedGroups()) > 0 {
-		if err := plan.CheckGroups(ctx, l); err != nil {
-			return planFailure(err)
-		}
+	// Always: the terminus and every group/deliver are checked against
+	// their group's type when it exists (SPEC §7, ADR-054).
+	if err := plan.CheckGroups(ctx, l); err != nil {
+		return planFailure(err)
 	}
 
 	if *simulate {
@@ -186,10 +186,8 @@ func cmdPlan(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return planFailure(err)
 	}
-	if len(plan.ReferencedGroups()) > 0 {
-		if err := plan.CheckGroups(ctx, l); err != nil {
-			return planFailure(err)
-		}
+	if err := plan.CheckGroups(ctx, l); err != nil {
+		return planFailure(err)
 	}
 	// The listing is the normative surface (SPEC §7): the diagram never
 	// replaces it unless asked, and never carries a fact it does not.

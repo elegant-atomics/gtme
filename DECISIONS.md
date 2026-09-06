@@ -3188,9 +3188,9 @@ everything else stays honestly `estimated`.
 manifests ride the build.
 
 ### ADR-054: `traverse` — a run is a sequence of typed segments, and a type is a file
-**Status:** Proposed (2026-09-05 — design session; answers ADR-008's parked
+**Status:** Accepted (2026-09-05 — design session; answers ADR-008's parked
 question and ROADMAP.md's "Entity types" (until this packet, "Object
-ontology"); not accepted until a human merges the packet)
+ontology"); human-approved 2026-09-05 by merging the packet)
 **Context:** §4 derives identity for exactly `person` and `company`, as a
 closed switch. `entity_type` is an open string everywhere else, and since
 issue #27 plan and verify refuse what has no derivation — an extension

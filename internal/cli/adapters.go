@@ -21,8 +21,8 @@ import (
 	"github.com/elegant-atomics/gtme/internal/adapterinstall"
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/elegant-atomics/gtme/internal/registry"
 )
 
 func cmdAdapters(ctx context.Context, env Env, args []string) error {
@@ -313,16 +313,27 @@ func verifyBindingDir(env Env, dir string) (*binding.Binding, error) {
 	if err != nil {
 		return nil, fail(ExitValidation, "adapters: %s: %v", b.ID, err)
 	}
-	// An entity_type with no §4 identity derivation can never enter the
-	// ledger — refusing here closes the gap between "certified" and "works",
-	// instead of the runner dropping every record after a paid call (#27).
-	if m.EntityType != "" && !identity.Supported(m.EntityType) {
-		return nil, fail(ExitValidation,
-			"adapters: %s: entity_type %q has no identity derivation in this build (SPEC §4 defines %s) — its records would all be dropped at the identity boundary",
-			b.ID, m.EntityType, strings.Join(identity.SupportedTypes(), ", "))
+	// The adapter–type contract (SPEC §4a, ADR-054): the type resolves to
+	// one file, provides is canonical for it, and a source or traverse can
+	// key what it emits — refusing here closes the gap between "certified"
+	// and "works", instead of the runner dropping every record after a paid
+	// call (#27).
+	shipped, err := shippedTypes(b.ID, dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkTypeContract(m, dir); err != nil {
+		return nil, fail(ExitValidation, "adapters: %s: %v", b.ID, err)
 	}
 
-	fmt.Fprintf(env.Stderr, "%s v%d — %s (%s)\n", b.ID, b.Version, b.Role, m.EntityType)
+	if b.Role == adapters.RoleTraverse {
+		fmt.Fprintf(env.Stderr, "%s v%d — %s (%s → %s, %s)\n", b.ID, b.Version, b.Role, m.From, m.EntityType, m.Relation.Name)
+	} else {
+		fmt.Fprintf(env.Stderr, "%s v%d — %s (%s)\n", b.ID, b.Version, b.Role, m.EntityType)
+	}
+	for _, t := range shipped {
+		fmt.Fprintf(env.Stderr, "  ships type:  %s (%s) — read in place, under this binding's pin\n", t.EntityType, filepath.Join(registry.TypesDir, t.EntityType+".json"))
+	}
 	fmt.Fprintf(env.Stderr, "  calls:       %s\n", bindingHost(b))
 	creds := "none"
 	if len(m.Credentials) > 0 {
@@ -347,6 +358,71 @@ func verifyBindingDir(env Env, dir string) (*binding.Binding, error) {
 	return b, nil
 }
 
+// checkTypeContract runs the adapter–type contract (SPEC §4a, ADR-054) on a
+// manifest's static shape: the type (and a traverse's from) resolves to one
+// file, needs and provides are canonical for their types, and a source or
+// traverse can key what it emits.
+func checkTypeContract(m *adapters.Manifest, dir string) error {
+	reg, err := registry.Load()
+	if err != nil {
+		return err
+	}
+	if dir != "" {
+		// The binding's own types count — it may be the one that brings the
+		// type it emits (SPEC §4a discovery, source 3).
+		reg = reg.WithBindingDir(dir)
+	}
+	problems, _ := reg.Contract(m, m.EntityType, m.ProvidesFields(), adapters.Wildcard(m.Provides))
+	for _, p := range problems {
+		return fmt.Errorf("%s", p.Msg)
+	}
+	needsType := m.EntityType
+	if m.Role == adapters.RoleTraverse {
+		needsType = m.From
+		if _, err := reg.Resolve(m.From); err != nil {
+			return fmt.Errorf("from: %v", err)
+		}
+	}
+	if needsType != adapters.EntityAny {
+		for _, name := range m.NeedsFields() {
+			if err := reg.ValidateName(needsType, name); err != nil {
+				return fmt.Errorf("needs: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+// shippedTypes reads the type files a binding ships (SPEC §4a): each must
+// validate, be named after its type, and not carry a name the binary
+// embeds — nothing installed may redefine how person, company or post is
+// keyed on an operator's machine.
+func shippedTypes(id, dir string) ([]*registry.Type, error) {
+	var out []*registry.Type
+	for _, path := range registry.ShippedTypes(dir) {
+		name := strings.TrimSuffix(filepath.Base(path), ".json")
+		rel := filepath.Join(registry.TypesDir, filepath.Base(path))
+		if registry.Reserved(name) {
+			return nil, fail(ExitValidation,
+				"adapters: %s ships %s, but %q is a type this build embeds — embedded names are reserved so no binding can redefine how a %s is keyed (SPEC §4a); refusing to install",
+				id, rel, name, name)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fail(ExitValidation, "adapters: %s: %s: %v", id, rel, err)
+		}
+		t, err := registry.ParseType(raw, path, "binding")
+		if err != nil {
+			return nil, fail(ExitValidation, "adapters: %s: %s: %v", id, rel, err)
+		}
+		if t.EntityType != name {
+			return nil, fail(ExitValidation, "adapters: %s: %s declares entity_type %q; the file is named after the type", id, rel, t.EntityType)
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 // runFixtures drives the binding through the real engine with the fixture
 // set as its HTTP seam — the conformance-kit shape, minus testing.T.
 func runFixtures(b *binding.Binding, m *adapters.Manifest, fixtures *binding.FixtureSet) (int, error) {
@@ -368,7 +444,12 @@ func runFixtures(b *binding.Binding, m *adapters.Manifest, fixtures *binding.Fix
 		if v, ok := fixtures.Input["email"].(string); ok {
 			key = v
 		}
-		input = append(input, protocol.Record(protocol.Key{EntityType: m.EntityType, IdentityKey: key}, fixtures.Input, nil))
+		// A traverse consumes records of its from type (SPEC §6, ADR-054).
+		inType := m.EntityType
+		if m.Role == adapters.RoleTraverse {
+			inType = m.From
+		}
+		input = append(input, protocol.Record(protocol.Key{EntityType: inType, IdentityKey: key}, fixtures.Input, nil))
 	}
 	credEnv := map[string]string{}
 	for _, c := range append(append([]string{}, m.Credentials...), m.CredentialsOptional...) {
@@ -411,8 +492,8 @@ func runFixtures(b *binding.Binding, m *adapters.Manifest, fixtures *binding.Fix
 		}
 		return records, err
 	}
-	if b.Role == adapters.RoleSource && records == 0 {
-		return 0, fmt.Errorf("the fixtures produced no records — a source's fixtures must yield at least one")
+	if (b.Role == adapters.RoleSource || b.Role == adapters.RoleTraverse) && records == 0 {
+		return 0, fmt.Errorf("the fixtures produced no records — a %s's fixtures must yield at least one", b.Role)
 	}
 	return records, nil
 }

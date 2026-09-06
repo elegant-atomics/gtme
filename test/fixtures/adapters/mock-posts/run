@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""mock/posts — a fixture traverse (SPEC §6, ADR-054): people in, posts out.
+
+Each parent (a person, keyed by email) yields a fixed set of posts, so the
+crossing is deterministic and offline. Jane and Bob share one post, so the
+runner has a coalesce to count; Carol has none, so a parent counts empty.
+The RECORDs carry the OUTPUT type in their key (SPEC §5) and no identity
+key — the runner canonicalizes.
+"""
+
+import json
+import sys
+
+POSTS = {
+    "jane.doe@acme.com": [
+        {"url": "https://www.linkedin.com/posts/jane-1", "platform": "linkedin", "text": "Shipping outbound", "likes": 12, "mock.post_id": "p-jane-1"},
+        {"url": "https://www.linkedin.com/posts/shared-1", "platform": "linkedin", "text": "A shared post", "likes": 40, "mock.post_id": "p-shared-1"},
+    ],
+    "bob@globex.io": [
+        {"url": "https://www.linkedin.com/posts/shared-1", "platform": "linkedin", "text": "A shared post", "likes": 40, "mock.post_id": "p-shared-1"},
+    ],
+}
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    limit = 0
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        kind = msg.get("type")
+        if kind == "OPEN":
+            limit = int((msg.get("config") or {}).get("limit") or 0)
+            send({"type": "SCHEMA", "provides": {"type": "object", "properties": {}}})
+        elif kind == "RECORD":
+            email = (msg.get("fields") or {}).get("email", "")
+            posts = POSTS.get(email, [])
+            if limit:
+                posts = posts[:limit]
+            for post in posts:
+                send({"type": "RECORD", "key": {"entity_type": "post", "identity_key": ""}, "fields": post})
+            send({"type": "COST", "key": msg.get("key"), "provider": "mock", "amount_usd": 0.001})
+        elif kind == "END":
+            break
+    send({"type": "END"})
+
+
+if __name__ == "__main__":
+    main()
