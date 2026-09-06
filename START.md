@@ -89,7 +89,13 @@ gtme run cache.yaml            # again: 3 cached, $0.0300 avoided, 0 delivered
 
 The second run's receipt reads `cached 3` and `avoided $0.0300` on the
 enrichment, `0` out on the delivery, and `avoided via cache` in the
-total line. Then look at what the ledger kept:
+total line. Be clear about what that proves: the counter is real and the
+number is not. The price is pretend, the people are fictional, and three
+records is a party trick; nothing in this door spends a cent, so nothing
+in it saves one. The same `avoided` column with your rows and a model's
+real price is door 2, and with a vendor's real per-record reveal price
+it is door 3 — that receipt is somebody's actual bill. Then look at what
+the ledger kept:
 
 ```sh
 gtme show jane.doe@acme.com --provenance
