@@ -22,7 +22,6 @@ Three kinds appear below:
 | id | role | kind | what it does |
 |---|---|---|---|
 | `csv/source` | source | process (built-in) | rows from a CSV, with `columns:` ingress mapping |
-| `webhook/source` | source | process (built-in) | drains a spool file written by any webhook receiver |
 | `source: {group: …}` | source | runner-owned | a typed group's current members, projected from the ledger |
 | `apollo/search` | source | **binding** | Apollo people search, paginated |
 | `harvest/profile` | enrich | process (built-in) | LinkedIn profile via HarvestAPI |
@@ -156,13 +155,14 @@ source:
     columns: { full_name: Full Name, email: Email, company_domain: Company Website }
 ```
 
-### `webhook/source`
+### Events without a daemon
 
-The no-daemon answer to events: any commodity receiver (a Cloudflare
-Worker, Zapier, a GitHub Action) appends JSON payloads to a spool file;
-this adapter drains it like a CSV, marking consumed lines so a re-run
-never re-sources them. Config: `spool_path`. Pair with cron for
-event-driven pipelines.
+There is no `webhook/source` (ADR-055 defers it to the roadmap; it returns
+with `listen`). The working recipe: a commodity receiver (a Cloudflare
+Worker, Zapier, a GitHub Action) appends each event as a row to a CSV,
+and a scheduled `gtme run` sources it with `csv/source`. Rows re-source
+on every run; identity coalescing, the judgment cache and delivery
+idempotency keep that cheap and safe.
 
 ### Group as a source
 

@@ -1257,19 +1257,23 @@ repositories. The binary carries the floor (`csv/*`, `http/*`, `sql/*`,
 `ai/*`, `group/*`) and the reference twins in `spec/bindings/`; every
 other vendor is a registry entry.
 
-### Event-driven pipelines: webhook/source + cron (ADR-009)
+### Event-driven pipelines: a scheduled run over a file a receiver writes (ADR-009; the spool adapter deferred, ADR-055)
 
 There is no daemon and no long-running receiver process (§13 non-goals). The
 v0 answer to "run a pipeline when an event happens" is: a commodity webhook
 receiver you already have (a Cloudflare Worker, a Zapier/Make webhook
-action, a GitHub Action) appends each incoming payload as one line to a
-spool file or directory; a `webhook/source` adapter (§10) reads and drains
-that spool the same way `csv/source` reads a CSV; a scheduled `gtme run`
-(cron, launchd, CI schedule) invokes the pipeline periodically. At-least-once
-redelivery from the receiver is absorbed structurally by the `deliveries`
-table's `UNIQUE(target, scope, idempotency)` constraint (§3, ADR-044) — replaying the same
-event through the pipeline twice produces at most one delivery. Per-event
-low latency is explicitly out of scope for v0.
+action, a GitHub Action) appends each incoming payload as one row to a
+file, and a scheduled `gtme run` (cron, launchd, CI schedule) invokes the
+pipeline periodically. Today the file is a CSV and the source is
+`csv/source` (§10.1): rows are re-sourced on every run, and identity
+coalescing (§4), the judgment cache (§7) and delivery idempotency make
+that cheap and safe — at-least-once redelivery from the receiver is
+absorbed structurally by the `deliveries` table's `UNIQUE(target, scope,
+idempotency)` constraint (§3, ADR-044), so replaying the same event
+through the pipeline twice produces at most one delivery. The adapter
+that would drain an NDJSON spool and mark lines consumed, ADR-009's
+`webhook/source`, is deferred to ROADMAP.md (ADR-055) and returns with
+`listen`. Per-event low latency is explicitly out of scope for v0.
 
 ### In-flight steps — `deferred: true`, the pipeline's last step; `run` collects (ADR-038)
 
@@ -1938,14 +1942,8 @@ contract, pure YAML.
 7. **`mock-enrich-py`** (external, Python 3 stdlib only) — reads protocol
    from stdin, adds field `mock_score` (random but seeded from identity
    key), emits COST 0. Proves the external adapter path.
-8. **`webhook/source`** (source; entity_type per payload) — near-clone of
-   `csv/source` (ADR-009): config `spool_path` (a file or directory of
-   NDJSON-per-line event payloads written by an external receiver); each
-   line becomes a candidate record the same way a CSV row does; successfully
-   ledger-written lines MUST be marked consumed (moved/truncated/deleted per
-   `spool_path`'s shape) so a re-run does not re-source them — this is the
-   adapter-level half of the redelivery story, distinct from and in addition
-   to the delivery-side idempotency in §8.
+(Item 8, `webhook/source`, was specified here from ADR-009 and never
+built; ADR-055 defers it to ROADMAP.md. The event recipe is in §8.)
 
 For Apollo/Harvest/Instantly: implement against their current public docs
 (fetch docs at build time via web access if available; otherwise implement
@@ -2181,8 +2179,9 @@ universal transports — files, webhooks, the web. Universality is bought
 by pushing semantics into user config, so universal adapters are always
 the worst version of any given integration: their job is the guarantee
 ("wireable today"), not excellence; bindings are the ceiling. The set:
-In — `csv/source` (§10.1), `webhook/source` (§10.8), and group-as-source
-(§9, built in M9); transform — `ai/*` (pure, above) and `sql/*`; out —
+In — `csv/source` (§10.1) and group-as-source (§9, built in M9) — the
+spool-draining `webhook/source` is deferred (ADR-055, ROADMAP.md);
+transform — `ai/*` (pure, above) and `sql/*`; out —
 `http/deliver` and `csv/deliver`. Receipts showing the same `http/*`
 target recurring across runs are the cue to mint a named binding.
 
@@ -2244,10 +2243,11 @@ offline.
   expected rows. (AI engine behind an interface; tests use a fake engine.)
 - **M5 — real adapters.** Apollo, Harvest, Instantly against live APIs,
   each with fixture-based unit tests plus a `--live` build tag for manual
-  smoke tests; `webhook/source` against a local spool fixture (no live
-  dependency — offline-testable like `csv/source`). ✅ The pipeline in §9
-  runs end-to-end with real keys (manual gate — see §12); `webhook/source`
-  drains a fixture spool without re-sourcing consumed lines on a second run.
+  smoke tests. ✅ The pipeline in §9
+  runs end-to-end with real keys (manual gate — see §12). *The
+  `webhook/source` clauses this milestone originally carried were never
+  met — no package, manifest or fixture ever existed (AUDIT.md) — and are
+  struck by ADR-055, which defers the adapter to ROADMAP.md.*
 - **M6 — polish.** `gtme runs`, README with 60-second quickstart,
   `brew`-style install script, `gtme secret set`.
 - **M7 — canonical vocabulary & edge contracts (ADR-017/018/019/020).**
@@ -2692,8 +2692,9 @@ contents (this section does not duplicate it, to avoid the two drifting).
 
 ## 13. Non-goals for v0 (do not build)
 
-Scheduler/daemon (answered instead by the webhook/source + cron spool
-recipe, §8), dashboards or any UI (a one-shot static render such as
+Scheduler/daemon (answered instead by a scheduled `gtme run` over a file
+a receiver writes, §8; the spool-draining adapter is deferred, ADR-055),
+dashboards or any UI (a one-shot static render such as
 `gtme plan --viz` is not one: no process, no interaction, no retained
 state — see ADR-051), DAG/branching beyond
 `when:`, `waterfall:` execution (parse-and-reject only), email waterfall
@@ -2804,6 +2805,17 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.45 (proposed) — 2026-09-06 (ADR-055: `webhook/source` deferred)
+**Removed:** §10 item 8, `webhook/source` — specified from ADR-009's
+reconciliation, never built (AUDIT.md), now on ROADMAP.md with `listen`
+as the design pass it returns with.
+**Changed:** §8 the event recipe states what ships (a scheduled run over
+a CSV a receiver writes, through `csv/source`) and what is deferred;
+§10a the universal floor's In set; §11 M5's unmet `webhook/source`
+acceptance clauses struck with a note; §13 the no-daemon answer cites the
+scheduled run, not the adapter. README.md and ADAPTERS.md drop it. No
+code changes.
 
 ### v0.44 — 2026-09-06 (bookkeeping after M28)
 **Changed:** §4a describes the hash-tier component forms the type-file
