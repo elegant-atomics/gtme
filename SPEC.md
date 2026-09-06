@@ -1944,6 +1944,19 @@ contract, pure YAML.
    key), emits COST 0. Proves the external adapter path.
 (Item 8, `webhook/source`, was specified here from ADR-009 and never
 built; ADR-055 defers it to ROADMAP.md. The event recipe is in §8.)
+9. **`demo/enrich`** (enrich, person; ADR-056, proposed) — the priced,
+   keyless enrichment. Needs `email` or `full_name`; provides `demo.score`
+   (integer 0–100, derived from the identity key's hash) and `demo.note`
+   (the fixed string `synthetic — demo/enrich called no vendor`).
+   Deterministic; no network, no credential, no payload; runs armed, and
+   under `--simulate` runs exactly as armed — never a simulation gap.
+   Config `cost_per_record_usd` (default `0.01`, ADR-046 template, basis
+   `estimated`) and `freshness_days` (default 30). Cost rows land under
+   `demo/enrich@1`; `gtme plan` prints `est/record: $0.0100`. Never in
+   the registry index; the `demo/` prefix is reserved. Exists so the
+   zero-key path prints the top-up receipt — `cached`, `avoided` — on a
+   persisting ledger (`examples/cache.yaml`), which `--simulate` cannot
+   (ADR-028).
 
 For Apollo/Harvest/Instantly: implement against their current public docs
 (fetch docs at build time via web access if available; otherwise implement
@@ -2805,6 +2818,13 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.46 — 2026-09-06 (proposed: ADR-056, `demo/enrich`)
+**Added (proposed):** §10 item 9, `demo/enrich` — a built-in, priced,
+keyless, deterministic enrichment that runs armed, so the zero-key
+onboarding path prints the top-up receipt on a persisting ledger.
+Built with the M29 packet that follows approval; README.md, ADAPTERS.md,
+START.md and `examples/cache.yaml` ride the build.
 
 ### v0.45 — 2026-09-06 (ADR-055: `webhook/source` deferred; accepted by merge, no build)
 **Removed:** §10 item 8, `webhook/source` — specified from ADR-009's
