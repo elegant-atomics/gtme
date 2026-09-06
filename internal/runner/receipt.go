@@ -81,6 +81,27 @@ func PrintReceipt(w io.Writer, res *Result) {
 			dash(s.Filtered), dash(s.Failed), money(s.Cost.Total()), avoided)
 	}
 	tw.Flush()
+	// Failures, with their reasons (SPEC §8: every error names its fix). One
+	// line per distinct reason, most frequent first; a bare count in the
+	// table would leave a missing key looking like bad data.
+	for _, s := range res.Steps {
+		if len(s.FailReasons) == 0 {
+			continue
+		}
+		reasons := make([]string, 0, len(s.FailReasons))
+		for reason := range s.FailReasons {
+			reasons = append(reasons, reason)
+		}
+		sort.Slice(reasons, func(i, j int) bool {
+			if s.FailReasons[reasons[i]] != s.FailReasons[reasons[j]] {
+				return s.FailReasons[reasons[i]] > s.FailReasons[reasons[j]]
+			}
+			return reasons[i] < reasons[j]
+		})
+		for _, reason := range reasons {
+			fmt.Fprintf(w, "%s: %d failed — %s\n", s.ID, s.FailReasons[reason], reason)
+		}
+	}
 	// Declared fields absent at dispatch (SPEC §7, ADR-053): the gap is
 	// visible whether or not the operator chose a policy.
 	for i := range res.Steps {

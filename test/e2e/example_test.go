@@ -202,3 +202,25 @@ func TestMyCSVPipelinePlans(t *testing.T) {
 	contains(t, res.stderr, "plan ok — nothing has been spent", "my-csv plan")
 	contains(t, res.stderr, "out → csv/deliver", "the deliver target is a local file")
 }
+
+// A first-run failure names its fix on the receipt (SPEC §8): an armed run
+// of the my-csv example with no model key must not just count three failed
+// records — it must say which key is missing and how to set it.
+func TestReceiptNamesTheMissingKey(t *testing.T) {
+	h := newHarness(t)
+
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "examples", "my-csv.yaml"))
+	if err != nil {
+		t.Fatalf("reading the my-csv pipeline: %v", err)
+	}
+	h.write("my-csv.yaml", string(raw))
+	h.write("contacts.csv", "Full Name,Email,Title,Company Website\n"+
+		"Jane Doe,jane.doe@acme.com,VP Marketing,https://www.acme.com\n"+
+		"Bob Stone,bob@grovelabs.io,Head of Growth,grovelabs.io\n")
+
+	res := h.run("run", "my-csv.yaml")
+	if res.code == 0 {
+		t.Fatalf("a run with no model key must fail\nstderr:\n%s", res.stderr)
+	}
+	contains(t, res.stderr, "fit: 2 failed — ai: ANTHROPIC_API_KEY is not set (run `gtme secret set ANTHROPIC_API_KEY`)", "the receipt names the key")
+}

@@ -71,8 +71,12 @@ type StepStat struct {
 	CacheSkips int
 	Filtered   int // failed a filter verdict
 	Failed     int
-	Gated      int // excluded by when:
-	Skipped    int // records held back by on_missing: a deliver's withheld send, or a participant step's skip (SPEC §7/§8)
+	// FailReasons tallies why records failed this step, verbatim from the
+	// failed event's reason, so the receipt can name the fix (SPEC §8:
+	// every error names its fix) instead of printing a bare count.
+	FailReasons map[string]int
+	Gated       int // excluded by when:
+	Skipped     int // records held back by on_missing: a deliver's withheld send, or a participant step's skip (SPEC §7/§8)
 	// Missing counts records dispatched with a declared uses: field absent
 	// (on_missing: run, SPEC §7, ADR-053); MissingFields tallies which.
 	Missing       int

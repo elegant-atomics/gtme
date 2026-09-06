@@ -2745,6 +2745,24 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-06 — The receipt names why records failed
+
+**Question:** An armed run of the CSV example with no model key ended
+`fit: 3 in, 0 out, … 3 failed` and `run … failed`, and nothing on the
+receipt said the key was missing — the reason sat in `step_events`
+detail, one `gtme show --run last` away. §8 says every error names its
+fix; a bare count is not an error naming anything.
+**Choice:** `StepStat` tallies failure reasons verbatim from the failed
+event (`FailReasons`), and the receipt prints one line per distinct
+reason after the table — `fit: 3 failed — ai: ANTHROPIC_API_KEY is not
+set (run \`gtme secret set ANTHROPIC_API_KEY\`)` — most frequent first.
+Nothing new is written; the ledger already held the reason.
+**Why:** The receipt is the artifact a first run leaves behind, and the
+first failure a newcomer meets is a missing credential the plan only
+warned about. Spec-invisible: the receipt's step table and its
+annotations are §8's, and this is one more annotation in the slot
+`on_missing` and suppression already use.
+
 ### 2026-09-06 — A deliver preflight under `--simulate` is a counted gap
 
 **Question:** The zero-key demo moved its deliver step from a binding

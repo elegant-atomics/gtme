@@ -17,7 +17,7 @@ source:
   use: apollo/search        # a vendor adapter that is pure YAML — see spec/bindings/
   with:
     query: vp marketing, saas
-    limit: 25
+    limit: 1                  # one person through the whole chain first; raise it once a dry-run receipt reads right
 
 steps:
   - id: fit
