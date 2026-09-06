@@ -405,7 +405,8 @@ relations) into its one gated target.
 
 **Promoted (2026-09-05, ADR-054).** Two kinds of type — subjects and
 signals — and a type is a file discovered like an adapter; `person` and
-`company` become two such files; `post` and `job_posting` are seeded. The
+`company` become two such files; `post` is seeded, and `job_posting` is
+the expected second, brought by the first binding that emits it. The
 association-vs-commitment line above held: associating is a relation
 written by a declared reference field, committing is a delivery into a
 typed group. What this entry named as candidates and ADR-054 declined by

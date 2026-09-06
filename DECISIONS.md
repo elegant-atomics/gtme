@@ -3231,7 +3231,8 @@ compose reads, not rows a person joins to. What passed is one kind:
 signals.
 **Decision:** (1) **Two kinds of type, and a type is a file.** A
 *subject* (`person`, `company`) is what a pipeline delivers to. A
-*signal* (`post`, `job_posting` seeded) is what a pipeline finds and
+*signal* (`post` seeded; `job_posting` the expected second, brought by
+the first binding that needs it) is what a pipeline finds and
 traverses from: keyed on a platform-public identifier, never a delivery
 target, related to a subject. The registry file
 (`spec/fields/<type>.json`, §4a) becomes the type's whole definition: it
@@ -3244,15 +3245,23 @@ fields (the `nh:` fallback, declared where wanted and absent for
 signals). A vendor's record id is never a tier: keying on one forks the
 identity the moment a second vendor arrives, the failure ADR-020 spent a
 packet avoiding. (2) **Types are discovered like adapters; gtme ships the
-floor, not the catalog.** Embedded: `person`, `company`, `post`,
-`job_posting`. Installed: a binding MAY ship `types/<name>.json` beside
-its manifest, `gtme adapters add` installs it to
-`~/.gtme/types/<name>.json`, and an operator MAY put a file there by
-hand. Same name, different content hash is a plan error naming both
-files — the operator picks. The rule of two promotes: a type two verified
-bindings ship moves into the binary and the argument is settled once.
-There is no custom-object verb, schema editor or UI: a type is a file,
-and that is what keeps it from becoming one. (3) **The contract between
+floor, not the catalog.** Three sources, no copying, no verb. Embedded:
+`person`, `company`, `post` — the registry's own rule, grow by demand,
+seeds only the signal a reference binding is about to emit. In place: a
+binding MAY ship `types/<name>.json` beside its manifest, and the planner
+reads it where the binding was installed — the type travels with the
+binding that emits it, under the binding's pin, and leaves with it. By
+hand: an operator MAY place a file in `~/.gtme/types/`. `gtme adapters
+add` adds nothing but the binding; there is no `types add`, since a type
+no adapter emits is a type nothing can use. Embedded names are reserved:
+a binding shipping `person.json`, `company.json` or `post.json` is
+refused by `verify` and never installs, so no binding can redefine how
+people are keyed on an operator's machine. Same name, different content
+across any two sources is a plan error naming both paths. The rule of
+two promotes: a type two verified bindings ship moves into the binary and
+the argument is settled once. There is no custom-object verb, schema
+editor or UI: a type is a file, and that is what keeps it from becoming
+one. (3) **The contract between
 an adapter and a type is three plan-time checks.** For any manifest
 naming an `entity_type`: (a) the name resolves to exactly one type file;
 (b) every static `provides` property is canonical for that type or

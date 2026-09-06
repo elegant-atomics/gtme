@@ -158,7 +158,7 @@ binary (`internal/ledger/migrations/000N_*.sql`), applied at open.
 
 CREATE TABLE identities (
   id           TEXT PRIMARY KEY,          -- ULID
-  entity_type  TEXT NOT NULL,             -- a type file's name (§4a, ADR-054): person | company | post | job_posting embedded; more installed
+  entity_type  TEXT NOT NULL,             -- a type file's name (§4a, ADR-054): person | company | post embedded; more arrive with bindings
   identity_key TEXT NOT NULL,             -- canonical key, see §4
   created_at   TEXT NOT NULL,             -- RFC3339
   UNIQUE(entity_type, identity_key)
@@ -460,7 +460,7 @@ is the registry's `handle` rule: trim, strip a leading `@`, strip a
 adapters agree on field names *and* value shapes (ADR-017). The registry is
 that agreement: a canonical field registry per entity type lives in
 `spec/fields/<entity_type>.json` — `person.json`, `company.json`,
-`post.json`, `job_posting.json` embedded — machine-checkable artifacts,
+`post.json` embedded — machine-checkable artifacts,
 loaded directly by the implementation and the test suite, per ADR-010.
 `spec/schemas/field-registry.schema.json` is the schema for the registry
 files themselves. Since ADR-054 the registry file is the type's whole
@@ -506,7 +506,8 @@ Three tiers:
 **Type files (ADR-054).** Beyond `fields`, a type file declares:
 
 - `kind: subject | signal`. A *subject* (`person`, `company`) is what a
-  pipeline delivers to. A *signal* (`post`, `job_posting`) is what a
+  pipeline delivers to. A *signal* (`post`; `job_posting` is the
+  expected second, brought by the first binding that emits it) is what a
   pipeline finds and traverses from: keyed on a platform-public
   identifier, related to a subject, never the target of a deliver step
   (a deliver manifest naming a signal type is a plan error).
@@ -528,14 +529,21 @@ Three tiers:
   declaration rather than the runner's special case. A referenced
   identity is a ledger fact, never a run member.
 
-**Discovery (ADR-054).** Types are discovered like adapters (§6). The
-binary embeds `person`, `company`, `post`, `job_posting`. A binding MAY
-ship `types/<name>.json` beside its `binding.yaml`; `gtme adapters add`
-installs it to `~/.gtme/types/<name>.json` after `verify` passes, and an
-operator MAY place a file there by hand. Two files of the same name with
-different content are a plan error naming both paths. A type two
-verified registry bindings ship is promoted into the binary (the rule of
-two, below). There is no verb that creates a type: it is a file.
+**Discovery (ADR-054).** Types are discovered like adapters (§6), from
+three sources, with nothing copied and no verb: (1) the binary embeds
+`person`, `company`, `post`; (2) an operator MAY place a file in
+`~/.gtme/types/<name>.json`; (3) a binding MAY ship `types/<name>.json`
+beside its `binding.yaml`, and the planner reads it in place under the
+binding's install directory — the type travels with the binding that
+emits it, under the binding's pin, and leaves with it. `gtme adapters
+add` installs the binding and nothing else. Embedded names are reserved:
+`gtme adapters verify` MUST refuse a binding shipping a type file whose
+name the binary embeds, so nothing installed can redefine how `person`,
+`company` or `post` is keyed. Two files of the same name with different
+content across any two sources are a plan error naming both paths. A
+type two verified registry bindings ship is promoted into the binary
+(the rule of two, below). `gtme adapters verify` prints the type a
+binding ships beside its needs and provides.
 
 **The adapter–type contract (ADR-054).** For every manifest or binding
 naming an `entity_type` (and, for a traverse, a `from`), `gtme plan` and
@@ -2446,9 +2454,10 @@ decided contract, not shipped behavior.
 - **M28 — types and traverse (ADR-054; §3, §4, §4a, §5, §6, §7, §8, §9,
   §10a, §13). Queued.** A type is a file: `spec/fields/*.json` gain
   `kind`, `identity` and per-field `reference`, §4 derivation reads the
-  `identity` list (person and company unchanged in behavior, `post` and
-  `job_posting` seeded), the `url` rule exists, and `~/.gtme/types/` is
-  discovered with `gtme adapters add` installing a binding's `types/`.
+  `identity` list (person and company unchanged in behavior, `post`
+  seeded), the `url` rule exists, and types are discovered from the
+  binary, `~/.gtme/types/`, and each installed binding's `types/` in
+  place; `verify` refuses a binding shipping an embedded type's name.
   The adapter–type contract runs in `plan` and `adapters verify`. The
   `works_at` special case becomes `company_domain`'s declared reference.
   `traverse` is a manifest and binding role with `from` and `relation`;
@@ -2469,8 +2478,10 @@ decided contract, not shipped behavior.
   second traverse back to `person` (engagers) reaches a person already
   in the run and coalesces; a `sql/traverse` over `works_at` yields the
   companies of the run's people; a traverse binding emitting posts with
-  no key fails `plan` and `verify` naming the missing tier; two
-  `types/post.json` with different hashes fail plan naming both; a group
+  no key fails `plan` and `verify` naming the missing tier; a binding
+  shipping `types/post.json` is refused by `verify` as a reserved name;
+  two installed bindings shipping `types/job_posting.json` with different
+  hashes fail plan naming both paths; a group
   source over a `post` group validates field names against `post`; a
   company run ending in a person group fails plan; an existing person
   pipeline plans and runs byte-identically; `once:` treats a parent that
@@ -2790,9 +2801,10 @@ pass that produced them.
 **Added:** §4a type files — `kind: subject | signal`, an ordered
 `identity` tier list §4 now reads, per-field `reference` (the runner
 writes the relation; `works_at` becomes `company_domain`'s declaration),
-discovery from `~/.gtme/types/` and a binding's `types/`, and the
+discovery from the binary, `~/.gtme/types/`, and each installed
+binding's `types/` in place (embedded names reserved), and the
 three-check adapter–type contract run by `plan` and `adapters verify`;
-`post` and `job_posting` seeded. §4 the `url` rule. §6 the `traverse`
+`post` seeded. §4 the `url` rule. §6 the `traverse`
 role with `from` and `relation`; §10a the traverse binding role and
 `sql/traverse`. §7 segment typing, the contract checks, plan's type-change
 and relation-write annotations, and group type checks. §8 the traverse
