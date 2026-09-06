@@ -3255,6 +3255,62 @@ everything else stays honestly `estimated`.
 `credentials_optional` example), §9, §10 item 3; `spec/schemas/`
 manifests ride the build.
 
+### ADR-055: `webhook/source` is deferred — the recipe stands, the adapter does not ship in v0
+**Status:** Proposed (2026-09-06 — from AUDIT.md's deferred (a) item,
+the one place the spec describes an adapter the binary does not contain;
+not accepted until a human merges the packet)
+**Context:** ADR-009 answered "run a pipeline when an event happens"
+without a daemon: a commodity receiver appends payloads to a spool, and a
+scheduled `gtme run` drains it through a `webhook/source` adapter. §8
+documents the recipe, §10 item 8 specifies the adapter, §11 M5 lists it
+among that milestone's acceptance and marks the milestone built, §13
+cites it as the reason no scheduler exists, and README.md and ADAPTERS.md
+list it among what ships. No package, manifest or fixture for it has ever
+existed: AUDIT.md flagged the gap at the reconciliation pass and deferred
+it to the build backlog behind the validation campaign, and nothing since
+has asked for it — eight operator stories, two live campaigns and three
+agent round-trips ran without an event source. ROADMAP.md's `listen`
+entry names the shape events will actually need, a record that
+correlates to an identity rather than minting one, which item 8's
+csv-clone does not attempt. With a public launch ahead, the one claim a
+stranger could falsify in five minutes should be withdrawn by saying so,
+not answered by building the guessed shape.
+**Decision:** (1) **The adapter moves to ROADMAP.md.** `webhook/source`
+leaves §10; the M5 acceptance clause that was never met is struck with a
+note; ADAPTERS.md and README.md stop listing it. (2) **The recipe stands,
+stated as what ships.** A scheduled `gtme run` (cron, launchd, a CI
+schedule) is the v0 answer to events, and a receiver that appends rows to
+a CSV works today through `csv/source`: rows re-source on every run, and
+identity coalescing (§4), the judgment cache (§7) and delivery
+idempotency (§8) make that cheap and safe. What is deferred is the NDJSON
+spool adapter that marks lines consumed. (3) **§13 keeps "no scheduler,
+no daemon"** and cites the scheduled run over a receiver-written file as
+the answer, not an adapter that does not exist. (4) **ADR-009 is not
+retired.** Its decision — spool plus scheduled run, no daemon — still
+governs; only its "add `webhook/source` to the adapter list" spec impact
+is superseded here. (5) **It returns with `listen`.** An event source
+that correlates to identities is one design pass, and the spool adapter
+is its transport; designing the transport first would fix the shape
+before the semantics are decided.
+**Consequences:** Zero code changes — nothing deletes because nothing
+exists — and `make check` is unaffected (`help --agent`'s examples were
+written to avoid the adapter for exactly this reason). The docs stop
+overpromising on the one point that could be checked. The event-driven
+story becomes "scheduled runs over a CSV a receiver writes," which is
+true and shipped. The cost is that a spool re-sources on every run until
+the adapter exists; downstream spend is bounded by the caches.
+**Rejected:** *Building it now* — a near-clone of `csv/source` is a
+day's work, but it builds the event shape ADR-009 guessed at before
+`listen` decides what an event is, and no receipt asks for it. *Leaving
+§10 as it is until it is built* — that is the docs-lying risk this
+closes. *Retiring ADR-009* — the no-daemon decision is right and still
+governs.
+**Spec impact:** AMEND (this packet's second commit) — §8 (the recipe,
+reworded to what ships), §10 (item 8 removed), §10a (the universal
+floor's In set), §11 (M5's unmet clause struck with a note), §13 (the
+no-daemon answer). README.md and ADAPTERS.md drop the adapter. AUDIT.md's
+deferred item closes by reference. ROADMAP.md gains the entry.
+
 ### ADR-054: `traverse` — a run is a sequence of typed segments, and a type is a file
 **Status:** Accepted (2026-09-05 — design session; answers ADR-008's parked
 question and ROADMAP.md's "Entity types" (until this packet, "Object

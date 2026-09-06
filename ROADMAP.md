@@ -73,6 +73,17 @@ implications for identity-key derivation (an event correlates to an
 existing identity rather than minting one) that need their own design pass.
 ADR-054 confirms the reading: an event is not an entity type.
 
+## `webhook/source` — the spool-draining adapter
+
+Deferred by ADR-055 (2026-09-06). ADR-009's shape: a commodity receiver
+appends NDJSON payloads to a spool, and a source adapter drains it,
+marking lines consumed so a re-run never re-sources them. Specified in
+v0, never built, and never asked for across two live campaigns and three
+agent round-trips; the working recipe is a receiver writing CSV rows and
+a scheduled run over `csv/source` (SPEC §8). It returns with `listen`
+above: an event that correlates to an identity rather than minting one is
+one design pass, and this adapter is its transport, not a CSV clone.
+
 ## REPL
 
 Named in the design session as a future interactive surface, not otherwise
