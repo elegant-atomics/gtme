@@ -348,7 +348,7 @@ func (r *runner) prepare(ctx context.Context, st *planner.Step, identityID, toke
 	}
 	fields := rec.Fields()
 	if err := r.validateNeeds(st, fields); err != nil {
-		r.bump(st, func(s *StepStat) { s.Failed++ })
+		r.failStat(st, err.Error())
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), identityID, "failed",
 			map[string]any{"reason": err.Error()}); err != nil {
 			return nil, err
@@ -1397,8 +1397,19 @@ func (r *runner) failItem(ctx context.Context, st *planner.Step, it *item, reaso
 		return nil
 	}
 	it.failed = true
-	r.bump(st, func(s *StepStat) { s.Failed++ })
+	r.failStat(st, reason)
 	return r.l.LogStepEvent(ctx, r.prov(st.ID), it.identityID, "failed", map[string]any{"reason": reason})
+}
+
+// failStat counts a failed record and its reason for the receipt.
+func (r *runner) failStat(st *planner.Step, reason string) {
+	r.bump(st, func(s *StepStat) {
+		s.Failed++
+		if s.FailReasons == nil {
+			s.FailReasons = map[string]int{}
+		}
+		s.FailReasons[reason]++
+	})
 }
 
 // chunkFailed marks every record in a crashed session as failed and returns the
