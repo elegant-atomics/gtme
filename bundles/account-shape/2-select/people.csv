@@ -1,0 +1,9 @@
+email,full_name,title,company_name,company_domain
+jane.doe@acme.com,Jane Doe,VP Marketing,Acme Inc,acme.com
+bob.k@acme.com,Bob Kaplan,CFO,Acme Inc,acme.com
+ann@acme.com,Ann Lee,Marketing Manager,Acme Inc,acme.com
+carl@globex.io,Carl Ng,VP Data,Globex,globex.io
+dana@globex.io,Dana Wu,Head of RevOps,Globex,globex.io
+priya@initech.dev,Priya Nair,Revenue Operations Manager,Initech,initech.dev
+tom@initech.dev,Tom Reyes,Staff Engineer,Initech,initech.dev
+dave@newco.example,Dave Kim,Head of Growth,Newco,newco.example

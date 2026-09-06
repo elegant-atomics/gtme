@@ -1,0 +1,6 @@
+email,full_name,company_domain,event,plan,occurred_at
+jane.doe@acme.com,Jane Doe,acme.com,trial_started,team,2026-09-06T14:02:11Z
+bob@globex.io,Bob Stone,globex.io,trial_started,free,2026-09-06T14:05:40Z
+carol@initech.dev,Carol Ray,initech.dev,invited_teammate,team,2026-09-06T14:09:03Z
+dave@newco.example,Dave Kim,newco.example,trial_started,business,2026-09-06T14:11:57Z
+jane.doe@acme.com,Jane Doe,acme.com,trial_started,team,2026-09-06T14:02:11Z

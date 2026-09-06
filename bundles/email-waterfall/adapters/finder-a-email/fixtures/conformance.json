@@ -1,0 +1,8 @@
+{
+  "note": "Hand-written. finder-a is a fictional vendor; these are the responses its shape implies, not recordings.",
+  "input": {"full_name": "Jane Doe", "company_domain": "acme.com"},
+  "responses": [
+    {"match": "domain=acme.com", "status": 200, "body": {"email": "jane.doe@acme.com", "confidence": 0.93}},
+    {"match": "GET /v1/find", "status": 404, "body": {"error": "not_found"}}
+  ]
+}

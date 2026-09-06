@@ -1,0 +1,13 @@
+{
+  "bundle_format_version": 1,
+  "name": "qualify",
+  "source_run_id": "01M1WCRK8GT8FQ77V65X8EGA2H",
+  "created_at": "2026-09-06T22:17:30.613Z",
+  "gtm_version": "v0.3.0-dirty",
+  "contents": {
+    "pipeline.yaml": "64c2c8683368175a2b233319b84d37fe5c44068fa305b01cfb68d856b6d652aa",
+    "registry/company.json": "56a4a6434fbb77bd24e2fc7f013abb28129a23f2d88d367ae591b9f7230814b5",
+    "registry/person.json": "2666a0850834b1542364a8c5deb7ce27e6033f931fb0fbe74397cb858f3457bc",
+    "registry/post.json": "53962867ce1614f937a16b50dddf736045271d7d6f44d4253d989ac571d63508"
+  }
+}

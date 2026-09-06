@@ -1,0 +1,17 @@
+{
+  "bundle_format_version": 1,
+  "name": "posts-to-engagers",
+  "source_run_id": "01M1WCRJFYCXETP5JMM3EZ7QEN",
+  "created_at": "2026-09-06T22:17:29.879Z",
+  "gtm_version": "v0.3.0-dirty",
+  "contents": {
+    "adapters/harvest-post-reactions/binding.yaml": "cafbfa22d6165eb3a37fa5bbc0980e97b04a3b58cc667baaea95fd02343f4872",
+    "adapters/harvest-post-reactions/fixtures/conformance.json": "cca78b241e70a4556ba7cefcbbec0a1967662c8cfd822a775cf407bdf35402ff",
+    "adapters/harvest-profile-posts/binding.yaml": "b41792d3157f5eeb2c4a67403541060c1bc5df6a9e747e531325d0e85cf9d4fb",
+    "adapters/harvest-profile-posts/fixtures/conformance.json": "c07bd4564e2970383908d94e5c73017c2fbb580d5ea37cd306c65d67b5a9ad6c",
+    "pipeline.yaml": "ea077939a7779153e782503a912a95b3dc8387f465fc8a5e12b90a0af4616f14",
+    "registry/company.json": "56a4a6434fbb77bd24e2fc7f013abb28129a23f2d88d367ae591b9f7230814b5",
+    "registry/person.json": "2666a0850834b1542364a8c5deb7ce27e6033f931fb0fbe74397cb858f3457bc",
+    "registry/post.json": "53962867ce1614f937a16b50dddf736045271d7d6f44d4253d989ac571d63508"
+  }
+}

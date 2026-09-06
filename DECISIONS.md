@@ -2745,6 +2745,75 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-06 — Pattern bundles: five patterns frozen under `bundles/`, and what sits beside a manifest
+
+**Question:** Launch 10 wants the campaign shapes (qualify → group →
+send; an email waterfall; the account shape; events via CSV + cron;
+posts to engagers via a traverse) shipped as runnable bundles — each
+`gtme freeze --bundle` output, each simulating offline from a clean
+checkout, each with a README and its receipt, all proven by CI. Where
+do they live, how are they produced when a `--simulate` run persists
+nothing to freeze from, how does a pattern that is two runs fit a format
+that is one, what travels beside the manifest, and where do the traverse
+bindings no shipped adapter provides come from?
+**Choice:** (1) `bundles/<pattern>/` at the repo root; a chain is a
+folder of numbered bundles (`qualify-group-send/1-qualify`, `2-send`;
+`account-shape/1-` … `4-`), one frozen run each, with the pattern's README
+at the folder root walking the order. (2) `bundles/refreeze.py` (python3
+stdlib, like the fixture adapters) mints the run to freeze from: a
+throwaway home, the pattern's bindings served from their own conformance
+fixtures by a local server (their `base_url` default pointed at it for
+the producing run and restored before the freeze, so the bundle carries
+the binding as authored), AI on the fixture engine, delivery held by
+`--dry-run`, `HTTP(S)_PROXY` at a dead port so no other host is reachable
+(loopback is never proxied), placeholder values for whatever credentials
+the plan reports missing; `--after` runs a chain's earlier bundles armed
+first so their groups exist. It then lays the frozen files over the
+directory and rewrites `receipt.txt` from a fresh `gtme run . --simulate`
+— the receipt a clean checkout sees. (3) Beside the manifest, unlisted:
+`README.md`, `receipt.txt`, and the input CSV. The manifest lists frozen
+files only, so an operator may replace the CSV under the same name and
+the bundle still verifies: the pipeline is frozen, the data is theirs.
+(4) `gtme run . --simulate` from inside the bundle is the documented
+form: `csv/source` opens paths relative to the working directory, and
+`IsBundle(".")` holds. (5) Deliver steps use the built-in Go
+`instantly/add-to-campaign` — it wins resolution over an installed
+binding of the same id, ships in the binary, and takes a campaign
+**id** in these bundles because name resolution is a hard network error
+under the producer's dead proxy while an unreadable campaign by id is a
+preflight `inconclusive … proceeding`. (6) The vendors gtme does not ship
+travel inside the bundle as pattern-local bindings, never as built-ins:
+the waterfall's finders and verifier are fictional (`finder-a/email`,
+`finder-b/email`, `verifier/email-status` on reserved `.example` hosts) —
+the slot is the point; the traverse pattern's `harvest/profile-posts` and
+`harvest/post-reactions` are shaped from HarvestAPI's docs with fixtures
+**hand-written to the documented shape and marked so** in each
+`conformance.json`'s `note`, per the handoff's instruction not to record
+with the stored key unasked. (7) `test/e2e/bundles_test.go` walks every
+`manifest.json` under `bundles/`, refuses one not listed in a chain,
+simulates each (hashes verified, `SIMULATED`, no simulation gap, no
+failed record), diffs the receipt's step table against the committed
+`receipt.txt`, and runs a chain's earlier bundles armed on the fixture
+engine between simulations, asserting no priced cost row but
+`demo/enrich`'s and no delivery but to a group. (8) `START.md` gains a
+"Five patterns, frozen" section after the doors with the tarball fetch
+line (`curl … archive/refs/heads/main.tar.gz | tar xz
+--strip-components=2 gtme-main/bundles/<pattern>`); the four doors are
+unchanged, because a bundle cannot be edited in place and doors 2–4 are
+about editing a file.
+**Why:** Bundles are the SPEC §8 artifact and the handoff's spec for
+Launch 10; every choice above is layout, tooling or test structure.
+The one code change en route is a bug: `bundle.Write` resolved
+`group/deliver` on the adapter path (the first frozen handoff failed
+`unknown adapter "group/deliver"`), the same class as #28's SQL steps —
+fixed with `planner.RunnerOwnedID`, which names every runner-owned id in
+one place, and covered by `TestBundleWithSQLSteps` growing a handoff and
+a `sql/traverse`. Two warts seen and left: a record that fails a step's
+`needs` prints a `file://` schema path into the receipt (the patterns
+gate with a `sql/filter` ahead of the step instead, which is also the
+better pipeline), and a receipt's `avoided` for a cached judgment prints
+`?`.
+
 ### 2026-09-06 — The receipt names why records failed
 
 **Question:** An armed run of the CSV example with no model key ended

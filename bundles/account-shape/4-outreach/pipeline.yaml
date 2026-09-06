@@ -1,0 +1,27 @@
+name: outreach
+version: 1
+source:
+  id: source
+  use: ""
+  group: selected-people
+  limit: 10
+steps:
+  - id: lines
+    use: ai/compose
+    with:
+      prompt: |
+        Write first_line and ps_line for a short intro email to one seat on a buying committee. first_line names their role at the company; ps_line is one low-pressure sentence. No flattery.
+    uses:
+      - full_name
+      - title
+      - company_name
+  - id: send
+    use: instantly/add-to-campaign
+    with:
+      campaign: 11111111-1111-4111-8111-111111111111
+    idempotency: email
+    variables:
+      first_name: full_name
+      personalization: first_line
+      ps_line: ps_line
+group: contacted

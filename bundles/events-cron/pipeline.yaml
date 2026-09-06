@@ -1,0 +1,36 @@
+name: trial-welcome
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    path: events.csv
+steps:
+  - id: paid-trial
+    use: sql/filter
+    with:
+      query: |
+        SELECT e.identity_id FROM current_values e JOIN current_values p ON p.identity_id = e.identity_id
+          AND p.field = 'csv.plan' AND p.value IN ('team', 'business')
+        WHERE e.field = 'csv.event' AND e.value = 'trial_started'
+  - id: lines
+    use: ai/compose
+    with:
+      prompt: |
+        Write first_line and ps_line for a welcome note to someone who just started a paid trial. first_line thanks them by first name and names the plan; ps_line offers one concrete next step. No exclamation marks.
+    when: paid-trial.passed
+    uses:
+      - full_name
+      - company_domain
+      - csv.plan
+  - id: welcome
+    use: instantly/add-to-campaign
+    with:
+      campaign: 11111111-1111-4111-8111-111111111111
+    when: paid-trial.passed
+    idempotency: email
+    variables:
+      first_name: full_name
+      personalization: first_line
+      ps_line: ps_line
+group: welcomed

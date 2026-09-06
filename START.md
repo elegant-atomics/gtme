@@ -207,6 +207,36 @@ repo has the checklist for sharing either kind.
 Done when: `verify` passes and a simulated receipt shows records coming
 out of the new adapter.
 
+## Five patterns, frozen
+
+Past the doors, the shapes campaigns actually take — each a **bundle**
+(`gtme freeze --bundle` output: the exact pipeline that ran, its bindings
+with their fixtures, a manifest of hashes) that simulates offline from a
+clean checkout with no keys and no spend. Each folder's README says what
+the receipt shows and which rung comes next.
+
+| Pattern | Shape |
+|---|---|
+| `qualify-group-send` | a cheap qualifier ⇒ group; a gated sender from the group |
+| `email-waterfall` | finder A → finder B → verifier, falling through on the cache |
+| `account-shape` | companies judged, people gated by their company, a brief per account, bounded outreach |
+| `events-cron` | a CSV a receiver appends to, run on a schedule, replays absorbed |
+| `posts-to-engagers` | people → their posts → who reacted, via two traverses |
+
+```sh
+curl -fsSL https://github.com/elegant-atomics/gtme/archive/refs/heads/main.tar.gz \
+  | tar xz --strip-components=2 gtme-main/bundles/email-waterfall
+cd email-waterfall
+gtme run . --simulate         # $0: hashes verified, served from the fixtures inside
+```
+
+Swap `email-waterfall` for any pattern above (`qualify-group-send` and
+`account-shape` are folders of bundles, run in order — their READMEs walk
+it). A bundle refuses to run if a frozen file is edited; the input CSV
+beside it is not frozen, so put your rows under the same name, or copy
+`pipeline.yaml` out and run the copy. `bundles/README.md` in the repo has
+the rest.
+
 ## Rules for the agent
 
 - **Never arm.** A command without `--simulate` or `--dry-run` on a

@@ -1,0 +1,23 @@
+{
+  "note": "Hand-written from the HarvestAPI docs (post-reactions response schema), not recorded from the API. Reactor URLs are in the id form the docs describe. Bob reacted to Jane's post and is already in the run, so he coalesces; Dave reacted to both posts and coalesces on the second. Record a real, sanitized response over these before trusting the shape live.",
+  "input": {"url": "https://www.linkedin.com/posts/jane-doe_outbound-activity-7123456789"},
+  "responses": [
+    {"match": "jane-doe_outbound", "status": 200, "body": {"status": "ok", "elements": [
+      {"id": "r1", "reactionType": "LIKE", "postId": "7123456789",
+       "actor": {"id": "ACoAAB2x9kQB", "name": "Dave Kim", "linkedinUrl": "https://www.linkedin.com/in/ACoAAB2x9kQB", "position": "Head of Growth at Newco"}},
+      {"id": "r2", "reactionType": "INSIGHTFUL", "postId": "7123456789",
+       "actor": {"id": "ACoAAC7pQmMB", "name": "Erin Park", "linkedinUrl": "https://www.linkedin.com/in/ACoAAC7pQmMB", "position": "Director of Demand Generation, Globex"}},
+      {"id": "r3", "reactionType": "LIKE", "postId": "7123456789",
+       "actor": {"id": "ACoAAD1t0f2B", "name": "Bob Stone", "linkedinUrl": "https://www.linkedin.com/in/bob-stone", "position": "Head of Growth at Globex"}},
+      {"id": "r4", "reactionType": "CELEBRATE", "postId": "7123456789",
+       "actor": {"id": "ACoAAE4v8hJB", "name": "Sam Ortiz", "linkedinUrl": "https://www.linkedin.com/in/ACoAAE4v8hJB", "position": "Technical Recruiter"}}
+    ], "pagination": {"totalPages": 1, "totalElements": 4, "pageNumber": 1, "pageSize": 100}}},
+    {"match": "acme_hiring-revops", "status": 200, "body": {"status": "ok", "elements": [
+      {"id": "r5", "reactionType": "LIKE", "postId": "7123456790",
+       "actor": {"id": "ACoAAB2x9kQB", "name": "Dave Kim", "linkedinUrl": "https://www.linkedin.com/in/ACoAAB2x9kQB", "position": "Head of Growth at Newco"}},
+      {"id": "r6", "reactionType": "SUPPORT", "postId": "7123456790",
+       "actor": {"id": "ACoAAF5w1kLB", "name": "Priya Nair", "linkedinUrl": "https://www.linkedin.com/in/ACoAAF5w1kLB", "position": "Revenue Operations Manager at Initech"}}
+    ], "pagination": {"totalPages": 1, "totalElements": 2, "pageNumber": 1, "pageSize": 100}}},
+    {"match": "GET /linkedin/post-reactions", "status": 200, "body": {"status": "ok", "elements": [], "pagination": {"totalPages": 0, "totalElements": 0, "pageNumber": 1, "pageSize": 100}}}
+  ]
+}

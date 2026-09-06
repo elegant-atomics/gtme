@@ -1,0 +1,29 @@
+name: people-select
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    path: people.csv
+steps:
+  - id: at-qualified-account
+    use: sql/filter
+    with:
+      query: |
+        SELECT r.from_id AS identity_id FROM relations r JOIN group_membership gm ON gm.identity_id = r.to_id AND gm.group_name = 'qualified-accounts' WHERE r.relation = 'works_at'
+  - id: triage
+    use: ai/filter
+    with:
+      prompt: |
+        Keep people who own reporting or the budget for it: marketing, revenue operations, finance. Drop engineers and individual contributors.
+    when: at-qualified-account.passed
+    uses:
+      - full_name
+      - title
+  - id: select
+    use: group/deliver
+    with:
+      group: selected-people
+    idempotency: email
+    variables:
+      name: full_name

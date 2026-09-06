@@ -1,0 +1,16 @@
+$ gtme run . --simulate
+bundle accounts-qualify (frozen from run 01M1WCRM02MANZ8EFXQPRBKYJV) — hashes verified
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCRMHAJWGRMV93V956C0RW (accounts-qualify)
+source [info]: read 4 rows from companies.csv
+source: sourced 4 records
+small-enough: 4 in, 3 out, 0 cached, 1 filtered, 0 failed
+judge: 3 in, 3 out, 0 cached, 0 filtered, 0 failed
+
+run 01M1WCRMHAJWGRMV93V956C0RW — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step          adapter     in  out  empty  cached  filtered  failed  cost  avoided
+source        csv/source  0   4    -      0       -         -       $0    -
+small-enough  sql/filter  4   3    -      0       1         -       $0    -
+judge         ai/filter   3   3    -      0       -         -       $0    -
+group "qualified-accounts": 3 record(s) would be added (held back — simulated run)
+total: $0 (estimated) spent

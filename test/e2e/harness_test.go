@@ -102,10 +102,17 @@ const commandTimeout = 60 * time.Second
 // runWithEnv runs gtme with extra environment entries and optional stdin.
 func (h *harness) runWithEnv(extraEnv []string, stdin string, args ...string) result {
 	h.t.Helper()
+	return h.runIn(h.work, extraEnv, stdin, args...)
+}
+
+// runIn is runWithEnv from another working directory — a bundle's, so its
+// relative input paths resolve the way an operator's `cd` makes them.
+func (h *harness) runIn(dir string, extraEnv []string, stdin string, args ...string) result {
+	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, gtmBin, args...)
-	cmd.Dir = h.work
+	cmd.Dir = dir
 	cmd.Env = append(h.env(), extraEnv...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)

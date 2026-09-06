@@ -1,0 +1,18 @@
+$ gtme run . --simulate
+bundle qualify (frozen from run 01M1WCRK8GT8FQ77V65X8EGA2H) — hashes verified
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCRKS5YX4061201SR3BPAD (qualify)
+source [info]: read 8 rows from people.csv
+source: sourced 8 records
+score: 8 in, 8 out, 0 cached, 0 filtered, 0 failed
+worth-a-model-call: 8 in, 5 out, 0 cached, 3 filtered, 0 failed
+fit: 5 in, 5 out, 0 cached, 0 filtered, 0 failed
+
+run 01M1WCRKS5YX4061201SR3BPAD — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step                adapter      in  out  empty  cached  filtered  failed  cost     avoided
+source              csv/source   0   8    -      0       -         -       $0       -
+score               demo/enrich  8   8    -      0       -         -       $0.0800  -
+worth-a-model-call  sql/filter   8   5    -      0       3         -       $0       -
+fit                 ai/filter    5   5    -      0       -         -       $0       -
+group "qualified": 5 record(s) would be added (held back — simulated run)
+total: $0.0800 (estimated) spent

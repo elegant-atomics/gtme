@@ -9,3 +9,6 @@ TRANSCRIPT-*
 DECISIONS-SEED*.md
 HANDOFF.md
 NOTES.md
+
+# An armed run of a pattern bundle with a csv/deliver step writes beside it.
+bundles/**/out.csv

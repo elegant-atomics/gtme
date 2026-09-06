@@ -1,0 +1,80 @@
+# harvest/profile-posts — a person's recent LinkedIn posts via HarvestAPI,
+# as a traverse (SPEC §6, ADR-054): one GET per person, records of type post
+# out, each written authored_by → its author. Shaped from the docs
+# (https://docs.harvestapi.io/linkedin-api-reference/profile/profile-posts);
+# the fixtures beside it are hand-written to that shape, not recorded — see
+# fixtures/conformance.json. Verify against a live response before an armed
+# run: `gtme adapters verify harvest/profile-posts` after recording one.
+#
+# Endpoint: GET https://api.harvestapi.io/linkedin/profile-posts?profile=...
+# Auth:     X-API-Key header
+id: harvest/profile-posts
+version: 1
+role: traverse
+from: person
+entity_type: post
+relation: { name: authored_by, from: record }
+
+needs:
+  type: object
+  required: [linkedin_url]
+  properties:
+    linkedin_url: { type: string }
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    url: { type: string }
+    text: { type: string }
+    published_at: { type: string }
+    likes: { type: integer }
+    comments: { type: integer }
+    reposts: { type: integer }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    posted_limit:
+      type: string
+      description: How far back to read (the vendor's postedLimit — 24h, week, month)
+      default: month
+    base_url:
+      type: string
+      default: "https://api.harvestapi.io"
+      description: Override the API host (testing)
+
+credentials: [HARVEST_API_KEY]
+cost_estimate_usd: 0.01
+
+auth:
+  type: header
+  name: X-API-Key
+  env: HARVEST_API_KEY
+
+request:
+  method: GET
+  url: "{{config.base_url}}/linkedin/profile-posts"
+  query:
+    profile: "{{record.linkedin_url}}"
+    postedLimit: "{{config.posted_limit}}"
+
+extract:
+  records: elements
+  fields:
+    url: { path: linkedinUrl, transform: url }
+    text: content
+    published_at: postedAt.date
+    likes: { path: engagement.likes, absent: [0] }
+    comments: { path: engagement.comments, absent: [0] }
+    reposts: { path: engagement.shares, absent: [0] }
+
+errors:
+  "404":
+    verdict: skip
+    reason: profile not found
+
+cost:
+  per: request
+  amount_usd: 0.01

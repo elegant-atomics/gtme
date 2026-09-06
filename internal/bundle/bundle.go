@@ -79,10 +79,10 @@ func Write(dir string, p *pipeline.Pipeline, sourceRunID, gtmVersion, createdAt 
 		if strings.TrimSpace(s.Use) == "" {
 			continue // a group source references ledger state, not an adapter
 		}
-		if s.Use == planner.SQLTransformID || s.Use == planner.SQLFilterID {
-			// Runner-owned SQL steps (SPEC §10a) resolve to executors inside the
-			// gtme binary, not to entries on the adapter path; their query already
-			// travels in pipeline.yaml (#28).
+		if planner.RunnerOwnedID(s.Use) {
+			// Runner-owned steps — sql/* (SPEC §10a) and group/deliver (§8) —
+			// resolve to executors inside the gtme binary, not to entries on the
+			// adapter path; their config already travels in pipeline.yaml (#28).
 			continue
 		}
 		res, err := adapters.Resolve(s.Use)

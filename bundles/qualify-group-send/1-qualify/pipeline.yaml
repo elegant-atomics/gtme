@@ -1,0 +1,33 @@
+name: qualify
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    columns:
+      company_domain: Company Website
+      company_name: Company
+      email: Email
+      full_name: Full Name
+      title: Title
+    path: people.csv
+steps:
+  - id: score
+    use: demo/enrich
+    with:
+      cost_per_record_usd: 0.01
+  - id: worth-a-model-call
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values WHERE field = 'demo.score' AND CAST(value AS INTEGER) >= 50
+  - id: fit
+    use: ai/filter
+    with:
+      prompt: |
+        Keep people who own or influence the outbound tooling budget: marketing, growth, demand generation and revenue operations leaders. Drop engineers, recruiters and anyone whose title says they are not on the go-to-market side.
+    when: worth-a-model-call.passed
+    uses:
+      - title
+      - company_name
+group: qualified

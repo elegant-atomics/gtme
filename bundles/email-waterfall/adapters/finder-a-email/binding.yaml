@@ -1,0 +1,61 @@
+# finder-a/email — a stand-in email finder. The vendor is fictional (the
+# .example domain is reserved for exactly this); the shape is the common one:
+# one GET per person, the address in the response, 404 when the vendor has
+# nothing. Replace it with your finder's binding — `gtme help --bindings`
+# prints the contract — and keep the pipeline as it is.
+id: finder-a/email
+version: 1
+role: enrich
+entity_type: person
+
+needs:
+  type: object
+  required: [full_name, company_domain]
+  properties:
+    full_name: { type: string }
+    company_domain: { type: string }
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    email: { type: string }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    base_url:
+      type: string
+      default: "https://api.finder-a.example"
+      description: Override the API host (testing)
+
+credentials: [FINDER_A_API_KEY]
+freshness_days: 30
+cost_estimate_usd: 0.005
+
+auth:
+  type: header
+  name: X-API-Key
+  env: FINDER_A_API_KEY
+
+request:
+  method: GET
+  url: "{{config.base_url}}/v1/find"
+  query:
+    name: "{{record.full_name}}"
+    domain: "{{record.company_domain}}"
+
+extract:
+  records: "."
+  fields:
+    email: { path: email, transform: email }
+
+errors:
+  "404":
+    verdict: skip
+    reason: no address on file
+
+cost:
+  per: record
+  amount_usd: 0.005

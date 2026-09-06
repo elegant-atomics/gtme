@@ -1,0 +1,42 @@
+$ gtme run . --simulate
+bundle outreach (frozen from run 01M1WCVF6KA7HT93CHGYD11W73) — hashes verified
+simulate: ignoring missing credentials (step "send": missing credential INSTANTLY_API_KEY (set it in the environment or run `gtme secret set INSTANTLY_API_KEY`))
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCVFRQRK6S5VMCKGKVF9AE (outreach)
+source: sourced 6 members of group "selected-people" (limit 10, oldest first)
+lines: 6 in, 6 out, 0 cached, 0 filtered, 0 failed
+send: 6 in, 0 out, 0 cached, 0 filtered, 0 failed, 6 held (dry run)
+
+run 01M1WCVFRQRK6S5VMCKGKVF9AE — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step    adapter                    in  out  empty  cached  filtered  failed  cost  avoided
+source  group:selected-people      0   6    -      0       -         -       $0    -
+lines   ai/compose                 6   6    -      0       -         -       $0    -
+send    instantly/add-to-campaign  6   0    -      0       -         -       $0    -
+group "contacted": 6 record(s) would be added (held back — simulated run)
+send: preflight skipped — the target is not read under --simulate; --dry-run checks it
+send: resolved variables for 6 record(s) — review, then run again without --dry-run to arm:
+  jane.doe@acme.com
+    first_name: "Jane Doe"
+    personalization: "Fixture first line for jane.doe@acme.com"
+    ps_line: "Fixture ps line for jane.doe@acme.com"
+  bob.k@acme.com
+    first_name: "Bob Kaplan"
+    personalization: "Fixture first line for bob.k@acme.com"
+    ps_line: "Fixture ps line for bob.k@acme.com"
+  ann@acme.com
+    first_name: "Ann Lee"
+    personalization: "Fixture first line for ann@acme.com"
+    ps_line: "Fixture ps line for ann@acme.com"
+  priya@initech.dev
+    first_name: "Priya Nair"
+    personalization: "Fixture first line for priya@initech.dev"
+    ps_line: "Fixture ps line for priya@initech.dev"
+  tom@initech.dev
+    first_name: "Tom Reyes"
+    personalization: "Fixture first line for tom@initech.dev"
+    ps_line: "Fixture ps line for tom@initech.dev"
+  dave@newco.example
+    first_name: "Dave Kim"
+    personalization: "Fixture first line for dave@newco.example"
+    ps_line: "Fixture ps line for dave@newco.example"
+total: $0 (estimated) spent

@@ -1,0 +1,53 @@
+# verifier/email-status — a stand-in verifier (fictional vendor, reserved
+# .example domain). One GET per address; the status lands in the canonical
+# email_status field, which is what the sql/filter after it reads. Replace
+# with your verifier's binding; the values your vendor uses go in the filter.
+id: verifier/email-status
+version: 1
+role: enrich
+entity_type: person
+
+needs:
+  type: object
+  required: [email]
+  properties:
+    email: { type: string }
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    email_status: { type: string }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    base_url:
+      type: string
+      default: "https://api.verifier.example"
+      description: Override the API host (testing)
+
+credentials: [VERIFIER_API_KEY]
+freshness_days: 30
+cost_estimate_usd: 0.003
+
+auth:
+  type: header
+  name: X-API-Key
+  env: VERIFIER_API_KEY
+
+request:
+  method: GET
+  url: "{{config.base_url}}/verify"
+  query:
+    email: "{{record.email}}"
+
+extract:
+  records: "."
+  fields:
+    email_status: status
+
+cost:
+  per: record
+  amount_usd: 0.003

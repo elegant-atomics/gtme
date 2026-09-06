@@ -1,0 +1,71 @@
+{
+  "entity_type": "post",
+  "version": 1,
+  "kind": "signal",
+  "description": "Canonical field registry for post records (SPEC.md §4a, ADR-054): a signal type — something a pipeline finds and traverses from, never delivers to. Keyed on the platform-public URL and nothing else: a post without a URL is not a post the ledger can hold, so a signal declares no hash tier. Seeded with the first traverse binding; grows by demand under the rule of two.",
+  "identity": [
+    {
+      "field": "url"
+    }
+  ],
+  "fields": [
+    {
+      "name": "url",
+      "tier": "identity",
+      "type": "string",
+      "format": "uri",
+      "normalization": "url",
+      "description": "The post's platform-public URL — the one key tier (SPEC.md §4, the url rule: scheme and host lowercased, fragment and trailing slash dropped, path and query kept).",
+      "example": "https://www.linkedin.com/posts/jane-doe_outbound-activity-7123456789"
+    },
+    {
+      "name": "platform",
+      "tier": "core",
+      "type": "string",
+      "normalization": "lower",
+      "description": "The platform the post lives on, lowercased. No locked value domain yet (rule of two).",
+      "example": "linkedin"
+    },
+    {
+      "name": "text",
+      "tier": "core",
+      "type": "string",
+      "normalization": "trim",
+      "description": "The post's body text, as published.",
+      "example": "We just shipped …"
+    },
+    {
+      "name": "published_at",
+      "tier": "core",
+      "type": "string",
+      "format": "date-time",
+      "normalization": "trim",
+      "description": "When the post was published, RFC3339.",
+      "example": "2026-09-01T14:30:00Z"
+    },
+    {
+      "name": "likes",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Reaction count at read time.",
+      "example": 42
+    },
+    {
+      "name": "comments",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Comment count at read time.",
+      "example": 7
+    },
+    {
+      "name": "reposts",
+      "tier": "core",
+      "type": "integer",
+      "normalization": "none",
+      "description": "Repost/share count at read time.",
+      "example": 3
+    }
+  ]
+}

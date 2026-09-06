@@ -1,0 +1,29 @@
+$ gtme run . --simulate
+bundle posts-to-engagers (frozen from run 01M1WCRJFYCXETP5JMM3EZ7QEN) — hashes verified
+simulate: ignoring missing credentials (2 plan problems:
+  - step "posts": missing credential HARVEST_API_KEY (set it in the environment or run `gtme secret set HARVEST_API_KEY`)
+  - step "engagers": missing credential HARVEST_API_KEY (set it in the environment or run `gtme secret set HARVEST_API_KEY`))
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCRK299VK4DZN30ZGFZ7RQ (posts-to-engagers)
+source [info]: read 3 rows from people.csv
+source: sourced 3 records
+has-profile: 3 in, 2 out, 0 cached, 1 filtered, 0 failed
+posts [info]: harvest/profile-posts: 1 records
+posts [info]: harvest/profile-posts: 2 records
+posts: 2 in, 2 out, 0 cached, 0 filtered, 0 failed — 2 traversed (post), 1 coalesced
+engagers [info]: harvest/post-reactions: 2 records
+engagers [info]: harvest/post-reactions: 4 records
+engagers: 2 in, 2 out, 0 cached, 0 filtered, 0 failed — 4 traversed (person), 2 coalesced
+worth-a-look: 5 in, 5 out, 0 cached, 0 filtered, 0 failed
+
+run 01M1WCRK299VK4DZN30ZGFZ7RQ — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step          adapter                 in  out  empty  cached  filtered  failed  cost     avoided
+source        csv/source              0   3    -      0       -         -       $0       -
+has-profile   sql/filter              3   2    -      0       1         -       $0       -
+posts         harvest/profile-posts   2   2    -      0       -         -       $0.0200  -
+engagers      harvest/post-reactions  2   2    -      0       -         -       $0.0200  -
+worth-a-look  ai/filter               5   5    -      0       -         -       $0       -
+group "warm-engagers": 5 record(s) would be added (held back — simulated run)
+posts: 2 parent(s) in, 2 out, 0 empty — 2 traversed (post), 1 coalesced
+engagers: 2 parent(s) in, 2 out, 0 empty — 4 traversed (person), 2 coalesced
+total: $0.0400 (estimated) spent

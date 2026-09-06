@@ -1,0 +1,77 @@
+# harvest/post-reactions — who reacted to a LinkedIn post, via HarvestAPI,
+# as a traverse back to people (SPEC §6, ADR-054): one GET per post, person
+# records out, each written engaged_with → the post. A reactor who is
+# already in the run (an author, say) coalesces instead of minting twice.
+# Shaped from the docs
+# (https://docs.harvestapi.io/linkedin-api-reference/post/post-reactions);
+# the fixtures beside it are hand-written to that shape, not recorded. The
+# docs say reactor profile URLs usually come in id form (/in/ACoAAB…), not
+# public slugs — the fixtures reflect that, and it is why the pipeline
+# keeps these people by the internal-url tier (the registry's `linkedin`
+# rule sorts an id-form URL into linkedin_internal_url) and lets a later
+# harvest/profile fill the rest.
+#
+# Endpoint: GET https://api.harvestapi.io/linkedin/post-reactions?post=...
+# Auth:     X-API-Key header
+id: harvest/post-reactions
+version: 1
+role: traverse
+from: post
+entity_type: person
+relation: { name: engaged_with, from: record }
+
+needs:
+  type: object
+  required: [url]
+  properties:
+    url: { type: string }
+
+provides:
+  type: object
+  additionalProperties: false
+  properties:
+    linkedin_url: { type: string }
+    linkedin_internal_url: { type: string }
+    full_name: { type: string }
+    headline: { type: string }
+    harvest.reaction_type: { type: string }
+
+config_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    base_url:
+      type: string
+      default: "https://api.harvestapi.io"
+      description: Override the API host (testing)
+
+credentials: [HARVEST_API_KEY]
+cost_estimate_usd: 0.01
+
+auth:
+  type: header
+  name: X-API-Key
+  env: HARVEST_API_KEY
+
+request:
+  method: GET
+  url: "{{config.base_url}}/linkedin/post-reactions"
+  query:
+    post: "{{record.url}}"
+
+extract:
+  records: elements
+  fields:
+    linkedin_url: { path: actor.linkedinUrl, transform: linkedin }
+    full_name: actor.name
+    headline: actor.position
+    harvest.reaction_type: reactionType
+
+errors:
+  "404":
+    verdict: skip
+    reason: post not found
+
+cost:
+  per: request
+  amount_usd: 0.01

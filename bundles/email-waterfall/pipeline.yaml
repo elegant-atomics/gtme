@@ -1,0 +1,42 @@
+name: email-waterfall
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    columns:
+      company_domain: Company Website
+      full_name: Full Name
+      linkedin_url: LinkedIn URL
+      title: Title
+    path: people.csv
+steps:
+  - id: finder-a
+    use: finder-a/email
+    cache: 30d
+  - id: finder-b
+    use: finder-b/email
+    cache: 30d
+  - id: found
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values WHERE field = 'email' AND value != ''
+  - id: verify
+    use: verifier/email-status
+    when: found.passed
+    cache: 30d
+  - id: deliverable
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values WHERE field = 'email_status' AND value = 'valid'
+  - id: out
+    use: csv/deliver
+    with:
+      path: out.csv
+    idempotency: email
+    variables:
+      email: email
+      name: full_name
+      status: email_status
