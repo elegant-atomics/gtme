@@ -2745,6 +2745,74 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-05 — M28 internals: types and traverse (ADR-054)
+
+**Question:** How does a type file express §4's name fallback without
+code, how does the runner know which records belong to the segment after
+a traverse, how does a child RECORD say which parent it came from, what
+happens to a group that predates types, where does a reference get
+written, what vocabulary does a SQL step validate against after a
+traverse, and what does plan print so the graph a run builds is visible?
+**Choice:** (1) **A hash tier is a list of components, the first
+required.** A component is a field name, `{any: […]}` — the first
+alternative that yields a value — or `{join: […]}` — the named fields'
+values joined with a space, present only when every one is. Values are
+normalized, lowercased with whitespace collapsed, joined with `|` and
+sha256-hashed under the tier's prefix; the first component MUST yield or
+the tier yields nothing, and later components contribute their value or
+an empty string. `person.json` declares `{hash: [{any: [full_name,
+{join: [first_name, last_name]}]}, company_domain], prefix: "nh:"}`,
+which is §4's `sha256(lower(full_name) + "|" + lower(company_domain))`
+exactly, plus the first+last form the old Go path already accepted;
+the golden keys are byte-identical. The domain is a salt, never a key on
+its own, which is what first-required encodes. (2) **The segment after a
+traverse is derived from the traverse's own events, not a column.** A
+record is eligible for the step after a traverse when its state is the
+traverse *and* it appears among that traverse's `traversed`/`coalesced`
+step events. Parents finished at the traverse share the state string, and
+in the same-type case ADR-054 (6) allows (people to their coworkers) they
+share the type too, so neither state nor type can separate parents from
+children; the events can, and they exist already for ADR-053's accounting.
+No migration, no `run_records` column. (3) **One parent per session is
+the wire's parent attribution.** A traverse dispatches one parent per
+adapter session; every RECORD the session emits is that parent's child.
+A child RECORD carries no parent reference on the wire — ADR-054 kept §5
+unchanged — so the session is the attribution. The cost is a session per
+parent, which is what an enrich pays per record already. (4) **A legacy
+untyped group stays untyped on its first write.** `EnsureGroup` keeps
+whatever type a group has, null included; a terminus or `group/deliver`
+writing into an old group does not type it, and only `gtme groups add
+--type` does, once. ADR-054 (8) says so, and the alternative — a run's
+first write deciding a fact the operator never reviewed — is the kind of
+silent decision groups exist to prevent. The handoff named this as a
+likely ask; the conformant reading was cheap enough to keep. (5)
+**References are written wherever their field lands.** `writeReferences`
+runs after every field write — a source row, an enrich, a transform —
+not only at the source: `company_domain` arrives from `apollo/enrich`,
+not from the search, which is why the old `relateCompany` fired after
+enrich. A referenced identity that cannot be keyed is skipped, not a
+record failure — the old rule, kept. (6) **A SQL step takes its
+segment's type.** `sql/transform`, `sql/filter` and `sql/traverse`
+validate `uses:`/`provides:` against the registry of the segment they
+sit in; before this they were validated against the source's type,
+which is the wrong vocabulary after a traverse. An entity-blind pipeline
+leaves the type empty and the check open, as for any step. (7) **Plan
+prints the graph.** Every step gets an `entity:` line (`(untyped group —
+entity-blind)` for a legacy group source); a step whose provides carry a
+reference field prints `writes: works_at → company (from
+company_domain)`; a traverse prints its type change with the relation
+and, with `limit:`, `1 child(ren) per parent (engine-owned)`; a
+cross-segment `when:` fails naming the step it precedes and the fix
+(`gate at the traverse instead`); a `from` mismatch names both types
+(`mock/engagers traverses from post, but the records here are person`).
+**Why:** Each choice makes something derivable from a fact the ledger
+or the plan already holds — the traverse's events, the session, the
+group row, the segment — rather than adding a column, a wire field or a
+flag to carry it. (1) is the one place the schema grew past the ADR's
+text: the ADR said a hash names fields, and the person fallback cannot
+be said that way without losing the first+last case, so the type-file
+schema admits the component forms and §4a now describes them.
+
 ### 2026-09-04 — M27 internals: record accounting (ADR-053)
 
 **Question:** What exactly is `empty`, what exactly is a coalesce, what

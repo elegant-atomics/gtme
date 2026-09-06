@@ -16,7 +16,7 @@
 
 CREATE TABLE identities (
   id           TEXT PRIMARY KEY,          -- ULID
-  entity_type  TEXT NOT NULL,             -- 'person' | 'company' (extensible)
+  entity_type  TEXT NOT NULL,             -- a type file's name (§4a, ADR-054): person | company | post embedded; more arrive with bindings
   identity_key TEXT NOT NULL,             -- canonical key, see §4
   created_at   TEXT NOT NULL,             -- RFC3339
   UNIQUE(entity_type, identity_key)

@@ -515,8 +515,16 @@ Three tiers:
   {field: linkedin_url}, {field: github_username, prefix: "gh:"}, …,
   {hash: [full_name, company_domain], prefix: "nh:"}]`. Each `field`
   entry names a registry field in this file whose `normalization` is one
-  of `email`, `domain`, `linkedin_url`, `handle`, `url`; a `hash` entry
-  names fields whose lowercased values are joined with `|` and hashed.
+  of `email`, `domain`, `linkedin_url`, `handle`, `url`. A `hash` entry
+  lists components, the first required: a component is a field name,
+  `{any: [component, …]}` (the first alternative that yields a value), or
+  `{join: [field, …]}` (the named fields' values joined with a space,
+  present only when every one is); the components' normalized values,
+  lowercased with whitespace collapsed, are joined with `|` and
+  sha256-hashed under the tier's prefix, later components contributing
+  their value or an empty string. `person`'s fallback is `{hash: [{any:
+  [full_name, {join: [first_name, last_name]}]}, company_domain], prefix:
+  "nh:"}` — §4's name-hash, the domain a salt and never a key on its own.
   The fields the tiers name are the file's `tier: identity` fields.
 - `reference` (optional, per field): `{type: <type>, relation: <name>,
   fields: [<name>, …]}` — a record carrying this field also names an
@@ -2796,6 +2804,14 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.44 — 2026-09-06 (bookkeeping after M28)
+**Changed:** §4a describes the hash-tier component forms the type-file
+schema already admits (`{any: […]}`, `{join: […]}`, first required),
+which v0.43 named only in the changelog. The 2026-09-05 M28 internals
+decision v0.43 pointed at is now actually recorded in DECISIONS.md.
+`spec/ledger.sql`'s comment on `identities.entity_type` matches §3. No
+behavior changes.
 
 ### v0.43 — 2026-09-05 (M28 build: types and traverse, built)
 **Changed:** §11 M28 marked built. No normative text changed beyond that.
