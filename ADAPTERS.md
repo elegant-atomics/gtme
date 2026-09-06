@@ -23,10 +23,11 @@ Three kinds appear below:
 |---|---|---|---|
 | `csv/source` | source | process (built-in) | rows from a CSV, with `columns:` ingress mapping |
 | `webhook/source` | source | process (built-in) | drains a spool file written by any webhook receiver |
-| `source: {group: …}` | source | runner-owned | a group's current members, projected from the ledger |
+| `source: {group: …}` | source | runner-owned | a typed group's current members, projected from the ledger |
 | `apollo/search` | source | **binding** | Apollo people search, paginated |
 | `harvest/profile` | enrich | process (built-in) | LinkedIn profile via HarvestAPI |
 | `http/enrich` | enrich | engine-inline | fetch any URL per record → markdown field or JSON extraction |
+| `sql/traverse` | traverse | runner-owned | follow a relation the ledger already holds into records of another type |
 | `sql/transform` | enrich | runner-owned | derive fields with a read-only SELECT over the ledger — per-record or cross-record |
 | `ai/filter` | filter | process (built-in) | LLM judgment → pass/fail verdicts with reasons |
 | `sql/filter` | filter | runner-owned | deterministic verdicts from a SQL predicate |
@@ -43,7 +44,8 @@ Three kinds appear below:
 Every adapter — binding or process — presents the same three things to the
 runner: a **contract** (`needs`/`provides` as JSON Schema over canonical
 field names), a **config schema** (what its `with:` block accepts), and a
-**role** (source, enrich, filter, verify, compose, deliver). That's all
+**role** (source, traverse, enrich, filter, verify, compose, review,
+deliver). That's all
 `gtme plan` sees, which is why it can validate a whole pipeline without
 caring how any step is implemented. At run time the runner projects
 exactly the declared fields into the adapter, validates whatever comes
@@ -59,7 +61,7 @@ annotated:
 ```yaml
 id: jsonplaceholder/users     # how pipelines name it: use: jsonplaceholder/users
 version: 1
-role: source                  # source | enrich | deliver
+role: source                  # source | traverse | enrich | deliver
 entity_type: person
 
 provides:                     # the contract — plan validates downstream
@@ -170,8 +172,16 @@ source:
 ```
 
 No adapter, no `use:` — the runner projects the group's current members
-(people and companies alike) straight from the ledger. The consuming half
-of the qualify/send decomposition. The group must exist at plan time.
+straight from the ledger. The consuming half of the qualify/send
+decomposition. The group must exist at plan time.
+
+A group carries the entity type of its members (ADR-054), set when it is
+created — by the terminus or `group/deliver` that first wrote to it, or
+by `gtme groups add NAME --type TYPE` — and adding a member of another
+type is refused. The pipeline takes that type, so field names after a
+group source are validated like anywhere else. A group created before
+types existed has none, and a pipeline sourcing from it is entity-blind
+until `--type` sets it; `gtme plan` says so.
 
 ### `apollo/search` — binding
 
@@ -182,6 +192,51 @@ absent (never an identity key), domain fallback from `primary_domain` to
 `website_url`. Config: `query` or `titles`/`seniorities`/`locations`/
 `domains`, plus `limit`. Credential: `APOLLO_API_KEY`. The whole adapter
 is [~150 lines of YAML](spec/bindings/apollo-search/binding.yaml).
+
+## Traversers
+
+A traverse changes the run's entity type: records of one type in, records
+of another — or the same — type out, each related to the record that
+produced it (ADR-054). Only the new type moves forward; the parents are
+finished at the traverse. So a pipeline is a sequence of typed segments,
+every step is validated against the type of its segment, and `when:` may
+only name a step in the same one — gate at the traverse itself to skip a
+parent's children. `gtme plan` prints each crossing with the relation it
+writes. A vendor traverse fetches records the ledger has never seen;
+`sql/traverse` follows edges it already holds.
+
+### `sql/traverse`
+
+The runner-owned traverse: one read-only, timeboxed SELECT yielding
+`identity_id` (the children, of the step's declared `entity_type`) and
+`parent_id` (the run's current records). It follows a relation the ledger
+already holds, so it mints nothing, writes no relation, and costs
+nothing.
+
+```yaml
+- id: to-company
+  use: sql/traverse
+  with:
+    entity_type: company
+    query: >
+      SELECT r.to_id AS identity_id, r.from_id AS parent_id
+      FROM relations r WHERE r.relation = 'works_at'
+```
+
+### A vendor traverse
+
+Records that are not in the ledger yet have to be fetched, so a vendor
+traverse is source-shaped with two additions: `from:` (the input type,
+which must equal the segment it sits in) and `relation:` (the edge
+written between each emitted record and its parent, and which end it
+starts at). Its request templates per parent from `{{record.<field>}}`
+placeholders, which are also its needs; `entity_type:` is the type it
+*emits*; `limit:` caps children per parent. A binding may ship the type
+it emits as `types/<name>.json` beside `binding.yaml`, read in place —
+never one of the names the binary embeds. gtme ships no vendor traverse
+today; `gtme help --bindings` is the contract to author one against.
+
+---
 
 ## Enrichers
 

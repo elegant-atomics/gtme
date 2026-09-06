@@ -11,7 +11,7 @@ is kept as the trail from the name to the ADR that answered it, and to
 hold whatever it named that is *still* open. Read those for history, not
 for what is coming.
 
-## `expand` role
+## `expand` role — BUILT as `traverse`
 
 DECISIONS.md ADR-008. A pipeline step that takes one record in and emits N
 records out — possibly of a different `entity_type` — writing `relations`
@@ -378,7 +378,7 @@ declared workflow identity should ever enter the cache key — so a changed
 process re-judges without `respend:` — is the question, and it waits for
 a real multi-pass agent to have been used.
 
-## Entity types — beyond person and company (until 2026-09-05, "Object ontology")
+## Entity types — beyond person and company — BUILT
 
 §4 derives identity for exactly two entity types; the binding schema
 deliberately keeps `entity_type` an open string, and plan/verify now
@@ -403,7 +403,9 @@ target is the routing key in disguise and stays refused. A later
 pipeline can always source *from* the association (`{query:}` over
 relations) into its one gated target.
 
-**Promoted (2026-09-05, ADR-054).** Two kinds of type — subjects and
+**Promoted (2026-09-05, ADR-054; built as M28, spec v0.43).** This
+section was "Object ontology" until that packet retired the word. Two
+kinds of type — subjects and
 signals — and a type is a file discovered like an adapter; `person` and
 `company` become two such files; `post` is seeded, and `job_posting` is
 the expected second, brought by the first binding that emits it. The
