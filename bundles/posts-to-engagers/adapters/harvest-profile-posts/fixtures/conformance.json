@@ -1,0 +1,33 @@
+{
+  "note": "Hand-written from the HarvestAPI docs (profile-posts response schema), not recorded from the API. Two people have posts; one post is on both profiles as a repost, so the second parent coalesces it. Record a real, sanitized response over these before trusting the shape live.",
+  "input": {"linkedin_url": "https://www.linkedin.com/in/jane-doe"},
+  "responses": [
+    {"match": "jane-doe", "status": 200, "body": {"status": "ok", "elements": [
+      {"id": "7123456789", "linkedinUrl": "https://www.linkedin.com/posts/jane-doe_outbound-activity-7123456789",
+       "content": "We cut our outbound tooling bill in half by caching every enrichment we pay for. The receipt tells the story better than the dashboard ever did.",
+       "author": {"name": "Jane Doe", "linkedinUrl": "https://www.linkedin.com/in/jane-doe", "publicIdentifier": "jane-doe"},
+       "postedAt": {"date": "2026-09-01T14:30:00Z", "postedAgoText": "5 days ago"},
+       "engagement": {"likes": 42, "comments": 7, "shares": 3}},
+      {"id": "7123456790", "linkedinUrl": "https://www.linkedin.com/posts/acme_hiring-revops-activity-7123456790",
+       "content": "Acme is hiring a RevOps lead. If you have opinions about attribution, we want to hear them.",
+       "author": {"name": "Acme Inc", "linkedinUrl": "https://www.linkedin.com/company/acme", "universalName": "acme"},
+       "postedAt": {"date": "2026-08-28T09:12:00Z", "postedAgoText": "1 week ago"},
+       "engagement": {"likes": 18, "comments": 2, "shares": 6},
+       "repostedBy": {"name": "Jane Doe", "linkedinUrl": "https://www.linkedin.com/in/jane-doe", "publicIdentifier": "jane-doe"}},
+      {"id": "7123456791", "linkedinUrl": "https://www.linkedin.com/posts/jane-doe_lifecycle-activity-7123456791",
+       "content": "Lifecycle email is where most teams leave money. Third post, past the limit this pipeline sets.",
+       "author": {"name": "Jane Doe", "linkedinUrl": "https://www.linkedin.com/in/jane-doe", "publicIdentifier": "jane-doe"},
+       "postedAt": {"date": "2026-08-20T16:00:00Z", "postedAgoText": "2 weeks ago"},
+       "engagement": {"likes": 9, "comments": 1, "shares": 0}}
+    ], "pagination": {"totalPages": 1, "totalElements": 3, "pageNumber": 1, "pageSize": 20}}},
+    {"match": "bob-stone", "status": 200, "body": {"status": "ok", "elements": [
+      {"id": "7123456790", "linkedinUrl": "https://www.linkedin.com/posts/acme_hiring-revops-activity-7123456790",
+       "content": "Acme is hiring a RevOps lead. If you have opinions about attribution, we want to hear them.",
+       "author": {"name": "Acme Inc", "linkedinUrl": "https://www.linkedin.com/company/acme", "universalName": "acme"},
+       "postedAt": {"date": "2026-08-28T09:12:00Z", "postedAgoText": "1 week ago"},
+       "engagement": {"likes": 18, "comments": 2, "shares": 6},
+       "repostedBy": {"name": "Bob Stone", "linkedinUrl": "https://www.linkedin.com/in/bob-stone", "publicIdentifier": "bob-stone"}}
+    ], "pagination": {"totalPages": 1, "totalElements": 1, "pageNumber": 1, "pageSize": 20}}},
+    {"match": "GET /linkedin/profile-posts", "status": 200, "body": {"status": "ok", "elements": [], "pagination": {"totalPages": 0, "totalElements": 0, "pageNumber": 1, "pageSize": 20}}}
+  ]
+}

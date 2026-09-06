@@ -1,0 +1,35 @@
+name: account-brief
+version: 1
+source:
+  id: source
+  use: ""
+  group: qualified-accounts
+steps:
+  - id: committee
+    use: sql/transform
+    with:
+      provides:
+        - acct.committee
+        - acct.committee_size
+      query: |
+        SELECT r.to_id AS identity_id,
+               json_group_array(json_object('name', n.value, 'title', t.value)) AS "acct.committee",
+               count(*) AS "acct.committee_size"
+        FROM relations r JOIN group_membership gm ON gm.identity_id = r.from_id AND gm.group_name = 'selected-people' LEFT JOIN current_values n ON n.identity_id = r.from_id AND n.field = 'full_name' LEFT JOIN current_values t ON t.identity_id = r.from_id AND t.field = 'title' WHERE r.relation = 'works_at' GROUP BY r.to_id
+  - id: brief
+    use: ai/compose
+    with:
+      prompt: |
+        Write a three-sentence account brief: who is on the buying committee, who to open with, and the one angle that fits the whole account. Plain language, no hype.
+    uses:
+      - company_name
+      - acct.committee
+      - acct.committee_size
+    provides:
+      - brief
+  - id: handoff
+    use: group/deliver
+    with:
+      group: briefed
+    variables:
+      brief: account-brief.brief

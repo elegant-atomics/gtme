@@ -1,0 +1,24 @@
+$ gtme run . --simulate
+bundle account-brief (frozen from run 01M1WCRNC0EW2FFQJZG5VS4F3J) — hashes verified
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCRNWYYMMY2JSFC3C5ZH2H (account-brief)
+source: sourced 3 members of group "qualified-accounts"
+committee: 3 in, 3 out, 0 cached, 0 filtered, 0 failed
+brief: 3 in, 3 out, 0 cached, 0 filtered, 0 failed
+handoff: 3 in, 0 out, 0 cached, 0 filtered, 0 failed, 3 held (dry run)
+
+run 01M1WCRNWYYMMY2JSFC3C5ZH2H — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step       adapter                   in  out  empty  cached  filtered  failed  cost  avoided
+source     group:qualified-accounts  0   3    -      0       -         -       $0    -
+committee  sql/transform             3   3    -      0       -         -       $0    -
+brief      ai/compose                3   3    -      0       -         -       $0    -
+handoff    group/deliver             3   0    -      0       -         -       $0    -
+handoff: 3 record(s) would be handed off to group "briefed" (held back — simulated run)
+handoff: resolved variables for 3 record(s) — review, then run again without --dry-run to arm:
+  acme.com
+    brief: "Fixture brief for acme.com"
+  initech.dev
+    brief: "Fixture brief for initech.dev"
+  newco.example
+    brief: "Fixture brief for newco.example"
+total: $0 (estimated) spent

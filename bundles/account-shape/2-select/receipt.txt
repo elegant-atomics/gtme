@@ -1,0 +1,31 @@
+$ gtme run . --simulate
+bundle people-select (frozen from run 01M1WCRMMY9RZMPPTA5VMKGD16) — hashes verified
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCRN718AC75MSX9AS9RKGZ (people-select)
+source [info]: read 8 rows from people.csv
+source: sourced 8 records
+at-qualified-account: 8 in, 6 out, 0 cached, 2 filtered, 0 failed
+triage: 6 in, 6 out, 0 cached, 0 filtered, 0 failed
+select: 6 in, 0 out, 0 cached, 0 filtered, 0 failed, 6 held (dry run)
+
+run 01M1WCRN718AC75MSX9AS9RKGZ — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step                  adapter        in  out  empty  cached  filtered  failed  cost  avoided
+source                csv/source     0   8    -      0       -         -       $0    -
+at-qualified-account  sql/filter     8   6    -      0       2         -       $0    -
+triage                ai/filter      6   6    -      0       -         -       $0    -
+select                group/deliver  6   0    -      0       -         -       $0    -
+select: 6 record(s) would be handed off to group "selected-people" (held back — simulated run)
+select: resolved variables for 6 record(s) — review, then run again without --dry-run to arm:
+  jane.doe@acme.com
+    name: "Jane Doe"
+  bob.k@acme.com
+    name: "Bob Kaplan"
+  ann@acme.com
+    name: "Ann Lee"
+  priya@initech.dev
+    name: "Priya Nair"
+  tom@initech.dev
+    name: "Tom Reyes"
+  dave@newco.example
+    name: "Dave Kim"
+total: $0 (estimated) spent

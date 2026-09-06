@@ -120,13 +120,15 @@ steps:
 	contains(t, res.stderr, "does not match its manifest hash", "tamper detection")
 }
 
-// TestBundleWithSQLSteps: sql/transform and sql/filter are runner-owned steps
-// (SPEC §10a), not adapters — the bundler must not try to resolve them on the
-// adapter path (#28). Their query travels inside pipeline.yaml; nothing else
-// has to be packed.
+// TestBundleWithSQLSteps: sql/transform, sql/filter, sql/traverse and
+// group/deliver are runner-owned steps (SPEC §10a, §8), not adapters — the
+// bundler must not try to resolve them on the adapter path (#28; group/deliver
+// surfaced the same way when the first pattern bundle with a handoff was
+// frozen). Their config travels inside pipeline.yaml; nothing else has to be
+// packed.
 func TestBundleWithSQLSteps(t *testing.T) {
 	h := newHarness(t)
-	h.write("people.csv", "full_name,linkedin_url\nJane Doe,https://www.linkedin.com/in/jane-doe\n")
+	h.write("people.csv", "full_name,linkedin_url,company_domain\nJane Doe,https://www.linkedin.com/in/jane-doe,acme.com\n")
 	h.write("p.yaml", `name: sql-bundle-proof
 version: 1
 source:
@@ -155,6 +157,20 @@ steps:
     variables:
       name: full_name
       shout: probe.shout
+  - id: park
+    use: group/deliver
+    with:
+      group: parked
+    variables:
+      name: full_name
+  - id: to-company
+    use: sql/traverse
+    with:
+      entity_type: company
+      query: >
+        SELECT r.to_id AS identity_id, r.from_id AS parent_id
+        FROM relations r WHERE r.relation = 'works_at'
+group: accounts
 `)
 	h.mustRun("run", "p.yaml")
 
@@ -162,15 +178,16 @@ steps:
 	res := h.mustRun("freeze", "last", "--bundle", bundleDir)
 	contains(t, res.stderr, "self-contained except credentials", "freeze output")
 
-	// No adapters/sql-* entries exist — there is nothing on the adapter path to
-	// pack — and the frozen pipeline still carries both steps verbatim.
-	for _, name := range []string{"adapters/sql-transform", "adapters/sql-filter"} {
+	// No adapters/sql-* or adapters/group-* entries exist — there is nothing
+	// on the adapter path to pack — and the frozen pipeline still carries
+	// every step verbatim.
+	for _, name := range []string{"adapters/sql-transform", "adapters/sql-filter", "adapters/sql-traverse", "adapters/group-deliver"} {
 		if _, err := os.Stat(filepath.Join(bundleDir, name)); err == nil {
-			t.Errorf("bundle packed %s, but sql/* steps are runner-owned", name)
+			t.Errorf("bundle packed %s, but the step is runner-owned", name)
 		}
 	}
 	frozen := readFile(t, filepath.Join(bundleDir, "pipeline.yaml"))
-	for _, want := range []string{"sql/transform", "sql/filter", "probe.shout"} {
+	for _, want := range []string{"sql/transform", "sql/filter", "sql/traverse", "group/deliver", "probe.shout"} {
 		if !strings.Contains(frozen, want) {
 			t.Errorf("frozen pipeline.yaml is missing %q", want)
 		}
@@ -179,7 +196,7 @@ steps:
 	// The bundle runs on a clean ledger — the runner owns the sql steps, so
 	// simulation needs nothing beyond the bundle and the binary.
 	clean := newHarness(t)
-	clean.write("people.csv", "full_name,linkedin_url\nJane Doe,https://www.linkedin.com/in/jane-doe\n")
+	clean.write("people.csv", "full_name,linkedin_url,company_domain\nJane Doe,https://www.linkedin.com/in/jane-doe,acme.com\n")
 	moved := filepath.Join(clean.work, "bundle")
 	if err := os.Rename(bundleDir, moved); err != nil {
 		t.Fatal(err)

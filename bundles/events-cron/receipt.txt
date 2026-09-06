@@ -1,0 +1,29 @@
+$ gtme run . --simulate
+bundle trial-welcome (frozen from run 01M1WCVDVN4WKA6BMW69N6R47Z) — hashes verified
+simulate: ignoring missing credentials (step "welcome": missing credential INSTANTLY_API_KEY (set it in the environment or run `gtme secret set INSTANTLY_API_KEY`))
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCVEB0QXZTMGGBFZCXGZ7J (trial-welcome)
+source [info]: read 5 rows from events.csv
+source: sourced 4 records (1 coalesced into known identities)
+paid-trial: 4 in, 2 out, 0 cached, 2 filtered, 0 failed
+lines: 2 in, 2 out, 0 cached, 0 filtered, 0 failed
+welcome: 2 in, 0 out, 0 cached, 0 filtered, 0 failed, 2 held (dry run)
+
+run 01M1WCVEB0QXZTMGGBFZCXGZ7J — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step        adapter                    in  out  empty  cached  filtered  failed  cost  avoided
+source      csv/source                 0   4    -      0       -         -       $0    -
+paid-trial  sql/filter                 4   2    -      0       2         -       $0    -
+lines       ai/compose                 2   2    -      0       -         -       $0    -
+welcome     instantly/add-to-campaign  2   0    -      0       -         -       $0    -
+group "welcomed": 2 record(s) would be added (held back — simulated run)
+welcome: preflight skipped — the target is not read under --simulate; --dry-run checks it
+welcome: resolved variables for 2 record(s) — review, then run again without --dry-run to arm:
+  jane.doe@acme.com
+    first_name: "Jane Doe"
+    personalization: "Fixture first line for jane.doe@acme.com"
+    ps_line: "Fixture ps line for jane.doe@acme.com"
+  dave@newco.example
+    first_name: "Dave Kim"
+    personalization: "Fixture first line for dave@newco.example"
+    ps_line: "Fixture ps line for dave@newco.example"
+total: $0 (estimated) spent

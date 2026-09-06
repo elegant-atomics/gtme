@@ -197,6 +197,17 @@ func PendingToken(runID, stepID string) string { return runID + "/" + stepID }
 // GroupDeliverID is the runner-owned handoff step (SPEC §8, ADR-032).
 const GroupDeliverID = "group/deliver"
 
+// RunnerOwnedID reports a step id the runner executes itself — the group
+// handoff (§8) and the SQL steps (§10a) — so there is no adapter on the path
+// to resolve, pack, or install for it.
+func RunnerOwnedID(use string) bool {
+	switch use {
+	case GroupDeliverID, SQLTransformID, SQLFilterID, SQLTraverseID:
+		return true
+	}
+	return false
+}
+
 // Target is the deliveries.target a deliver step writes under (SPEC §3): the
 // adapter id, or `group:<name>` for a handoff — so each group keeps its own
 // (target, idempotency) scope, as each adapter does.

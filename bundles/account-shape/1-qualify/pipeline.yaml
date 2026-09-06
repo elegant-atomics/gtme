@@ -1,0 +1,31 @@
+name: accounts-qualify
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    entity_type: company
+    path: companies.csv
+steps:
+  - id: small-enough
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values WHERE field = 'company_employees' AND CAST(value AS INTEGER) < 200
+  - id: judge
+    use: ai/filter
+    with:
+      prompt: |
+        Keep companies likely to have reporting pain: software or manufacturing, small enough that one person owns the stack. Tier a is a clear fit, b is plausible. Say why in one sentence.
+    when: small-enough.passed
+    uses:
+      - company_name
+      - company_industry
+      - company_employees
+    provides:
+      rationale: {}
+      tier:
+        enum:
+          - a
+          - b
+group: qualified-accounts

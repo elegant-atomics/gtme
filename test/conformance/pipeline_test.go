@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/elegant-atomics/gtme/internal/pipeline"
@@ -119,6 +120,11 @@ func TestAdapterManifestsValidate(t *testing.T) {
 		if d.IsDir() && (d.Name() == ".git" || d.Name() == "bin") {
 			return fs.SkipDir
 		}
+		if d.IsDir() && path == filepath.Join(root, "bundles") {
+			// A campaign bundle's manifest.json is a different document
+			// (spec/bundle-manifest.json) — TestBundleManifestsValidate below.
+			return fs.SkipDir
+		}
 		if !d.IsDir() && d.Name() == "manifest.json" {
 			files = append(files, path)
 		}
@@ -150,6 +156,56 @@ func TestAdapterManifestsValidate(t *testing.T) {
 			}
 			if err := schema.Validate(asJSONValue(t, raw)); err != nil {
 				t.Errorf("%s does not satisfy spec/schemas/manifest.schema.json:\n%v", rel, err)
+			}
+		})
+	}
+}
+
+// TestBundleManifestsValidate checks every frozen pattern bundle's
+// manifest.json under bundles/ against spec/bundle-manifest.json (SPEC §8,
+// ADR-029) — the format the bundler writes and `gtme run <bundle>` reads.
+func TestBundleManifestsValidate(t *testing.T) {
+	root := repoRoot()
+	var files []string
+	err := filepath.WalkDir(filepath.Join(root, "bundles"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && d.Name() == "manifest.json" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking bundles/: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("found no bundle manifests to check")
+	}
+
+	schemaPath := specPath("bundle-manifest.json")
+	raw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", schemaPath, err)
+	}
+	c := jsonschema.NewCompiler()
+	c.Draft = jsonschema.Draft7
+	if err := c.AddResource("bundle-manifest.json", strings.NewReader(string(raw))); err != nil {
+		t.Fatalf("%s is not a loadable schema: %v", schemaPath, err)
+	}
+	schema, err := c.Compile("bundle-manifest.json")
+	if err != nil {
+		t.Fatalf("%s does not compile as draft-07: %v", schemaPath, err)
+	}
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		t.Run(rel, func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("reading %s: %v", path, err)
+			}
+			if err := schema.Validate(asJSONValue(t, raw)); err != nil {
+				t.Errorf("%s does not satisfy spec/bundle-manifest.json:\n%v", rel, err)
 			}
 		})
 	}

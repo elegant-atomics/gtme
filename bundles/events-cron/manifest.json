@@ -1,0 +1,13 @@
+{
+  "bundle_format_version": 1,
+  "name": "trial-welcome",
+  "source_run_id": "01M1WCVDVN4WKA6BMW69N6R47Z",
+  "created_at": "2026-09-06T22:19:03.341Z",
+  "gtm_version": "v0.3.0-dirty",
+  "contents": {
+    "pipeline.yaml": "46c218e87aa304638be8910693e844df85afb817985003b196413b867ddd22c3",
+    "registry/company.json": "56a4a6434fbb77bd24e2fc7f013abb28129a23f2d88d367ae591b9f7230814b5",
+    "registry/person.json": "2666a0850834b1542364a8c5deb7ce27e6033f931fb0fbe74397cb858f3457bc",
+    "registry/post.json": "53962867ce1614f937a16b50dddf736045271d7d6f44d4253d989ac571d63508"
+  }
+}

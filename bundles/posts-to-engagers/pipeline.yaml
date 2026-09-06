@@ -1,0 +1,34 @@
+name: posts-to-engagers
+version: 1
+source:
+  id: source
+  use: csv/source
+  with:
+    columns:
+      company_domain: Company Website
+      email: Email
+      full_name: Full Name
+      linkedin_url: LinkedIn URL
+      title: Title
+    path: people.csv
+steps:
+  - id: has-profile
+    use: sql/filter
+    with:
+      query: |
+        SELECT identity_id FROM current_values WHERE field = 'linkedin_url' AND value != ''
+  - id: posts
+    use: harvest/profile-posts
+    when: has-profile.passed
+    limit: 2
+  - id: engagers
+    use: harvest/post-reactions
+  - id: worth-a-look
+    use: ai/filter
+    with:
+      prompt: |
+        Keep people whose headline says they run marketing, growth, demand generation or revenue operations. Drop recruiters, students and anyone whose headline is empty.
+    uses:
+      - full_name
+      - headline
+group: warm-engagers

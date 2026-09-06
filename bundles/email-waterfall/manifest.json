@@ -1,0 +1,19 @@
+{
+  "bundle_format_version": 1,
+  "name": "email-waterfall",
+  "source_run_id": "01M1WCRHSQTAVMSP5PGHXMC6A6",
+  "created_at": "2026-09-06T22:17:29.186Z",
+  "gtm_version": "v0.3.0-dirty",
+  "contents": {
+    "adapters/finder-a-email/binding.yaml": "38e53e4aa8ca2953a92ffff1e373102b252e0f20b5d81648d1c77b17b255cf88",
+    "adapters/finder-a-email/fixtures/conformance.json": "5897674f288808489a66be7bed9dc9f74ffd88a79f4a56a27cb812d09119c92c",
+    "adapters/finder-b-email/binding.yaml": "b32cf83fdcadff0fcb5e64de6f41ed3ff2d254ca4b9fa22dbdadb51135e983f6",
+    "adapters/finder-b-email/fixtures/conformance.json": "c83411dfab546e1630743e1931eb34d77a592f88fefe8408c7800c4f8e322d76",
+    "adapters/verifier-email-status/binding.yaml": "6a8e271f83f50209d54ed693661f5d3d8d5917b3bbb0a00c9b365dbcc1cf3154",
+    "adapters/verifier-email-status/fixtures/conformance.json": "fb7ecd7c126488c0e9df08d9bc743643b639ce61134e637d03f9e0fb13eb329e",
+    "pipeline.yaml": "5fc1102450cbfcdfdafbeb8d84c907f816b2e79e04addae84591a77033d45e98",
+    "registry/company.json": "56a4a6434fbb77bd24e2fc7f013abb28129a23f2d88d367ae591b9f7230814b5",
+    "registry/person.json": "2666a0850834b1542364a8c5deb7ce27e6033f931fb0fbe74397cb858f3457bc",
+    "registry/post.json": "53962867ce1614f937a16b50dddf736045271d7d6f44d4253d989ac571d63508"
+  }
+}

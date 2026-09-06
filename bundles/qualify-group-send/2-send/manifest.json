@@ -1,0 +1,13 @@
+{
+  "bundle_format_version": 1,
+  "name": "send",
+  "source_run_id": "01M1WCVEFNN62EBT1W8JQXREHY",
+  "created_at": "2026-09-06T22:19:03.987Z",
+  "gtm_version": "v0.3.0-dirty",
+  "contents": {
+    "pipeline.yaml": "1dc38feae4f558bdad1a4776ffa021a94206f181adcdf3521b28910bac605034",
+    "registry/company.json": "56a4a6434fbb77bd24e2fc7f013abb28129a23f2d88d367ae591b9f7230814b5",
+    "registry/person.json": "2666a0850834b1542364a8c5deb7ce27e6033f931fb0fbe74397cb858f3457bc",
+    "registry/post.json": "53962867ce1614f937a16b50dddf736045271d7d6f44d4253d989ac571d63508"
+  }
+}

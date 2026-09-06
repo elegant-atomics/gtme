@@ -1,0 +1,38 @@
+$ gtme run . --simulate
+bundle send (frozen from run 01M1WCVEFNN62EBT1W8JQXREHY) — hashes verified
+simulate: ignoring missing credentials (step "send": missing credential INSTANTLY_API_KEY (set it in the environment or run `gtme secret set INSTANTLY_API_KEY`))
+simulate: fixtures only — no network, no spend, nothing sends, nothing persists
+run 01M1WCVF0P0E6Q7SGDP7PFN6RW (send)
+source: sourced 5 members of group "qualified"
+lines: 5 in, 5 out, 0 cached, 0 filtered, 0 failed
+send: 5 in, 0 out, 0 cached, 0 filtered, 0 failed, 5 held (dry run)
+
+run 01M1WCVF0P0E6Q7SGDP7PFN6RW — done (SIMULATED — fixtures only; nothing sent, nothing persisted)
+step    adapter                    in  out  empty  cached  filtered  failed  cost  avoided
+source  group:qualified            0   5    -      0       -         -       $0    -
+lines   ai/compose                 5   5    -      0       -         -       $0    -
+send    instantly/add-to-campaign  5   0    -      0       -         -       $0    -
+group "sent": 5 record(s) would be added (held back — simulated run)
+send: preflight skipped — the target is not read under --simulate; --dry-run checks it
+send: resolved variables for 5 record(s) — review, then run again without --dry-run to arm:
+  jane.doe@acme.com
+    first_name: "Jane Doe"
+    personalization: "Fixture first line for jane.doe@acme.com"
+    ps_line: "Fixture ps line for jane.doe@acme.com"
+  bob@globex.io
+    first_name: "Bob Stone"
+    personalization: "Fixture first line for bob@globex.io"
+    ps_line: "Fixture ps line for bob@globex.io"
+  carol@initech.dev
+    first_name: "Carol Ray"
+    personalization: "Fixture first line for carol@initech.dev"
+    ps_line: "Fixture ps line for carol@initech.dev"
+  erin@umbrella.example
+    first_name: "Erin Park"
+    personalization: "Fixture first line for erin@umbrella.example"
+    ps_line: "Fixture ps line for erin@umbrella.example"
+  lee@vandelay.example
+    first_name: "Lee Chen"
+    personalization: "Fixture first line for lee@vandelay.example"
+    ps_line: "Fixture ps line for lee@vandelay.example"
+total: $0 (estimated) spent

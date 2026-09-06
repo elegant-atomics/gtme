@@ -1,0 +1,8 @@
+{
+  "note": "Hand-written. finder-b is a fictional vendor; these are the responses its shape implies, not recordings.",
+  "input": {"full_name": "Bob Stone", "company_domain": "globex.io"},
+  "responses": [
+    {"match": "domain=globex.io", "status": 200, "body": {"email": "bob@globex.io", "confidence": 0.71}},
+    {"match": "GET /emails/lookup", "status": 404, "body": {"error": "not_found"}}
+  ]
+}

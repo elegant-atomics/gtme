@@ -1,0 +1,9 @@
+{
+  "note": "Hand-written. verifier is a fictional vendor; these are the responses its shape implies, not recordings.",
+  "input": {"email": "jane.doe@acme.com"},
+  "responses": [
+    {"match": "email=jane.doe", "status": 200, "body": {"status": "valid", "reason": "mailbox_exists"}},
+    {"match": "email=bob", "status": 200, "body": {"status": "catch_all", "reason": "accept_all_domain"}},
+    {"match": "GET /verify", "status": 200, "body": {"status": "unknown", "reason": "no_answer"}}
+  ]
+}

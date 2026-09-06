@@ -271,6 +271,12 @@ whatever the machine has installed. Contracts travel; your ledger,
 credentials, and input data stay yours. The natural unit for a playbook, a
 handoff, or a per-client repo.
 
+Five such playbooks ship in [`bundles/`](bundles/): qualify → group →
+send, an email waterfall, the account shape, events via CSV + cron, and
+posts to engagers via a traverse. Every one simulates offline from the
+checkout (`cd bundles/<pattern> && gtme run . --simulate`) and CI proves
+it; each README says what its receipt shows and which rung comes next.
+
 ## Get started
 
 ```sh
