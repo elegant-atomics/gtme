@@ -157,6 +157,11 @@ type Plan struct {
 	Steps     []Step
 	Available []string
 	Wildcard  bool
+	// FinalType is the type of the run's last segment (SPEC §7, ADR-054):
+	// the source's, or the last traverse's output type — what the terminus
+	// group takes. "" for an entity-blind pipeline (an untyped legacy group
+	// source).
+	FinalType string
 	// Warnings are plan-level observations that do not block (SPEC §7): the
 	// one-commit-point rule (ADR-032) is the first.
 	Warnings []string
@@ -518,6 +523,7 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 	}
 
 	plan.Available = keys(available)
+	plan.FinalType = scope.EntityType
 
 	// One commit point (SPEC §7, ADR-032): arming is all-or-nothing
 	// (ADR-031), so a handoff and a network-side send in one pipeline means
@@ -777,6 +783,19 @@ func ResolveStep(s pipeline.Step, isSource bool, scope Scope) (Step, []Problem) 
 		ps.Use = "group:" + ps.SourceGroup
 		ps.Role = adapters.RoleSource
 		ps.Wildcard = true
+		// The pipeline takes the group's type (SPEC §9, ADR-054), so every
+		// later step's names validate against it. A group with no type —
+		// created before ADR-054 — leaves the plan entity-blind, said so.
+		if scope.Ledger != nil {
+			if g, err := scope.Ledger.GetGroup(scope.Ctx, ps.SourceGroup); err == nil {
+				ps.EntityType = g.EntityType
+				if g.EntityType == "" {
+					ps.Notes = append(ps.Notes, fmt.Sprintf(
+						"group %q has no entity type (created before ADR-054), so this plan is entity-blind: field names are not validated until run time — set it once with `gtme groups add %s --type <type>`",
+						ps.SourceGroup, ps.SourceGroup))
+				}
+			}
+		}
 		gateDeliverKeys(false)
 		gateProvides(false)
 		gateOf()
@@ -1333,6 +1352,37 @@ func (p *Plan) CheckGroups(ctx context.Context, l *ledger.Ledger) error {
 				continue
 			}
 			return err
+		}
+	}
+	// The terminus and every group/deliver are checked against their
+	// group's type (SPEC §7, ADR-054): a company run ending in a group of
+	// people fails naming the group, its type, and the pipeline's type. A
+	// group created on demand takes the type at run time.
+	check := func(step, name, entityType string) error {
+		g, err := l.GetGroup(ctx, name)
+		if errors.Is(err, ledger.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if g.EntityType != "" && entityType != "" && g.EntityType != entityType {
+			problems = append(problems, Problem{Step: step, Kind: KindContract,
+				Msg: fmt.Sprintf("group %q holds %s records, but this pipeline would add %s records to it (SPEC §7, ADR-054) — end in a group of the pipeline's type, or traverse to %s first",
+					name, g.EntityType, entityType, g.EntityType)})
+		}
+		return nil
+	}
+	if name := strings.TrimSpace(p.Pipeline.Group); name != "" {
+		if err := check("", name, p.FinalType); err != nil {
+			return err
+		}
+	}
+	for i := range p.Steps {
+		if st := &p.Steps[i]; st.IsGroupDeliver {
+			if err := check(st.ID, st.TargetGroup, st.EntityType); err != nil {
+				return err
+			}
 		}
 	}
 	if len(problems) > 0 {

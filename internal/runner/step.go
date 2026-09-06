@@ -1264,7 +1264,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		// The handoff itself (SPEC §8, ADR-032): membership in the target
 		// group, created on demand. An existing member is not re-asserted.
 		if st.IsGroupDeliver {
-			g, err := r.l.EnsureGroup(ctx, st.TargetGroup)
+			g, err := r.l.EnsureGroup(ctx, st.TargetGroup, st.EntityType)
 			if err != nil {
 				return err
 			}
@@ -1285,7 +1285,7 @@ func (r *runner) advance(ctx context.Context, st *planner.Step, it *item, detail
 		// default), created on demand. Only armed runs reach this path — dry
 		// and simulated deliveries never invoke the adapter.
 		if st.RecordGroup != "" {
-			g, err := r.l.EnsureGroup(ctx, st.RecordGroup)
+			g, err := r.l.EnsureGroup(ctx, st.RecordGroup, st.EntityType)
 			if err != nil {
 				return err
 			}

@@ -21,11 +21,11 @@ func TestGroupMembershipDerivation(t *testing.T) {
 	}
 	id := jane.Identity.ID
 
-	g, err := l.EnsureGroup(ctx, "q3")
+	g, err := l.EnsureGroup(ctx, "q3", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := l.EnsureGroup(ctx, "q3")
+	again, err := l.EnsureGroup(ctx, "q3", "")
 	if err != nil || again.ID != g.ID {
 		t.Fatalf("EnsureGroup not idempotent: %v %v", again, err)
 	}

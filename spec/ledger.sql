@@ -124,15 +124,19 @@ FROM field_value_ranks
 WHERE rank = 1;
 
 -- Layer 3: groups — named associations between identities and a context
--- (ADR-021, SPEC §3). A group carries no type field and no executable logic:
--- its character is derived from its events and the pipelines that reference
--- it. Members are identities, so groups hold people and companies alike.
+-- (ADR-021, SPEC §3). A group carries the entity type of its members
+-- (ADR-054) and no executable logic: its character (campaign-like, DNC-like,
+-- pool-like) is derived from its events and the pipelines that reference
+-- it. Members are identities of one type per group; a group created before
+-- ADR-054 has no type and is entity-blind until `gtme groups add --type`
+-- sets it.
 
 CREATE TABLE groups (
-  id         TEXT PRIMARY KEY,           -- ULID
-  name       TEXT NOT NULL UNIQUE,
-  note       TEXT,
-  created_at TEXT NOT NULL
+  id          TEXT PRIMARY KEY,          -- ULID
+  name        TEXT NOT NULL UNIQUE,
+  note        TEXT,
+  created_at  TEXT NOT NULL,
+  entity_type TEXT                       -- ADR-054: the members' type; null = created before it (entity-blind)
 );
 
 CREATE TABLE group_events (

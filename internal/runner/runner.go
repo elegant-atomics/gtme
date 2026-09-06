@@ -427,7 +427,9 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 		r.terminusWould = len(completers)
 		return nil
 	}
-	g, err := r.l.EnsureGroup(ctx, name)
+	// The terminus group takes the run's final type when created (SPEC §8,
+	// ADR-054); plan already refused a typed group of another type.
+	g, err := r.l.EnsureGroup(ctx, name, r.plan.FinalType)
 	if err != nil {
 		return err
 	}
