@@ -788,7 +788,8 @@ beside it. The canonical schema for this file is
   one that does not.
 - **Traverse (ADR-054):** a manifest with `"role": "traverse"` declares
   `from` (the input type — the planner requires it to equal the current
-  segment's type), `entity_type` (the output type), `needs` (validated
+  segment's type), `entity_type` (the output type; it MAY equal `from` —
+  people to their coworkers is a traverse), `needs` (validated
   against `from`), `provides` (validated against `entity_type`, key
   coverage included, §4a), and `relation: {"name": "authored_by",
   "from": "record" | "parent"}` — the edge written between every emitted
@@ -974,7 +975,11 @@ it or be `*`. A traverse step's `from` MUST equal the current type, and
 after it only records of its `entity_type` continue: the records before
 it are finished at the traverse (terminal in ADR-052's sense, whether
 they yielded children or none), and a deliver step MAY sit in any
-segment. For every manifest naming a type, plan runs the adapter–type
+segment. `when:` MAY name only a step in the current segment — a verdict
+is a fact about the parent, not the child — and a reference across a
+traverse is a plan error naming the traverse to gate at instead (`when:
+judge.passed` on the traverse step means only children of passing
+parents are minted). For every manifest naming a type, plan runs the adapter–type
 contract (§4a): the type resolves to one file, `provides` is canonical
 for it, and a source or traverse can key what it emits. Plan output MUST
 print each traverse as a type change with its relation — `person → post
@@ -1662,7 +1667,8 @@ its repeat policy — defaulting per the adapter's declared idempotency
 (§8), and refusing `always`/`on_change` on a target that is not natively
 idempotent. `respend: true` on a step (grammar, any paid step) declares that re-running
 the pipeline MAY pay for that step's records again — it silences the §7
-respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0. `cache:` takes
+respend warning and nothing else. `when:` supports only `<step_id>.passed` in v0, naming a step in the
+same segment (ADR-054, §7). `cache:` takes
 `Nd`. A **traverse step** (ADR-054) is an ordinary `steps:` entry whose
 adapter role is `traverse` (§6): it MAY carry `limit: N` (engine-owned,
 as on a source), `when:`, `require:`/`exclude:`, and `cache:`; after it,
@@ -2796,7 +2802,7 @@ source. §11 M28 queued.
 **Changed:** §3 `groups.entity_type` (nullable; a pre-existing group is
 entity-blind until set), the identities and groups comments. §5 a
 traverse's RECORDs name the output type. §13 the fan-out non-goal
-retires; relations that end is named in its place. Ontology decided:
+retires; relations that end is named in its place. Entity types decided:
 two kinds of type; account, deal, campaign, segment, event, persona,
 offer, value proposition are not types (ADR-054 (10); packs on
 ROADMAP.md).

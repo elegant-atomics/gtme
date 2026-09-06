@@ -3189,8 +3189,8 @@ manifests ride the build.
 
 ### ADR-054: `traverse` — a run is a sequence of typed segments, and a type is a file
 **Status:** Proposed (2026-09-05 — design session; answers ADR-008's parked
-question and ROADMAP.md's "Object ontology"; not accepted until a human
-merges the packet)
+question and ROADMAP.md's "Entity types" (until this packet, "Object
+ontology"); not accepted until a human merges the packet)
 **Context:** §4 derives identity for exactly `person` and `company`, as a
 closed switch. `entity_type` is an open string everywhere else, and since
 issue #27 plan and verify refuse what has no derivation — an extension
@@ -3271,8 +3271,9 @@ record to it. `company_domain` on `person` declares `{type: company,
 relation: works_at, fields: [company_domain, company_name]}`, and
 `relateCompany` becomes the one generic path. The referenced identity is
 a ledger fact, never a run member. (5) **`traverse` is the eighth role.**
-Records of one type in, records of another type out, each related to the
-record that produced it — ADR-008's `expand`, renamed because it also
+Records of one type in, records of a type out — another type, or the
+same one (people to their coworkers) — each related to the record that
+produced it — ADR-008's `expand`, renamed because it also
 contracts (people to their companies is the same step, coalescing) and a
 name that needs a caveat is the wrong name. A traverse manifest declares
 `from: <type>` (the input type — the planner requires it to equal the
@@ -3298,7 +3299,11 @@ counts `empty`. Run membership needs no new column: `run_records` keys on
 identity, and an identity carries its type. An identity a later segment
 reaches that is already in the run is a coalesce by ADR-053 (3) — one
 row, its state advancing to the later step. The terminus adds the last
-segment's completers. A deliver MAY sit in any segment. The traverse's
+segment's completers. A deliver MAY sit in any segment. `when:` MAY name
+only a step in the current segment: a verdict is a fact about the parent,
+not the child, so a cross-segment reference is a plan error naming the
+traverse to gate at instead (`when: judge.passed` on the traverse means
+only children of passing parents are ever minted). The traverse's
 receipt line reads like a source's — `posts: 10 in, 84 traversed, 3
 coalesced` — where `in` counts parents and reconciles as for any step
 (`empty` beside it when a parent yielded nothing), and `traversed` and
@@ -3349,7 +3354,13 @@ association mechanisms coexist and the rule for choosing is stated:
 **group membership is a decision** (gated, reversible, with events); **a
 relation is a fact** (per record, free, joinable). Relations still cannot
 end — `works_at` cannot say someone left — recorded on ROADMAP.md, not
-solved. Roles are eight; ADR-051's diagram gains a silhouette.
+solved. A related record's field is readable from any SQL step but not
+projectable into `uses:` or `variables:`; the to-one path this makes
+plan-validatable (a relation name resolves to a typed file) is named on
+ROADMAP.md as "Relation paths in projection", held for receipts per
+ADR-037. In prose, the identities and relations the ledger holds are the
+*entity graph*; the files that define them are the *types*; "ontology"
+retires. Roles are eight; ADR-051's diagram gains a silhouette.
 **Rejected:** *A third dimension on `run_records`* — the identity already
 carries its type. *A source manifest with non-empty `needs` instead of a
 role* — the reviewer should see the role in the id, the reasoning that

@@ -378,7 +378,7 @@ declared workflow identity should ever enter the cache key — so a changed
 process re-judges without `respend:` — is the question, and it waits for
 a real multi-pass agent to have been used.
 
-## Object ontology — beyond person and company
+## Entity types — beyond person and company (until 2026-09-05, "Object ontology")
 
 §4 derives identity for exactly two entity types; the binding schema
 deliberately keeps `entity_type` an open string, and plan/verify now
@@ -502,6 +502,27 @@ same want with `sql/traverse` (a query yielding `identity_id` and
 `parent_id` over `relations`) and, inside a file, the `traverse` role;
 ADR-037's rule applies — mint the typed atom only when receipts show the
 SQL recurring. Held here so it is not built early.
+
+## Relation paths in projection
+
+A SQL step may read any identity in the ledger (ADR-037), so a related
+record's facts are always *readable* — the parent's brief joins onto the
+child in one `sql/transform`. They are not *projectable*: `uses:` and
+`variables:` name only the record's own fields, and an AI step's inputs
+are exactly its projection. The atom this names is a to-one path in
+projection — `uses: [title, <works_at>company_name]`, sigil undecided
+because the dot is reserved for vendor namespaces (§4a). ADR-054 makes
+it plan-validatable: a relation name resolves to a target type through
+a reference declaration or a traverse manifest, and that type is a file
+with a registry, so a path to a missing field fails plan. Two rules to
+hold when it is built: to-one paths only (a to-many path is a set, and a
+set needs an aggregate, which is what `sql/transform` is for), and the
+path is read live on every run exactly as SQL is — a related record's
+field can change without the record itself changing, and a path cached
+like the record's own fields would judge a person on a company fact that
+went stale silently. Held for receipts per ADR-037's rule; the expected
+receipt is every traverse back down wanting the parent's fields on the
+next line.
 
 ## Relations that end
 
