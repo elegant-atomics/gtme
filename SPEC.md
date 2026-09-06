@@ -2797,7 +2797,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.42 (proposed) — 2026-09-05 (ADR-054: types and traverse; build queued as M28)
+### v0.42 — 2026-09-05 (ADR-054: types and traverse; build queued as M28)
 **Added:** §4a type files — `kind: subject | signal`, an ordered
 `identity` tier list §4 now reads, per-field `reference` (the runner
 writes the relation; `works_at` becomes `company_domain`'s declaration),
@@ -2818,6 +2818,7 @@ retires; relations that end is named in its place. Entity types decided:
 two kinds of type; account, deal, campaign, segment, event, persona,
 offer, value proposition are not types (ADR-054 (10); packs on
 ROADMAP.md).
+**Status:** accepted 2026-09-05 by merging the packet; built as M28.
 
 ### v0.41 — 2026-09-04 (M27 build: record accounting, built)
 **Changed:** §11 M27 marked built. Two clarifications the build needed,
