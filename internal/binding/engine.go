@@ -83,7 +83,7 @@ func (e *Engine) Run(ctx context.Context, p adapters.Ports) error {
 				return err
 			}
 			if e.B.Role == adapters.RoleSource {
-				if err := e.runSource(ctx, w, p, doer, cfg, session); err != nil {
+				if err := e.paginate(ctx, w, p, doer, cfg, session, nil); err != nil {
 					return err
 				}
 			}
@@ -96,6 +96,13 @@ func (e *Engine) Run(ctx context.Context, p adapters.Ports) error {
 				return fmt.Errorf("%s: received a record with no key", e.B.ID)
 			}
 			switch e.B.Role {
+			case adapters.RoleTraverse:
+				// A source-shaped crossing per parent (SPEC §10a, ADR-054):
+				// the request templates from the parent's fields, every
+				// record extracted is a child of the output type.
+				if err := e.paginate(ctx, w, p, doer, cfg, session, m.Fields); err != nil {
+					return err
+				}
 			case adapters.RoleEnrich:
 				if err := e.enrichRecord(ctx, w, p, doer, cfg, session, *m.Key, m.Fields); err != nil {
 					return err
@@ -139,17 +146,24 @@ func (e *Engine) runGap(r *protocol.Reader, w *protocol.Writer) error {
 	return w.Write(protocol.End())
 }
 
-// runSource pages through the API, emitting records until termination or the
-// config record limit (SPEC §10a source role: pagination + cursor/STATE).
-func (e *Engine) runSource(ctx context.Context, w *protocol.Writer, p adapters.Ports, doer httpx.Doer, cfg map[string]any, session string) error {
+// paginate pages through the API, emitting records until termination or the
+// config record limit (SPEC §10a source role: pagination + cursor/STATE). A
+// traverse (ADR-054) runs the same loop once per parent, whose fields
+// template the request; every record it extracts carries the output type
+// in its key, as §5 requires of a step that changes the type.
+func (e *Engine) paginate(ctx context.Context, w *protocol.Writer, p adapters.Ports, doer httpx.Doer, cfg map[string]any, session string, parent map[string]any) error {
 	// limit is the engine's (ADR-047): read it, and unless the binding
 	// declares it too, keep it out of the templates' sight.
 	limit := intConfig(cfg, "limit")
 	if !e.B.declaresConfig("limit") {
 		cfg = without(cfg, "limit")
 	}
-	tctx := tmplContext{Config: cfg, Session: session}
+	tctx := tmplContext{Config: cfg, Record: parent, Session: session}
 	pageSize := e.pageSize(tctx)
+	var key *protocol.Key
+	if e.B.Role == adapters.RoleTraverse {
+		key = &protocol.Key{EntityType: e.B.EntityType}
+	}
 
 	emitted, pages := 0, 0
 	pageNum, offset, cursor := 1, 0, ""
@@ -175,7 +189,7 @@ func (e *Engine) runSource(ctx context.Context, w *protocol.Writer, p adapters.P
 			}
 			// The per-record slice rides along for ADR-030 retention (the runner
 			// decides whether it is kept).
-			if err := w.Write(protocol.Message{Type: protocol.TypeRecord, Fields: fields,
+			if err := w.Write(protocol.Message{Type: protocol.TypeRecord, Key: key, Fields: fields,
 				Payload: e.payloadFor(w, cfg, rec)}); err != nil {
 				return err
 			}

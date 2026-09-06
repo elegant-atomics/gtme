@@ -25,14 +25,31 @@
     "role": {
       "enum": [
         "source",
+        "traverse",
         "enrich",
         "deliver"
       ],
-      "description": "source: pagination + cursor/STATE, config 'limit' caps emitted records; enrich: per-record request; deliver: idempotency + dry-run receipts."
+      "description": "source: pagination + cursor/STATE, config 'limit' caps emitted records; traverse (ADR-054): a source-shaped request templated per parent from '{{record.<field>}}' placeholders (its needs), emitting records of entity_type related to the parent by 'relation', 'limit' capping children per parent; enrich: per-record request; deliver: idempotency + dry-run receipts."
     },
     "entity_type": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "A type file's name (SPEC.md \u00a74a). For a traverse this is the OUTPUT type; 'from' is the input. A binding MAY ship the type it emits as types/<name>.json beside binding.yaml (never an embedded name)."
+    },
+    "from": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Traverse only (ADR-054): the input type; the planner requires it to equal the current segment's type."
+    },
+    "relation": {
+      "type": "object",
+      "required": ["name", "from"],
+      "additionalProperties": false,
+      "description": "Traverse only (ADR-054): the edge written between every emitted record and its parent, and which end it starts at (record: authored_by from the post to its author; parent: works_at from the person to the company).",
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "from": {"enum": ["record", "parent"]}
+      }
     },
     "needs": {
       "description": "Same manifest surface as process adapters (SPEC.md \u00a76): a JSON Schema, 'dynamic', or the dynamic-with-floor object form."

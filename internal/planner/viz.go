@@ -105,8 +105,8 @@ func vizHeadline(p *Plan) string {
 	return head
 }
 
-// entityTypes lists the entity types the plan's steps carry, in first-seen
-// order — one for every pipeline v0 can express (§13 defers expand).
+// entityTypes lists the entity types the plan's segments carry, in
+// first-seen order — one per segment (ADR-054: a traverse opens a new one).
 func entityTypes(p *Plan) string {
 	var kinds []string
 	seen := map[string]bool{}
@@ -231,6 +231,14 @@ func vizGates(s *Step) [][2]string {
 	if s.IsGroupSource {
 		left = append(left, "members of "+s.SourceGroup)
 	}
+	if s.IsTraverse {
+		// The type change (ADR-054): the one row a traverse cannot go without.
+		edge := ""
+		if s.Relation != nil {
+			edge = " (" + s.Relation.Name + ")"
+		}
+		left = append(left, s.From+" → "+s.EntityType+edge)
+	}
 	if s.IsGroupDeliver {
 		left = append(left, "→ group "+strconv.Quote(s.TargetGroup))
 	}
@@ -349,6 +357,8 @@ func roleGlyph(s *Step) string {
 		return "🚀"
 	}
 	switch s.Role {
+	case adapters.RoleTraverse:
+		return "🔀"
 	case adapters.RoleFilter:
 		return "🤏"
 	case adapters.RoleVerify:
@@ -400,6 +410,13 @@ func vizFrame(s *Step, rows [][2]string, in, out bool, n int) []string {
 	case s.Role == adapters.RoleCompose:
 		botFill = "~" // document
 		bl, br = "╰", "╯"
+	case s.Role == adapters.RoleTraverse:
+		// A trapezoid opening downward: one record in, its children out —
+		// the segment changes type here (ADR-054; ADR-051's eighth
+		// silhouette).
+		rail, tl, tr = "╱", "╱", "╲"
+		bl, br = "╱", "╲"
+		taper = -1
 	}
 	if botFill == "" {
 		botFill = fill

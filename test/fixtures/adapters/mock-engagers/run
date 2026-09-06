@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""mock/engagers — a fixture traverse back (ADR-054): posts in, people out.
+
+The shared post's engagers include Bob, who is already in the run as a
+parent of the first traverse — a person reached again, which coalesces —
+and Dave, who is new.
+"""
+
+import json
+import sys
+
+ENGAGERS = {
+    "p-shared-1": [
+        {"email": "bob@globex.io", "full_name": "Bob Stone"},
+        {"email": "dave@newco.example", "full_name": "Dave New"},
+    ],
+    "p-jane-1": [
+        {"email": "dave@newco.example", "full_name": "Dave New"},
+    ],
+}
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        msg = json.loads(line)
+        kind = msg.get("type")
+        if kind == "OPEN":
+            send({"type": "SCHEMA", "provides": {"type": "object", "properties": {}}})
+        elif kind == "RECORD":
+            pid = (msg.get("fields") or {}).get("mock.post_id", "")
+            for person in ENGAGERS.get(pid, []):
+                send({"type": "RECORD", "key": {"entity_type": "person", "identity_key": ""}, "fields": person})
+        elif kind == "END":
+            break
+    send({"type": "END"})
+
+
+if __name__ == "__main__":
+    main()

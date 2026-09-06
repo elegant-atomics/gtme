@@ -115,7 +115,7 @@ var agentVerbs = []agentVerb{
 	{"gtme answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set field=value ...] [--as NAME] [--cost USD [--measured]] [--note TEXT]", "record a participant's answer for one pending human/* or agent/* step: a filter takes pass=true|false and reason, a compose or review its declared fields; the value is validated against the step's declared outputs and refused naming them otherwise. Writes an `answered` event and nothing else — it never sends. STEP may be omitted when one step is pending; with no identity key and a terminal it walks the pending records. --as names the participant (default the OS user; the human/ or agent/ prefix follows the adapter), --cost records what the participant spent (estimated unless --measured), --note is free text kept with the answer (never part of a cache key)"},
 	{"gtme runs [RUN_ID|last]", "list runs, or print one run's receipt (records/cost per step); a rehearsal is marked (dry) and a run that spent money and sourced nothing reads `done — 0 records, $X spent` (ADR-052, ADR-053)"},
 	{"gtme freeze [RUN_ID|last] [--bundle DIR]", "print the pipeline.yaml that produced a run, reconstructed from its stored config; --bundle assembles a portable campaign bundle instead (pipeline + referenced bindings with fixtures + registry slice + hash manifest), which `gtme run` accepts wherever it accepts a pipeline path (ADR-029)"},
-	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL | remove NAME KEY... [--note TEXT]]", "list groups with derived character (members, added/removed/touched tallies), inspect one, or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); --note records a removal's reason (ADR-032)"},
+	{"gtme groups [show NAME | add NAME KEY...|--from-segment NAME|--query SQL|--type TYPE | remove NAME KEY... [--note TEXT]]", "list groups with their entity type and derived character (members, added/removed/touched tallies), inspect one (members, events, and the pipelines that wrote to and sourced from it), or hand-edit membership; snapshots evaluate a segment or SQL into extensional membership with provenance (ADR-021); a group holds one type, set at creation (ADR-054) — --type sets an untyped legacy group's type once, and is required when a key is ambiguous or no key is given; --note records a removal's reason (ADR-032)"},
 	{"gtme vacuum", "evict expired payloads from the ADR-030 cache tier — and nothing else; facts are append-only forever (SPEC §8)"},
 	{"gtme adapters", "list installed adapters with their source and pin (.source.json)"},
 	{"gtme adapters search TEXT", "search the bindings registry index by id, vendor, description and role (GTME_REGISTRY overrides the index URL)"},
@@ -134,21 +134,26 @@ var agentVerbs = []agentVerb{
 var agentSQLSteps = []agentVerb{
 	{"use: sql/filter — with: {query: \"SELECT identity_id, pass[, reason] FROM ...\"}", "runner-owned filter: rows decide pass/fail per eligible record (a missing row, or pass=0, fails it with the reason recorded); read-only against the §3 surface, $0"},
 	{"use: sql/transform — with: {query: \"SELECT identity_id, <expr> AS \\\"ns.field\\\" ...\"}", "runner-owned derivation: result columns append like adapter output (registry-checked, provenance `sql/transform @ <query-hash>`); declare provides: [ns.field]; cross-record aggregates and fan-in live here"},
+	{"use: sql/traverse — with: {entity_type: <type>, query: \"SELECT r.to_id AS identity_id, r.from_id AS parent_id FROM relations r WHERE r.relation = 'works_at'\"}", "runner-owned traverse (ADR-054): follows relations the ledger already holds — the companies of this run's people — into a new segment of entity_type; mints nothing, writes no relation; parents are finished here, only the children continue"},
 }
 
 type agentAdapter struct {
-	ID                  string          `json:"id"`
-	Version             int             `json:"version"`
-	Role                string          `json:"role"`
-	EntityType          string          `json:"entity_type"`
-	Needs               json.RawMessage `json:"needs,omitempty"`
-	Provides            json.RawMessage `json:"provides,omitempty"`
-	Credentials         []string        `json:"credentials,omitempty"`
-	CredentialsOptional []string        `json:"credentials_optional,omitempty"`
-	ConfigSchema        json.RawMessage `json:"config_schema,omitempty"`
-	FreshnessDays       int             `json:"freshness_days,omitempty"`
-	CostEstimateUSD     *float64        `json:"cost_estimate_usd,omitempty"`
-	Attests             bool            `json:"attests,omitempty"`
+	ID         string `json:"id"`
+	Version    int    `json:"version"`
+	Role       string `json:"role"`
+	EntityType string `json:"entity_type"`
+	// From and Relation are a traverse's ends (ADR-054): records of From
+	// in, records of EntityType out, each related to its parent.
+	From                string             `json:"from,omitempty"`
+	Relation            *adapters.Relation `json:"relation,omitempty"`
+	Needs               json.RawMessage    `json:"needs,omitempty"`
+	Provides            json.RawMessage    `json:"provides,omitempty"`
+	Credentials         []string           `json:"credentials,omitempty"`
+	CredentialsOptional []string           `json:"credentials_optional,omitempty"`
+	ConfigSchema        json.RawMessage    `json:"config_schema,omitempty"`
+	FreshnessDays       int                `json:"freshness_days,omitempty"`
+	CostEstimateUSD     *float64           `json:"cost_estimate_usd,omitempty"`
+	Attests             bool               `json:"attests,omitempty"`
 }
 
 // agentAdapters reads the live registry (built-ins + anything on
@@ -163,6 +168,8 @@ func agentAdapters() []agentAdapter {
 			Version:             m.Version,
 			Role:                m.Role,
 			EntityType:          m.EntityType,
+			From:                m.From,
+			Relation:            m.Relation,
 			Needs:               m.Needs,
 			Provides:            m.Provides,
 			Credentials:         m.Credentials,
@@ -373,7 +380,7 @@ var ledgerObjectNotes = map[string]string{
 	"step_events":       "per-record trail: claimed|done|failed|skipped_cache|dry_run|simulated, detail JSON",
 	"costs":             "spend per step/record; basis measured|estimated (ADR-046: measured only when read back from vendor-reported cost metadata; a rate multiplied out is estimated)",
 	"deliveries":        "sends and handoffs, UNIQUE(target, scope, idempotency) — scope is the resolved idempotency_scope config value (ADR-044, '' = unscoped); status accepted|confirmed|contradicted|sent; variables_hash drives redeliver: on_change (ADR-045)",
-	"groups":            "named associations (ADR-021); character derived from events",
+	"groups":            "named associations (ADR-021); entity_type is the members' type (ADR-054); character derived from events",
 	"group_events":      "append-only added|removed|touched events per (group, identity)",
 	"payloads":          "raw vendor responses, a purgeable cache tier (ADR-030) — never facts",
 	"field_value_ranks": "field_values ranked per (identity, field): confidence DESC, newest first",

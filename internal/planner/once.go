@@ -28,7 +28,8 @@ func (p *Plan) FinishedRecords(ctx context.Context, l *ledger.Ledger) (map[strin
 		if rec.Dry {
 			continue
 		}
-		if rec.State == rec.FinalStep || p.Stopped(rec.RunRecord) {
+		// A parent finished at a traverse is terminal too (ADR-054 (6)).
+		if rec.State == rec.FinalStep || p.Stopped(rec.RunRecord) || rec.FinishedAtTraverse {
 			finished[rec.IdentityID] = true
 		}
 	}

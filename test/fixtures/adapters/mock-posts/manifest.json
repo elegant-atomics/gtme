@@ -1,0 +1,32 @@
+{
+  "id": "mock/posts",
+  "version": 1,
+  "role": "traverse",
+  "from": "person",
+  "entity_type": "post",
+  "relation": {"name": "authored_by", "from": "record"},
+  "needs": {
+    "type": "object",
+    "required": ["email"],
+    "properties": {"email": {"type": "string"}}
+  },
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "url": {"type": "string"},
+      "platform": {"type": "string"},
+      "text": {"type": "string"},
+      "likes": {"type": "integer"},
+      "mock.post_id": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {"type": "integer", "minimum": 1}
+    }
+  },
+  "cost_estimate_usd": 0.001
+}

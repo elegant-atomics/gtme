@@ -492,8 +492,8 @@ func runFixtures(b *binding.Binding, m *adapters.Manifest, fixtures *binding.Fix
 		}
 		return records, err
 	}
-	if b.Role == adapters.RoleSource && records == 0 {
-		return 0, fmt.Errorf("the fixtures produced no records — a source's fixtures must yield at least one")
+	if (b.Role == adapters.RoleSource || b.Role == adapters.RoleTraverse) && records == 0 {
+		return 0, fmt.Errorf("the fixtures produced no records — a %s's fixtures must yield at least one", b.Role)
 	}
 	return records, nil
 }

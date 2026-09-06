@@ -20,19 +20,24 @@ import (
 
 // Binding is one parsed, schema-valid binding document.
 type Binding struct {
-	ID                  string          `json:"id"`
-	Version             int             `json:"version"`
-	Role                string          `json:"role"`
-	EntityType          string          `json:"entity_type"`
-	Needs               json.RawMessage `json:"needs,omitempty"`
-	Provides            json.RawMessage `json:"provides,omitempty"`
-	ConfigSchema        json.RawMessage `json:"config_schema,omitempty"`
-	FreshnessDays       int             `json:"freshness_days,omitempty"`
-	CostEstimate        *float64        `json:"cost_estimate_usd,omitempty"`
-	Credentials         []string        `json:"credentials,omitempty"`
-	CredentialsOptional []string        `json:"credentials_optional,omitempty"`
-	KeepPayloads        *bool           `json:"keep_payloads,omitempty"`
-	PayloadTTLDays      *int            `json:"payload_ttl_days,omitempty"`
+	ID         string `json:"id"`
+	Version    int    `json:"version"`
+	Role       string `json:"role"`
+	EntityType string `json:"entity_type"`
+	// From and Relation are the traverse role's keys (SPEC §10a, ADR-054):
+	// the input type, and the edge written between each emitted record and
+	// the parent it was traversed from.
+	From                string             `json:"from,omitempty"`
+	Relation            *adapters.Relation `json:"relation,omitempty"`
+	Needs               json.RawMessage    `json:"needs,omitempty"`
+	Provides            json.RawMessage    `json:"provides,omitempty"`
+	ConfigSchema        json.RawMessage    `json:"config_schema,omitempty"`
+	FreshnessDays       int                `json:"freshness_days,omitempty"`
+	CostEstimate        *float64           `json:"cost_estimate_usd,omitempty"`
+	Credentials         []string           `json:"credentials,omitempty"`
+	CredentialsOptional []string           `json:"credentials_optional,omitempty"`
+	KeepPayloads        *bool              `json:"keep_payloads,omitempty"`
+	PayloadTTLDays      *int               `json:"payload_ttl_days,omitempty"`
 
 	Auth             *Auth                `json:"auth,omitempty"`
 	Request          Request              `json:"request"`
@@ -267,6 +272,16 @@ func (b *Binding) check() error {
 	if b.Role == adapters.RoleDeliver && b.Idempotency == "" {
 		return fmt.Errorf("binding: %s: a deliver binding must declare idempotency: native | ledger", b.ID)
 	}
+	if b.Role == adapters.RoleTraverse {
+		switch {
+		case b.From == "":
+			return fmt.Errorf("binding: %s: a traverse binding declares from — the input type (SPEC §10a, ADR-054)", b.ID)
+		case b.Relation == nil || b.Relation.Name == "":
+			return fmt.Errorf("binding: %s: a traverse binding declares relation: {name, from: record | parent} (SPEC §10a, ADR-054)", b.ID)
+		}
+	} else if b.From != "" || b.Relation != nil {
+		return fmt.Errorf("binding: %s: from and relation are traverse keys (role %s)", b.ID, b.Role)
+	}
 	if b.Role != adapters.RoleDeliver && (len(b.Extract.Records) == 0 || len(b.Extract.Fields) == 0) {
 		return fmt.Errorf("binding: %s: a %s binding must declare extract.records and extract.fields", b.ID, b.Role)
 	}
@@ -294,6 +309,12 @@ func (b *Binding) Manifest() (*adapters.Manifest, error) {
 		"version":     b.Version,
 		"role":        b.Role,
 		"entity_type": b.EntityType,
+	}
+	if b.From != "" {
+		doc["from"] = b.From
+	}
+	if b.Relation != nil {
+		doc["relation"] = map[string]any{"name": b.Relation.Name, "from": b.Relation.From}
 	}
 	if b.IdempotencyScope != "" {
 		doc["idempotency_scope"] = b.IdempotencyScope

@@ -123,6 +123,15 @@ func PrintReceipt(w io.Writer, res *Result) {
 		fmt.Fprintf(w, "group %q: %d record(s) added\n", res.TerminusGroup, res.TerminusAdded)
 	}
 
+	// Traverses (SPEC §8, ADR-054): the children each traverse minted and
+	// coalesced, apart from the parents the table reconciles.
+	for _, s := range res.Steps {
+		if s.Role != adapters.RoleTraverse {
+			continue
+		}
+		fmt.Fprintf(w, "%s: %d parent(s) in, %d out, %d empty — %d traversed (%s), %d coalesced\n",
+			s.ID, s.In, s.Out, s.Empty, s.Traversed, s.ChildType, s.Coalesced)
+	}
 	// Handoffs (SPEC §8, ADR-032): what each group/deliver step committed to
 	// its group, or would have.
 	for _, s := range res.Steps {

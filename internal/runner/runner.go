@@ -121,6 +121,14 @@ type StepStat struct {
 	// invocation — in-run at a terminal, or collected from the ledger.
 	Answered int
 
+	// Traverse (SPEC §8, ADR-054): the children a traverse step minted
+	// (Traversed) and the children that resolved to an identity already in
+	// the run (Coalesced), of ChildType — counted apart from the parents the
+	// line reconciles.
+	Traversed int
+	Coalesced int
+	ChildType string
+
 	// Preflight (SPEC §8, ADR-040): the target's answer before anything
 	// sent — "" when the adapter does not preflight.
 	Preflight       string
@@ -413,12 +421,19 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The terminus adds the last segment's completers (SPEC §7, ADR-054):
+	// when the final step is a traverse, its parents share the children's
+	// state but finished there, so only its children complete.
+	children, err := r.segmentMembers(ctx, len(r.plan.Steps)-1)
+	if err != nil {
+		return err
+	}
 	// A withheld send (on_missing skip, suppression) leaves a deliver-step fail
 	// verdict but the record advanced — it completes and joins; the terminus
 	// captures completers, not sends (SPEC §8, ADR-031).
 	var completers []string
 	for _, rr := range records {
-		if rr.State == final && !r.stopped(rr) {
+		if rr.State == final && !r.stopped(rr) && (children == nil || children[rr.IdentityID]) {
 			completers = append(completers, rr.IdentityID)
 		}
 	}
@@ -448,6 +463,17 @@ func (r *runner) assertTerminus(ctx context.Context) error {
 		r.terminusAdded++
 	}
 	return nil
+}
+
+// segmentMembers is the set of records that belong to the segment step i
+// opens into, when step i is a traverse: the children it minted or
+// coalesced (SPEC §7, ADR-054). Nil means every record at that state
+// belongs — the step is not a traverse, or i is the source.
+func (r *runner) segmentMembers(ctx context.Context, i int) (map[string]bool, error) {
+	if i <= 0 || i >= len(r.plan.Steps) || !r.plan.Steps[i].IsTraverse {
+		return nil, nil
+	}
+	return r.l.TraverseChildren(ctx, r.runID, r.plan.Steps[i].ID)
 }
 
 // stopped reports whether a verdict froze this record. A filter's fail stops
@@ -540,10 +566,16 @@ func (r *runner) openMessage(st *planner.Step, items []*item) protocol.Message {
 		pending = &protocol.PendingRef{Token: items[0].token}
 	}
 	fetched := fetchedFields(items)
-	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 || st.Of != "" {
+	traverseLimit := st.IsTraverse && st.Limit > 0
+	if len(st.Variables) > 0 || len(st.AIProvides) > 0 || len(fetched) > 0 || st.Of != "" || traverseLimit {
 		config = make(map[string]any, len(st.Config)+4)
 		for k, v := range st.Config {
 			config[k] = v
+		}
+		if traverseLimit {
+			// The step-level cap on children per parent (SPEC §9, ADR-054),
+			// the engine's key on a traverse as on a source (ADR-047).
+			config["limit"] = st.Limit
 		}
 		if st.Of != "" {
 			// The referent (ADR-048) rides in like the derived provides: the
