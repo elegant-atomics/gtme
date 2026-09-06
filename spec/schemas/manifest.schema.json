@@ -18,13 +18,28 @@
       "description": "Manifest version; part of the provenance string."
     },
     "role": {
-      "enum": ["source", "filter", "enrich", "verify", "compose", "review", "deliver"],
-      "description": "What the adapter does in a pipeline. Only enrich/verify are cache-skippable (SPEC.md §7). review (ADR-048) is compose-shaped — records advance on RECORD, no VERDICT is expected — with of: required on the step and never gating."
+      "enum": ["source", "traverse", "filter", "enrich", "verify", "compose", "review", "deliver"],
+      "description": "What the adapter does in a pipeline. Only enrich/verify are cache-skippable (SPEC.md §7). review (ADR-048) is compose-shaped — records advance on RECORD, no VERDICT is expected — with of: required on the step and never gating. traverse (ADR-054): records of `from` in, records of `entity_type` out, each related to the parent it was traversed from by `relation`; the run opens a new segment after it (SPEC.md §7)."
     },
     "entity_type": {
       "type": "string",
       "minLength": 1,
-      "description": "'person' | 'company' (extensible), or '*' for an entity-agnostic adapter (SPEC.md §6, ADR-033): its steps take the pipeline's entity type, and its static needs/provides are validated against that type at plan time. A source may not declare '*'."
+      "description": "A type file's name (SPEC.md §4a, ADR-054: person, company, post embedded; more arrive with bindings), or '*' for an entity-agnostic adapter (SPEC.md §6, ADR-033): its steps take the pipeline's entity type, and its static needs/provides are validated against that type at plan time. A source or a traverse may not declare '*'. For a traverse this is the OUTPUT type; `from` is the input."
+    },
+    "from": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Traverse only (ADR-054): the input type. The planner requires it to equal the current segment's type; needs is validated against it. It MAY equal entity_type (people to their coworkers is a traverse). Never '*'."
+    },
+    "relation": {
+      "type": "object",
+      "required": ["name", "from"],
+      "additionalProperties": false,
+      "description": "Traverse only (ADR-054): the edge written between every emitted record and the parent it was traversed from, and which end it starts at — record (authored_by runs from the post to its author) or parent (works_at runs from the person to the company traversed from).",
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "from": {"enum": ["record", "parent"]}
+      }
     },
     "needs": {
       "oneOf": [

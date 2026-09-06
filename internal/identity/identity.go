@@ -1,6 +1,7 @@
-// Package identity canonicalizes incoming records into identity keys.
-// Canonicalization lives here and nowhere else — adapters never compute keys
-// (SPEC §4).
+// Package identity holds the normalization rules identity keys and canonical
+// values share (SPEC §4, §4a): each rule exists exactly once, here. Which
+// rules a type keys on, and in what order, is the type file's identity list,
+// read by internal/registry — adapters never compute keys.
 package identity
 
 import (
@@ -13,26 +14,21 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// Entity types recognized in v0. The set is extensible; the ledger stores
-// whatever it is handed.
+// Person and Company name the two embedded subject types (SPEC §4a,
+// ADR-054). Since ADR-054 the set of types is a set of files, and no code
+// here switches on these names — they exist for the callers that mean one
+// specific type (the reference minting in the runner, tests).
 const (
 	Person  = "person"
 	Company = "company"
 )
 
-// Strength ranks how durable a key is. A record that arrives with a stronger
-// key than the identity it matches upgrades that identity in place (SPEC §4).
-// Values are compared relatively and never persisted.
+// Strength ranks how durable a key is: a tier's position in its type file's
+// identity list, first (strongest) highest (SPEC §4, ADR-054). A record that
+// arrives with a stronger key than the identity it matches upgrades that
+// identity in place. Values are compared relatively, within one type, and
+// never persisted.
 type Strength int
-
-const (
-	StrengthNameHash Strength = 1
-	StrengthTwitter  Strength = 2 // reserved handle tier, key prefix "tw:" (ADR-020)
-	StrengthGitHub   Strength = 3 // reserved handle tier, key prefix "gh:" (ADR-020)
-	StrengthSlug     Strength = 4 // normalized public LinkedIn slug
-	StrengthDomain   Strength = 4 // registrable domain, for companies
-	StrengthEmail    Strength = 5
-)
 
 // Key is a canonical identity key plus how strong it is.
 type Key struct {
@@ -41,83 +37,29 @@ type Key struct {
 	Strength   Strength
 }
 
-// Supported reports whether an entity type has a §4 key derivation in this
-// build — the set Candidates switches over. The static gates (plan, adapters
-// verify) consult it so an underivable type fails before anything is spent,
-// not per record at run time (#27).
-func Supported(entityType string) bool {
-	switch entityType {
-	case Person, Company:
-		return true
-	}
-	return false
-}
+// KeyRules are the normalization rules a field tier may name (SPEC §4a,
+// ADR-054): each is a public-identifier rule, so a key derived from it
+// cannot fork when a second vendor arrives.
+var KeyRules = map[string]bool{"email": true, "domain": true, "linkedin_url": true, "handle": true, "url": true}
 
-// SupportedTypes names the derivable entity types, for error text.
-func SupportedTypes() []string { return []string{Person, Company} }
-
-// Candidates returns every key that can be derived from fields for the given
-// entity type, strongest first. The first element is the key a new identity
-// should be created with; all of them are worth looking up, because the record
-// may already exist under a weaker key.
-//
-// An empty slice (with a nil error) means the record carries nothing
-// identifying; callers should treat that as a failed record.
-func Candidates(entityType string, fields map[string]any) ([]Key, error) {
-	switch entityType {
-	case Person:
-		return personCandidates(fields), nil
-	case Company:
-		return companyCandidates(fields), nil
-	default:
-		return nil, fmt.Errorf("identity: unknown entity_type %q", entityType)
+// KeyForm derives the identity-key value a field tier contributes from a
+// raw value under one of the KeyRules: the rule's normalized value, except
+// that linkedin_url keys on the public slug ("in/jane-doe", SPEC §4) rather
+// than the stored canonical URL. Empty means the value is not a key.
+func KeyForm(rule, value string) string {
+	switch rule {
+	case "email":
+		return NormalizeEmail(value)
+	case "domain":
+		return NormalizeDomain(value)
+	case "linkedin_url":
+		return NormalizeLinkedIn(value)
+	case "handle":
+		return NormalizeHandle(value)
+	case "url":
+		return NormalizeURL(value)
 	}
-}
-
-// KeyFor returns the strongest key derivable from fields.
-func KeyFor(entityType string, fields map[string]any) (Key, error) {
-	cands, err := Candidates(entityType, fields)
-	if err != nil {
-		return Key{}, err
-	}
-	if len(cands) == 0 {
-		return Key{}, fmt.Errorf("identity: no identity key derivable for %s record", entityType)
-	}
-	return cands[0], nil
-}
-
-func personCandidates(fields map[string]any) []Key {
-	var out []Key
-	if email := NormalizeEmail(str(fields, "email")); email != "" {
-		out = append(out, Key{Person, email, StrengthEmail})
-	}
-	// Only the public vanity form keys (SPEC §4, ADR-020): internal and
-	// Sales-Navigator URLs are separate fields and never key material.
-	if slug := NormalizeLinkedIn(str(fields, "linkedin_url")); slug != "" {
-		out = append(out, Key{Person, slug, StrengthSlug})
-	}
-	if h := NormalizeHandle(str(fields, "github_username")); h != "" {
-		out = append(out, Key{Person, "gh:" + h, StrengthGitHub})
-	}
-	if h := NormalizeHandle(str(fields, "twitter_handle")); h != "" {
-		out = append(out, Key{Person, "tw:" + h, StrengthTwitter})
-	}
-	if name := normalizeName(personName(fields)); name != "" {
-		domain := NormalizeDomain(str(fields, "company_domain"))
-		out = append(out, Key{Person, nameHash(name + "|" + domain), StrengthNameHash})
-	}
-	return out
-}
-
-func companyCandidates(fields map[string]any) []Key {
-	var out []Key
-	if d := NormalizeDomain(firstNonEmpty(str(fields, "domain"), str(fields, "company_domain"), str(fields, "website"))); d != "" {
-		out = append(out, Key{Company, d, StrengthDomain})
-	}
-	if name := normalizeName(firstNonEmpty(str(fields, "name"), str(fields, "company_name"))); name != "" {
-		out = append(out, Key{Company, nameHash(name), StrengthNameHash})
-	}
-	return out
+	return ""
 }
 
 // NormalizeEmail lowercases and trims an email address. Anything without an
@@ -305,30 +247,51 @@ func NormalizeDomain(s string) string {
 	return etld1
 }
 
-func personName(fields map[string]any) string {
-	if s := firstNonEmpty(str(fields, "full_name"), str(fields, "name")); s != "" {
-		return s
-	}
-	first, last := strings.TrimSpace(str(fields, "first_name")), strings.TrimSpace(str(fields, "last_name"))
-	if first != "" && last != "" {
-		return first + " " + last
-	}
-	return ""
-}
-
-// normalizeName lowercases, trims, and collapses internal whitespace.
-func normalizeName(s string) string {
+// NormalizeName is the hash-tier value rule (SPEC §4a, ADR-054): lowercase,
+// trimmed, internal whitespace collapsed.
+func NormalizeName(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
-func nameHash(s string) string {
+// NameHash is the nh: fallback tier's key: sha256 over the joined
+// components, hex, under the tier's prefix (SPEC §4).
+func NameHash(prefix, s string) string {
 	sum := sha256.Sum256([]byte(s))
-	return "nh:" + hex.EncodeToString(sum[:])
+	return prefix + hex.EncodeToString(sum[:])
 }
 
-// str reads a field as a string. Numbers and other scalars that arrive from
+// NormalizeURL is the registry's url rule (SPEC §4, ADR-054): a
+// platform-public URL as a key. Trim; lowercase the scheme and host; drop
+// the fragment and any trailing slash; keep the path and query as written.
+// Anything without an http(s) scheme and a host is not a URL under this
+// rule and returns "".
+func NormalizeURL(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		s = s[:i]
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	u.Scheme = scheme
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+	u.RawFragment = ""
+	out := u.String()
+	for strings.HasSuffix(out, "/") && !strings.HasSuffix(out, "://") {
+		out = strings.TrimSuffix(out, "/")
+	}
+	return out
+}
+
+// Str reads a field as a string. Numbers and other scalars that arrive from
 // CSV or JSON are formatted rather than dropped.
-func str(fields map[string]any, key string) string {
+func Str(fields map[string]any, key string) string {
 	v, ok := fields[key]
 	if !ok || v == nil {
 		return ""
@@ -341,13 +304,4 @@ func str(fields map[string]any, key string) string {
 	default:
 		return fmt.Sprint(t)
 	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 	"github.com/elegant-atomics/gtme/internal/pipeline"
 	"github.com/elegant-atomics/gtme/internal/registry"
@@ -360,6 +359,10 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 	available := map[string]bool{}
 	steps := p.AllSteps()
 	scope := Scope{Ctx: ctx, Pipeline: p.Name, Ledger: l}
+	reg, err := registry.Load()
+	if err != nil {
+		return nil, &Errors{Problems: []Problem{{Kind: KindAdapter, Msg: err.Error()}}}
+	}
 
 	for i, s := range steps {
 		isSource := i == 0
@@ -405,42 +408,38 @@ func Build(ctx context.Context, p *pipeline.Pipeline, l *ledger.Ledger) (*Plan, 
 				}
 			}
 		}
-		// An entity_type with no §4 key derivation fails the plan outright: the
-		// runner would drop every sourced record at the identity boundary,
-		// after the source has been called and billed (#27). Static, so it is
-		// judged here, with no network and no spend.
-		if isSource && ps.EntityType != "" && !identity.Supported(ps.EntityType) {
-			problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-				Msg: fmt.Sprintf("entity_type %q has no identity derivation in this build (SPEC §4 defines %s) — every sourced record would be dropped at the identity boundary",
-					ps.EntityType, strings.Join(identity.SupportedTypes(), ", "))})
-		} else if isSource && ps.Manifest != nil && !ps.Wildcard && len(ps.Provides) > 0 {
-			// A source with an exact (probed, closed) schema is checked for an
-			// identity-key path (SPEC §7, ADR-018): no derivable tier is an
-			// error, only the name-hash fallback is a note. Judged here and
-			// only here — downstream sufficiency is each following step's own
-			// needs check.
-			strong, weak := identityPath(ps.EntityType, ps.Provides)
-			switch {
-			case !strong && !weak:
-				problems = append(problems, Problem{Step: s.ID, Kind: KindContract,
-					Msg: fmt.Sprintf("no identity-key path: none of the source's fields (%s) can derive a %s identity (SPEC §4) — map a column to an identity field with columns:",
-						strings.Join(ps.Provides, ", "), ps.EntityType)})
-			case !strong:
+		// The adapter–type contract (SPEC §4a, ADR-054): the type resolves to
+		// one file, provides is canonical for it, and a source can key what
+		// it emits — judged here, with no network and no spend, so an
+		// unkeyable source fails the plan rather than the run, after the
+		// vendor has billed (#27). Only the name-hash fallback is a note.
+		if isSource && ps.EntityType != "" && ps.Manifest != nil && reg != nil {
+			contract, weak := reg.Contract(ps.Manifest, ps.EntityType, ps.Provides, ps.Wildcard)
+			for _, cp := range contract {
+				kind := KindContract
+				if cp.Check == "provides" {
+					kind = KindAdapter
+				}
+				msg := cp.Msg
+				if cp.Check == "key" {
+					msg += " — map a column to an identity field with columns:"
+				}
+				problems = append(problems, Problem{Step: s.ID, Kind: kind, Msg: msg})
+			}
+			if weak {
 				ps.Notes = append(ps.Notes,
 					"only the name-hash fallback identity tier is derivable from this source; dedupe will be weak until something provides an email or public profile URL")
 			}
 			// Near-miss columns (SPEC §7): a csv.* leftover a small edit away
 			// from a canonical name is SUGGESTED, never silently mapped.
-			if reg, err := registry.Load(); err == nil {
-				for _, f := range ps.Provides {
-					bare, ok := strings.CutPrefix(f, "csv.")
-					if !ok {
-						continue
-					}
-					if s := reg.Suggest(ps.EntityType, bare); s != "" {
-						ps.Notes = append(ps.Notes,
-							fmt.Sprintf("column %q looks like canonical %q — map it explicitly with columns: {%s: <your header>}", bare, s, s))
-					}
+			for _, f := range ps.Provides {
+				bare, ok := strings.CutPrefix(f, "csv.")
+				if !ok {
+					continue
+				}
+				if s := reg.Suggest(ps.EntityType, bare); s != "" {
+					ps.Notes = append(ps.Notes,
+						fmt.Sprintf("column %q looks like canonical %q — map it explicitly with columns: {%s: <your header>}", bare, s, s))
 				}
 			}
 		}
@@ -1474,27 +1473,6 @@ func describeBranches(branches [][]string, available map[string]bool) string {
 		parts = append(parts, desc)
 	}
 	return strings.Join(parts, " or ")
-}
-
-// identityPath reports which SPEC §4 identity tiers a field set can derive:
-// strong is any non-name-hash tier, weak the name-hash fallback.
-func identityPath(entityType string, fields []string) (strong, weak bool) {
-	have := map[string]bool{}
-	for _, f := range fields {
-		have[f] = true
-	}
-	switch entityType {
-	case "person", "":
-		strong = have["email"] || have["linkedin_url"] || have["github_username"] || have["twitter_handle"]
-		weak = have["full_name"] || have["name"] || (have["first_name"] && have["last_name"])
-	case "company":
-		strong = have["company_domain"] || have["domain"] || have["website"]
-		weak = have["company_name"] || have["name"]
-	default:
-		// An extensible entity type with no registry vocabulary: nothing to judge.
-		return true, true
-	}
-	return strong, weak
 }
 
 // appendMissing adds s to list unless it is already there.

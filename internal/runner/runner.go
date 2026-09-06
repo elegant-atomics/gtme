@@ -20,7 +20,6 @@ import (
 	"github.com/elegant-atomics/gtme/internal/adapters"
 	"github.com/elegant-atomics/gtme/internal/ai"
 	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/identity"
 	"github.com/elegant-atomics/gtme/internal/ledger"
 	participantpkg "github.com/elegant-atomics/gtme/internal/participant"
 	"github.com/elegant-atomics/gtme/internal/planner"
@@ -881,28 +880,21 @@ func (r *runner) ingestSourceRecord(ctx context.Context, st *planner.Step, m pro
 	if !added {
 		// Which row merged into which identity is a ledger fact, not a count
 		// (SPEC §8, ADR-053): the row's own keys, and the identity that won.
-		detail := map[string]any{"into": ident.IdentityKey, "keys": rowKeys(st.EntityType, m)}
+		detail := map[string]any{"into": ident.IdentityKey, "keys": rowKeys(r.reg, st.EntityType, m)}
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), ident.ID, "coalesced", detail); err != nil {
 			return false, err
 		}
 		return false, nil
 	}
 	r.emit(protocol.Key{EntityType: ident.EntityType, IdentityKey: ident.IdentityKey}, m.Fields)
-	// Relate the person to their company when the source gave us a domain
-	// (SPEC §10.2 wants the relation; the runner owns identity, so it lives here).
-	if st.EntityType == identity.Person {
-		if err := r.relateCompany(ctx, st, ident.ID, m.Fields); err != nil {
-			return true, err
-		}
-	}
-	return true, nil
+	return true, r.writeReferences(ctx, st, ident.EntityType, ident.ID, m.Fields)
 }
 
 // rowKeys names the identity keys a sourced row carried, as written — the
 // half of a coalesce event that identifies the row.
-func rowKeys(entityType string, m protocol.Message) []string {
+func rowKeys(reg *registry.Registry, entityType string, m protocol.Message) []string {
 	var keys []string
-	if cands, err := identity.Candidates(entityType, m.Fields); err == nil {
+	if cands, err := reg.Candidates(entityType, m.Fields); err == nil {
 		for _, c := range cands {
 			keys = append(keys, c.Value)
 		}
@@ -913,23 +905,43 @@ func rowKeys(entityType string, m protocol.Message) []string {
 	return keys
 }
 
-func (r *runner) relateCompany(ctx context.Context, st *planner.Step, personID string, fields map[string]any) error {
-	domain := identity.NormalizeDomain(str(fields["company_domain"]))
-	if domain == "" {
+// writeReferences applies the type file's reference declarations (SPEC §4a,
+// ADR-054) to fields just written: for every field carrying a reference, the
+// identity it names is resolved-or-minted from the listed fields, populated
+// under the same names, and the relation is written from the record to it.
+// `company_domain` on a person declares works_at → company, which is how the
+// edge has always been written; the declaration is now the registry's, and
+// this is the one generic path. A referenced identity is a ledger fact, never
+// a run member. A referenced identity that cannot be keyed is not worth
+// failing the record over.
+func (r *runner) writeReferences(ctx context.Context, st *planner.Step, entityType, identityID string, fields map[string]any) error {
+	t, err := r.reg.Resolve(entityType)
+	if err != nil {
 		return nil
 	}
-	company := map[string]any{"domain": domain}
-	if name := str(fields["company_name"]); name != "" {
-		company["name"] = name
+	for _, f := range t.References() {
+		if stringify(fields[f.Name]) == "" {
+			continue
+		}
+		ref := f.Reference
+		sub := map[string]any{}
+		for _, name := range ref.Fields {
+			if v, ok := fields[name]; ok && stringify(v) != "" {
+				sub[name] = v
+			}
+		}
+		res, err := r.l.UpsertIdentity(ctx, ref.Type, sub, r.prov(st.ID))
+		if err != nil {
+			continue
+		}
+		if _, err := r.l.WriteFieldMap(ctx, res.Identity.ID, r.source(st), r.prov(st.ID), sub, nil); err != nil {
+			return err
+		}
+		if err := r.l.Relate(ctx, identityID, ref.Relation, res.Identity.ID); err != nil {
+			return err
+		}
 	}
-	res, err := r.l.UpsertIdentity(ctx, identity.Company, company, r.prov(st.ID))
-	if err != nil {
-		return nil // a company we cannot key is not worth failing a person over
-	}
-	if _, err := r.l.WriteFieldMap(ctx, res.Identity.ID, st.Manifest.Source(), r.prov(st.ID), company, nil); err != nil {
-		return err
-	}
-	return r.l.Relate(ctx, personID, "works_at", res.Identity.ID)
+	return nil
 }
 
 func str(v any) string {

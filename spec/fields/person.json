@@ -1,7 +1,41 @@
 {
   "entity_type": "person",
   "version": 1,
-  "description": "Canonical field registry for person records (SPEC.md §4a, ADR-017). Seeded from the fields the v0 adapters actually touch plus the curated cross-provider overlap. A field name not listed here must be vendor-namespaced (<vendor>.<field>).",
+  "kind": "subject",
+  "description": "Canonical field registry for person records (SPEC.md §4a, ADR-017). Seeded from the fields the v0 adapters actually touch plus the curated cross-provider overlap. A field name not listed here must be vendor-namespaced (<vendor>.<field>). A subject type (ADR-054): what a pipeline delivers to. The identity list is SPEC.md §4's person derivation, tier by tier.",
+  "identity": [
+    {
+      "field": "email"
+    },
+    {
+      "field": "linkedin_url"
+    },
+    {
+      "field": "github_username",
+      "prefix": "gh:"
+    },
+    {
+      "field": "twitter_handle",
+      "prefix": "tw:"
+    },
+    {
+      "hash": [
+        {
+          "any": [
+            "full_name",
+            {
+              "join": [
+                "first_name",
+                "last_name"
+              ]
+            }
+          ]
+        },
+        "company_domain"
+      ],
+      "prefix": "nh:"
+    }
+  ],
   "fields": [
     {
       "name": "email",
@@ -158,8 +192,16 @@
       "tier": "core",
       "type": "string",
       "normalization": "domain",
-      "description": "Current employer's registrable domain (eTLD+1). The comparable, dedupe-safe form — never a full URL.",
-      "example": "acme.com"
+      "description": "Current employer's registrable domain (eTLD+1). The comparable, dedupe-safe form — never a full URL. Declares the works_at reference (ADR-054): a person record carrying it also names a company, keyed and populated from company_domain and company_name, and the runner writes works_at from the person to it.",
+      "example": "acme.com",
+      "reference": {
+        "type": "company",
+        "relation": "works_at",
+        "fields": [
+          "company_domain",
+          "company_name"
+        ]
+      }
     },
     {
       "name": "company_website",
@@ -218,7 +260,10 @@
       "items_type": "string",
       "normalization": "none",
       "description": "Past roles, most recent first, one string per role.",
-      "example": ["VP Marketing, Acme Corp (2022–)", "Director of Growth, Beta Inc (2018–2022)"]
+      "example": [
+        "VP Marketing, Acme Corp (2022–)",
+        "Director of Growth, Beta Inc (2018–2022)"
+      ]
     },
     {
       "name": "recent_posts",
@@ -227,7 +272,9 @@
       "items_type": "string",
       "normalization": "none",
       "description": "Recent public post texts, most recent first.",
-      "example": ["Shipped our new onboarding flow today…"]
+      "example": [
+        "Shipped our new onboarding flow today…"
+      ]
     },
     {
       "name": "follower_count",

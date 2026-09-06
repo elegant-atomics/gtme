@@ -316,7 +316,7 @@ func TestRelateIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertIdentity: %v", err)
 	}
-	company, err := l.UpsertIdentity(ctx, identity.Company, map[string]any{"domain": "acme.com"}, Provenance{})
+	company, err := l.UpsertIdentity(ctx, identity.Company, map[string]any{"company_domain": "acme.com"}, Provenance{})
 	if err != nil {
 		t.Fatalf("UpsertIdentity: %v", err)
 	}

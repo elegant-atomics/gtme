@@ -1196,6 +1196,11 @@ func (r *runner) applyRecord(ctx context.Context, st *planner.Step, byKey map[st
 			// Not every enrichment carries identifying fields; that is fine.
 			_ = err
 		}
+		// A reference field just written names another identity (SPEC §4a,
+		// ADR-054): the relation is written wherever the field is.
+		if err := r.writeReferences(ctx, st, it.key.EntityType, it.identityID, m.Fields); err != nil {
+			return err
+		}
 	}
 	// A filter's RECORD carries its declared provides (SPEC §5, ADR-033) —
 	// stored like any output, pass or fail — but only its VERDICT advances.

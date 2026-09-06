@@ -1,7 +1,19 @@
 {
   "entity_type": "company",
   "version": 1,
-  "description": "Canonical field registry for company records (SPEC.md §4a, ADR-017). Company fields keep the company_ prefix so the same fact has the same name whether it appears on a company record or embedded on a person record.",
+  "kind": "subject",
+  "description": "Canonical field registry for company records (SPEC.md §4a, ADR-017). Company fields keep the company_ prefix so the same fact has the same name whether it appears on a company record or embedded on a person record. A subject type (ADR-054); the identity list is SPEC.md §4's company derivation.",
+  "identity": [
+    {
+      "field": "company_domain"
+    },
+    {
+      "hash": [
+        "company_name"
+      ],
+      "prefix": "nh:"
+    }
+  ],
   "fields": [
     {
       "name": "company_domain",

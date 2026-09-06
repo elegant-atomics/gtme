@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/elegant-atomics/gtme/internal/registry"
 	"github.com/elegant-atomics/gtme/internal/ulid"
 )
 
@@ -60,7 +61,11 @@ type UpsertResult struct {
 // stored key is upgraded in place and an 'identity_upgraded' step event is
 // written — never a duplicate identity.
 func (l *Ledger) UpsertIdentity(ctx context.Context, entityType string, fields map[string]any, prov Provenance) (UpsertResult, error) {
-	cands, err := identity.Candidates(entityType, fields)
+	reg, err := registry.Load()
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	cands, err := reg.Candidates(entityType, fields)
 	if err != nil {
 		return UpsertResult{}, err
 	}

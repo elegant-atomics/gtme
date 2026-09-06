@@ -81,6 +81,9 @@ func (r *runner) runSQLStep(ctx context.Context, st *planner.Step, identityIDs [
 			if _, err := r.l.WriteFieldMap(ctx, identityID, source, r.prov(st.ID), fields, nil); err != nil {
 				return err
 			}
+			if err := r.writeReferences(ctx, st, ident.EntityType, identityID, fields); err != nil {
+				return err
+			}
 		}
 		if err := r.l.LogStepEvent(ctx, r.prov(st.ID), identityID, "done",
 			map[string]any{"fields": len(fields)}); err != nil {
