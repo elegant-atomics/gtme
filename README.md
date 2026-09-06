@@ -320,7 +320,11 @@ gtme run examples/cache.yaml        # again: 3 cached, $0.0300 avoided, nothing 
 deterministic scores labelled synthetic in the value itself, at a stated
 pretend price — so the receipt's `cached` and `avoided` columns fill in
 for real, and every dollar it prints is labelled `demo/enrich` wherever it
-appears. The SQL filter and the CSV delivery are the real adapters.
+appears. The SQL filter and the CSV delivery are the real adapters. What
+this proves is the mechanism, not the savings: the counter is real, the
+$0.03 is not. The same column with a vendor's real price is the ladder
+below, and a second run of `apollo-to-instantly.yaml` at campaign size
+is where it turns into money.
 
 **Then with real keys**, the same file climbs the ladder:
 
