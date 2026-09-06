@@ -209,7 +209,7 @@ canonical examples were written to avoid referencing it precisely because
 an unimplemented adapter in a "this must pass `gtme plan`" example would be
 self-contradicting (see `TestHelpAgentExamplesPassPlan`).
 
-**Closed by deferral, 2026-09-06 (ADR-055, proposed).** The adapter moves
+**Closed by deferral, 2026-09-06 (ADR-055, accepted by merge of PR #58).** The adapter moves
 to ROADMAP.md and every document that listed it as shipping stops; §8's
 recipe states what actually ships (a scheduled run over a CSV a receiver
 writes). Nothing to build here.

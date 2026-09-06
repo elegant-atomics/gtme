@@ -2806,7 +2806,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.45 (proposed) — 2026-09-06 (ADR-055: `webhook/source` deferred)
+### v0.45 — 2026-09-06 (ADR-055: `webhook/source` deferred; accepted by merge, no build)
 **Removed:** §10 item 8, `webhook/source` — specified from ADR-009's
 reconciliation, never built (AUDIT.md), now on ROADMAP.md with `listen`
 as the design pass it returns with.

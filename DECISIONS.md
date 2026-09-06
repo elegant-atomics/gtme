@@ -3256,9 +3256,9 @@ everything else stays honestly `estimated`.
 manifests ride the build.
 
 ### ADR-055: `webhook/source` is deferred — the recipe stands, the adapter does not ship in v0
-**Status:** Proposed (2026-09-06 — from AUDIT.md's deferred (a) item,
-the one place the spec describes an adapter the binary does not contain;
-not accepted until a human merges the packet)
+**Status:** Accepted (2026-09-06 — from AUDIT.md's deferred (a) item,
+the one place the spec described an adapter the binary does not contain;
+human-approved 2026-09-06 by merging the packet, PR #58)
 **Context:** ADR-009 answered "run a pipeline when an event happens"
 without a daemon: a commodity receiver appends payloads to a spool, and a
 scheduled `gtme run` drains it through a `webhook/source` adapter. §8
