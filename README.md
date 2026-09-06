@@ -170,12 +170,19 @@ you already paid for — at zero vendor spend.
 
 ## Install
 
-Prebuilt binaries for macOS and Linux are on the
-[releases page](https://github.com/elegant-atomics/gtme/releases) — verify
-against `checksums.txt`, untar, put `gtme` on your PATH, `gtme init`.
-Building from source is `git clone` + `./install.sh` (Go 1.24+), which
-also installs the repo's example external adapters so the README
-quickstart works offline.
+```sh
+brew install elegant-atomics/tap/gtme     # macOS and Linux, arm64 and amd64
+```
+
+The [tap](https://github.com/elegant-atomics/homebrew-tap) installs the
+prebuilt binary from the [releases
+page](https://github.com/elegant-atomics/gtme/releases), verified against
+the `checksums.txt` published beside it; without Homebrew, do the same by
+hand — untar, put `gtme` on your PATH, `gtme init`. Building from source
+is `git clone` + `./install.sh` (Go 1.24+), which also installs the
+repo's example external adapters so the README quickstart works offline.
+Whichever way, **[START.md](START.md)** is the next page: four doors,
+each one pipeline file, each ending in a receipt.
 
 ## The adapters
 
@@ -285,11 +292,15 @@ gtme run examples/demo.yaml --simulate
 ```
 
 The Apollo source serves its conformance fixtures, the AI steps answer
-synthetically (and are *marked* synthetic in provenance), delivery is held
-with its variables resolved into the receipt — and one record visibly
-fails the delivery floor, because its email is Apollo's locked-email
-placeholder and gtme refuses to key an identity on garbage. Receipts are
-honest here; that's the point.
+synthetically (and are *marked* synthetic in provenance), the reveal step
+prints its estimated charge, and delivery is held with its variables
+resolved into the receipt. One sourced record has no email — Apollo's
+locked-email placeholder is treated as absent, never as an identity key —
+so it is keyed by name hash; both held records then read "Jane Doe",
+because the reveal fixture answers every lookup with the same sanitized
+person. Fixtures are canned responses, and the receipt says `SIMULATED`
+so nobody mistakes them for data. Run it twice: the receipts are
+identical, because a simulated run persists nothing.
 
 **Then with real keys**, the same file climbs the ladder:
 

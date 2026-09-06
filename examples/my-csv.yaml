@@ -1,0 +1,47 @@
+# Door 2 of START.md: your CSV in, judged and written rows out. One model key
+# (gtme secret set ANTHROPIC_API_KEY); nothing leaves the machine but the
+# model calls, and the deliver target is a local file.
+#
+#   gtme plan my-csv.yaml              # $0: checks the column mapping and contracts
+#   gtme run  my-csv.yaml --simulate   # $0: the shape of the output, from fixtures
+#   gtme run  my-csv.yaml              # spends on the model; writes out.csv
+#   gtme run  my-csv.yaml              # again: cached, nothing delivered twice
+#
+# Edit `path:` and `columns:` for your file, then the two prompts.
+name: my-csv
+version: 1
+
+source:
+  use: csv/source
+  with:
+    path: contacts.csv
+    columns:                      # canonical name: your header — unmapped headers are kept as csv.<header>
+      full_name: Full Name
+      email: Email
+      title: Title
+      company_domain: Company Website
+
+steps:
+  - id: fit
+    use: ai/filter
+    uses: [full_name, title, company_domain]
+    with:
+      prompt: >
+        Keep people who plausibly own outbound tooling decisions.
+
+  - id: lines
+    use: ai/compose
+    when: fit.passed
+    uses: [full_name, title, company_domain]
+    with:
+      prompt: >
+        Write first_line and ps_line for a short, honest intro email.
+
+  - id: out                     # a deliver step to a local CSV: universal output, and the review artifact
+    use: csv/deliver
+    with:
+      path: out.csv
+    variables:
+      first_line: first_line
+      ps_line: ps_line
+    idempotency: email          # re-runs append nothing twice
