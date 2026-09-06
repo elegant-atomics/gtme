@@ -180,3 +180,25 @@ func TestDemoPipelinePlans(t *testing.T) {
 		t.Errorf("apollo/enrich runs before the filter — ADR-043 pays only past it")
 	}
 }
+
+// TestMyCSVPipelinePlans guards START.md's second door the same way:
+// examples/my-csv.yaml must plan against a CSV whose headers are the ones its
+// columns: block names, with only the one model key it promises.
+func TestMyCSVPipelinePlans(t *testing.T) {
+	h := newHarness(t)
+
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "examples", "my-csv.yaml"))
+	if err != nil {
+		t.Fatalf("reading the my-csv pipeline: %v", err)
+	}
+	h.write("my-csv.yaml", string(raw))
+	h.write("contacts.csv", "Full Name,Email,Title,Company Website\n"+
+		"Jane Doe,jane.doe@acme.com,VP Marketing,https://www.acme.com\n")
+
+	res := h.runWithEnv([]string{"ANTHROPIC_API_KEY=plan-only"}, "", "plan", "my-csv.yaml")
+	if res.code != 0 {
+		t.Fatalf("exit = %d, want 0 — START.md offers this command\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "plan ok — nothing has been spent", "my-csv plan")
+	contains(t, res.stderr, "out → csv/deliver", "the deliver target is a local file")
+}

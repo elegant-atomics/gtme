@@ -298,10 +298,10 @@ append like any adapter output, provenance `sql/transform @ <query-hash>`.
 Batches records into one model call (default 25/batch) and returns
 per-record verdicts with reasons — which land in the ledger, so prompt
 tuning is a SQL query over what the model actually decided. Declare the
-fields the prompt reads with `uses:`; they're plan-checked. Engine is
-config (`engine: api | claude-code`), model overridable per step;
-provenance records the model id. Credential: `ANTHROPIC_API_KEY`
-(optional — the `claude-code` engine needs none).
+fields the prompt reads with `uses:`; they're plan-checked. The engine
+is the Anthropic Messages API (ADR-050: there is no `engine:` key — an
+`agent/*` step is how an agent answers instead), model overridable per
+step; provenance records the model id. Credential: `ANTHROPIC_API_KEY`.
 
 A filter MAY also declare output fields with a step-level `provides:`
 (ADR-033) — a list of names, or a map of name → `{type, enum}`:
@@ -352,8 +352,7 @@ ends the run **`pending`** — the step must be the pipeline's last, so its
 judgment lands in the `group:` terminus and a consumer pipeline pulls it.
 The next `gtme run` of the pipeline collects (still processing → still
 pending; run again later, from cron or by hand — nothing waits). Under
-`--simulate`, or on `engine: claude-code` (no batch surface), the step
-answers synchronously and says so. `gtme plan` warns when a judgment step
+`--simulate` the step answers synchronously and says so. `gtme plan` warns when a judgment step
 has nothing remembering its answers (add `exclude:` naming a group the
 pipeline writes, or say `respend: true`).
 
