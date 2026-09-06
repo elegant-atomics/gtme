@@ -2452,7 +2452,7 @@ decided contract, not shipped behavior.
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
 - **M28 — types and traverse (ADR-054; §3, §4, §4a, §5, §6, §7, §8, §9,
-  §10a, §13). Queued.** A type is a file: `spec/fields/*.json` gain
+  §10a, §13). Built 2026-09-05 (changelog v0.43).** A type is a file: `spec/fields/*.json` gain
   `kind`, `identity` and per-field `reference`, §4 derivation reads the
   `identity` list (person and company unchanged in behavior, `post`
   seeded), the `url` rule exists, and types are discovered from the
@@ -2796,6 +2796,19 @@ no reconstruction required from raw table scans.
 Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
+
+### v0.43 — 2026-09-05 (M28 build: types and traverse, built)
+**Changed:** §11 M28 marked built. No normative text changed beyond that.
+Implementation choices — how a hash tier expresses §4's name fallback
+(`{any: […]}`/`{join: […]}` components, first required), how the segment
+after a traverse is derived from the traverse's own events rather than a
+column (the same-type case ADR-054 (6) allows needs it), one parent per
+session as the wire's parent attribution, a legacy group staying untyped
+on its first write, references written wherever their field is, SQL
+steps taking their segment's type, and the plan's `writes:` line — are
+recorded as the 2026-09-05 M28 decision. The schema for type files admits
+the hash-component forms; `spec/schemas/pipeline.schema.json` admits
+`limit:` on a traverse step; migration `0013` adds `groups.entity_type`.
 
 ### v0.42 — 2026-09-05 (ADR-054: types and traverse; build queued as M28)
 **Added:** §4a type files — `kind: subject | signal`, an ordered
