@@ -3353,9 +3353,10 @@ no-daemon answer). README.md and ADAPTERS.md drop the adapter. AUDIT.md's
 deferred item closes by reference. ROADMAP.md gains the entry.
 
 ### ADR-056: `demo/enrich` — a priced, keyless enrichment so the zero-key path shows the cache
-**Status:** Proposed (2026-09-06 — from the launch onboarding work: the
+**Status:** Accepted (2026-09-06 — from the launch onboarding work: the
 zero-key demo cannot print the top-up receipt, because a simulated run
-persists nothing by ADR-028's own design)
+persists nothing by ADR-028's own design; human-approved 2026-09-06 by
+merging the packet, PR #63; built as M29)
 **Context:** The README's strongest line is the second run: overlapping
 records cache-skip and the receipt prints dollars *avoided*. Today that
 receipt needs a key. Every priced step either calls a vendor or a model,
