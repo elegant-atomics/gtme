@@ -303,6 +303,19 @@ person. Fixtures are canned responses, and the receipt says `SIMULATED`
 so nobody mistakes them for data. Run it twice: the receipts are
 identical, because a simulated run persists nothing.
 
+**The zero-key top-up** — the second receipt, on a ledger that persists:
+
+```sh
+gtme run examples/cache.yaml        # three people scored at $0.01 each, one kept, out.csv written
+gtme run examples/cache.yaml        # again: 3 cached, $0.0300 avoided, nothing delivered twice
+```
+
+`demo/enrich` is the binary's own synthetic enrichment: no vendor, no key,
+deterministic scores labelled synthetic in the value itself, at a stated
+pretend price — so the receipt's `cached` and `avoided` columns fill in
+for real, and every dollar it prints is labelled `demo/enrich` wherever it
+appears. The SQL filter and the CSV delivery are the real adapters.
+
 **Then with real keys**, the same file climbs the ladder:
 
 ```sh

@@ -31,6 +31,7 @@ var manifestJSON = []byte(`{
   "entity_type": "person",
   "needs": "dynamic",
   "idempotency_scope": "path",
+  "cost_estimate_usd": 0,
   "config_schema": {
     "type": "object",
     "required": ["path"],

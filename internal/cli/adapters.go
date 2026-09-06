@@ -313,6 +313,13 @@ func verifyBindingDir(env Env, dir string) (*binding.Binding, error) {
 	if err != nil {
 		return nil, fail(ExitValidation, "adapters: %s: %v", b.ID, err)
 	}
+	// The demo/ prefix is reserved (SPEC §10 item 9, ADR-056): demo/enrich's
+	// output is synthetic by construction, and nothing installed may borrow
+	// the prefix that says so.
+	if strings.HasPrefix(b.ID, "demo/") {
+		return nil, fail(ExitValidation,
+			"adapters: %s: the demo/ prefix is reserved for the binary's own synthetic adapters (SPEC §10 item 9); name the binding after its vendor — refusing to install", b.ID)
+	}
 	// The adapter–type contract (SPEC §4a, ADR-054): the type resolves to
 	// one file, provides is canonical for it, and a source or traverse can
 	// key what it emits — refusing here closes the gap between "certified"

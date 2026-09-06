@@ -1,0 +1,34 @@
+{
+  "id": "demo/enrich",
+  "version": 1,
+  "role": "enrich",
+  "entity_type": "person",
+  "needs": {
+    "type": "object",
+    "properties": {
+      "email": {"type": "string"},
+      "full_name": {"type": "string"}
+    },
+    "anyOf": [
+      {"required": ["email"]},
+      {"required": ["full_name"]}
+    ]
+  },
+  "provides": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "demo.score": {"type": "integer", "minimum": 0, "maximum": 100},
+      "demo.note": {"type": "string"}
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "cost_per_record_usd": {"type": "number", "minimum": 0, "description": "The pretend price of one enrichment, for the receipt's arithmetic (default 0.01)"}
+    }
+  },
+  "freshness_days": 30,
+  "cost_estimate_usd": 0.01
+}

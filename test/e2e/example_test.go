@@ -224,3 +224,81 @@ func TestReceiptNamesTheMissingKey(t *testing.T) {
 	}
 	contains(t, res.stderr, "fit: 2 failed — ai: ANTHROPIC_API_KEY is not set (run `gtme secret set ANTHROPIC_API_KEY`)", "the receipt names the key")
 }
+
+// M29 acceptance (SPEC §11, ADR-056): the zero-key top-up demo. Planned with
+// no environment, examples/cache.yaml prices demo/enrich at $0.01; run armed
+// twice against an empty ledger, the first receipt spends $0.03 on three
+// records and delivers one, the second cache-skips all three, prints the
+// $0.03 avoided, calls no adapter, and delivers nothing twice.
+func TestCacheExampleShowsTheDelta(t *testing.T) {
+	h := newHarness(t)
+	for _, name := range []string{"cache.yaml", "contacts.csv"} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot(), "examples", name))
+		if err != nil {
+			t.Fatalf("reading examples/%s: %v", name, err)
+		}
+		h.write(name, string(raw))
+	}
+
+	plan := h.mustRun("plan", "cache.yaml")
+	contains(t, plan.stderr, "score [enrich] — demo/enrich@1", "plan resolves the built-in")
+	contains(t, plan.stderr, "est/record: $0.0100", "plan prints the pretend price")
+
+	first := h.mustRun("run", "cache.yaml")
+	contains(t, first.stderr, "score: 3 in, 3 out, 0 cached", "first run scores everyone")
+	contains(t, first.stderr, "keep: 3 in, 1 out, 0 cached, 2 filtered", "the SQL filter judges")
+	contains(t, first.stderr, "out: 1 in, 1 out", "one delivered")
+	contains(t, first.stderr, "total: $0.0300 (estimated) spent", "first receipt total")
+	if n := h.queryInt(`SELECT count(*) FROM field_values WHERE field = 'demo.score' AND source = 'demo/enrich@1'`); n != 3 {
+		t.Errorf("demo.score values with provenance = %d, want 3", n)
+	}
+	if n := h.queryInt(`SELECT count(*) FROM costs WHERE provider = 'demo'`); n != 3 {
+		t.Errorf("demo cost rows = %d, want 3", n)
+	}
+	if got := h.queryStrings(`SELECT value FROM current_values WHERE field = 'demo.note' LIMIT 1`); len(got) != 1 || got[0] != "synthetic — demo/enrich called no vendor" {
+		t.Errorf("demo.note = %v", got)
+	}
+
+	second := h.mustRun("run", "cache.yaml")
+	contains(t, second.stderr, "score: 3 in, 0 out, 3 cached", "second run cache-skips")
+	contains(t, second.stderr, "$0.0300", "the receipt prints the dollars avoided")
+	contains(t, second.stderr, "avoided via cache", "second receipt")
+	contains(t, second.stderr, "out: 1 in, 0 out, 1 cached", "nothing delivered twice")
+	if n := h.queryInt(`SELECT count(*) FROM costs WHERE provider = 'demo'`); n != 3 {
+		t.Errorf("demo cost rows after the second run = %d, want 3 (no adapter call)", n)
+	}
+	if n := h.queryInt(`SELECT count(*) FROM step_events WHERE event = 'skipped_cache' AND step_id = 'score'`); n != 3 {
+		t.Errorf("skipped_cache events = %d, want 3", n)
+	}
+}
+
+// The demo/ prefix is reserved (ADR-056): a well-formed binding installed
+// under it — here a shipped one, renamed — is refused by name.
+func TestDemoPrefixIsReserved(t *testing.T) {
+	h := newHarness(t)
+	src := filepath.Join(repoRoot(), "spec", "bindings", "apollo-enrich")
+	dir := filepath.Join(h.home, ".gtme", "adapters", "demo-things")
+	if err := os.MkdirAll(filepath.Join(dir, "fixtures"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(src, "binding.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Replace(string(raw), "id: apollo/enrich", "id: demo/things", 1)
+	if err := os.WriteFile(filepath.Join(dir, "binding.yaml"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixtures, err := os.ReadFile(filepath.Join(src, "fixtures", "conformance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixtures", "conformance.json"), fixtures, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := h.run("adapters", "verify", "demo/things")
+	if res.code == 0 {
+		t.Fatalf("a demo/ binding must be refused\nstderr:\n%s", res.stderr)
+	}
+	contains(t, res.stderr, "the demo/ prefix is reserved", "refusal names the rule")
+}
