@@ -161,7 +161,7 @@ func TestDemoPipelinePlans(t *testing.T) {
 	env := []string{
 		"APOLLO_API_KEY=plan-only",
 		"ANTHROPIC_API_KEY=plan-only",
-		"ATTIO_API_KEY=plan-only",
+		"INSTANTLY_API_KEY=plan-only",
 	}
 	res := h.runWithEnv(env, "", "plan", "demo.yaml")
 	if res.code != 0 {

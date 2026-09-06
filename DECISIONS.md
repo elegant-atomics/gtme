@@ -2745,6 +2745,29 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-06 — A deliver preflight under `--simulate` is a counted gap
+
+**Question:** The zero-key demo moved its deliver step from a binding
+(`attio/assert`, fixture-served) to the built-in `instantly/add-to-campaign`,
+which preflights (ADR-040). The runner ran the preflight under
+`--simulate`, the adapter demanded its key and the network at OPEN, and
+the simulated run failed — against §8's "a simulated run MUST perform
+zero network calls" and its own banner. Skip, stub, or serve?
+**Choice:** Skip, and say so. Under `--simulate` a preflighting deliver
+step is not asked about its target; the receipt prints `send: preflight
+skipped — the target is not read under --simulate; --dry-run checks it`
+in the preflight slot, and the step's records are held as under
+`--dry-run`, as every simulated deliver already is. No preflight event is
+written. `--dry-run` remains the rung that reads the live target.
+**Why:** §8 already says a stubbed adapter's preflight is part of the
+counted gap; a deliver step is never stubbed (its records must be held
+and rendered), so the preflight fell through to the live path by
+omission, not decision. Serving the preflight from fixtures would need
+the process-adapter protocol to carry a fixture answer to a preflight
+session — a real addition to §5 for a check whose whole point is the
+live target's state. Spec-invisible: no verb, flag, schema or wire
+change; the receipt line lands in the slot ADR-040 defined.
+
 ### 2026-09-05 — M28 internals: types and traverse (ADR-054)
 
 **Question:** How does a type file express §4's name fallback without

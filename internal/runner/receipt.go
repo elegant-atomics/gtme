@@ -163,6 +163,8 @@ func PrintReceipt(w io.Writer, res *Result) {
 			fmt.Fprintf(w, "%s: preflight ok — %d check(s)", s.ID, len(s.PreflightChecks))
 		case "blocked":
 			fmt.Fprintf(w, "%s: preflight BLOCKED — %s", s.ID, s.PreflightReason)
+		case "simulated":
+			fmt.Fprintf(w, "%s: preflight skipped — %s", s.ID, s.PreflightReason)
 		default:
 			fmt.Fprintf(w, "%s: preflight inconclusive — %s (proceeded)", s.ID, s.PreflightReason)
 		}

@@ -82,9 +82,17 @@ func (r *runner) runStep(ctx context.Context, i int) error {
 	stub := r.stubbed(st)
 	// Deliver preflight (SPEC §8, ADR-040): before any record moves, ask a
 	// preflighting adapter whether the live target is fit to send to. A
-	// dry run reports; an armed run stops the step on blocked.
+	// dry run reports; an armed run stops the step on blocked. A simulated
+	// run performs zero network calls, so the target is not read: the
+	// preflight is a counted gap on the receipt, and --dry-run is where the
+	// target gets checked.
 	if st.IsDeliver && st.Manifest != nil && st.Manifest.Preflights && !stub {
-		if err := r.preflight(ctx, st); err != nil {
+		if r.simulate {
+			r.bump(st, func(s *StepStat) {
+				s.Preflight = "simulated"
+				s.PreflightReason = "the target is not read under --simulate; --dry-run checks it"
+			})
+		} else if err := r.preflight(ctx, st); err != nil {
 			return err
 		}
 	}

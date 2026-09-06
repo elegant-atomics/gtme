@@ -5,7 +5,8 @@
 # network, no spend, nothing persisted.
 #
 # With real keys set (gtme secret set APOLLO_API_KEY / ANTHROPIC_API_KEY /
-# ATTIO_API_KEY), the same file climbs the rest of the ladder:
+# INSTANTLY_API_KEY) and the Instantly campaign named below existing, the
+# same file climbs the rest of the ladder:
 #   gtme plan examples/demo.yaml          # contracts + cost, still $0
 #   gtme run  examples/demo.yaml --dry-run  # everything but delivery
 #   gtme run  examples/demo.yaml          # armed
@@ -21,7 +22,7 @@ source:
 steps:
   - id: fit
     use: ai/filter
-    uses: [first_name, title, company_name]   # masked fields only — free (ADR-043)
+    uses: [title, company_name]   # what the search shows before a paid reveal — free (ADR-043)
     with:
       prompt: >
         Keep only people who plausibly own outbound tooling decisions.
@@ -40,8 +41,9 @@ steps:
         Write first_line and ps_line for a short, honest intro email.
 
   - id: send                # a deliver adapter is an ordinary step (ADR-031)
-    use: attio/assert       # also pure YAML; assert = idempotent upsert
+    use: instantly/add-to-campaign
+    with: { campaign: "Q3 VP Marketing" }   # resolved to its id once per run; must exist
     variables:
-      name: full_name
+      first_name: first_name
       first_line: first_line
-    idempotency: email
+    idempotency: email      # re-runs deliver nothing twice, ever
