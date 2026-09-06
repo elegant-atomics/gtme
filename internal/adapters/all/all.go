@@ -13,6 +13,7 @@ import (
 	_ "github.com/elegant-atomics/gtme/internal/adapters/aisteps"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/csvdeliver"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/csvsource"
+	_ "github.com/elegant-atomics/gtme/internal/adapters/demoenrich"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/harvest"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/instantly"
 	_ "github.com/elegant-atomics/gtme/internal/adapters/participants"

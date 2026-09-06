@@ -1,0 +1,40 @@
+# Door 1's second file (START.md): the top-up receipt with zero keys, on a
+# ledger that persists. demo/enrich is the binary's own synthetic enrichment
+# (SPEC §10 item 9): no vendor, no key, no network — deterministic scores,
+# labelled synthetic in the value itself, at a stated pretend price of
+# $0.01 per record so the receipt's arithmetic is real.
+#
+#   gtme run examples/cache.yaml      # 3 scored at $0.01 each; 1 kept; out.csv written
+#   gtme run examples/cache.yaml      # again: 3 cached, $0.03 avoided, nothing delivered twice
+#
+# Every dollar it prints is labelled demo/enrich wherever it appears.
+name: cache
+version: 1
+
+source:
+  use: csv/source
+  with:
+    path: contacts.csv          # three fictional people, beside this file
+    columns: { full_name: Full Name, email: Email, title: Title, company_domain: Company Website }
+
+steps:
+  - id: score
+    use: demo/enrich            # $0.01 per record, pretend; cached for 30 days
+    with:
+      cost_per_record_usd: 0.01
+
+  - id: keep                    # deterministic judgment in SQL: no model, no spend
+    use: sql/filter
+    with:
+      query: >
+        SELECT identity_id FROM current_values
+        WHERE field = 'demo.score' AND CAST(value AS INTEGER) >= 70
+
+  - id: out
+    use: csv/deliver
+    with:
+      path: out.csv
+    variables:
+      score: demo.score
+      note: demo.note
+    idempotency: email          # re-runs append nothing twice

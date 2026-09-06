@@ -22,6 +22,7 @@ Three kinds appear below:
 | id | role | kind | what it does |
 |---|---|---|---|
 | `csv/source` | source | process (built-in) | rows from a CSV, with `columns:` ingress mapping |
+| `demo/enrich` | enrich | process (built-in) | synthetic, keyless, priced at a stated pretend rate — the zero-key cache demo |
 | `source: {group: …}` | source | runner-owned | a typed group's current members, projected from the ledger |
 | `apollo/search` | source | **binding** | Apollo people search, paginated |
 | `harvest/profile` | enrich | process (built-in) | LinkedIn profile via HarvestAPI |
@@ -239,6 +240,21 @@ today; `gtme help --bindings` is the contract to author one against.
 ---
 
 ## Enrichers
+
+### `demo/enrich`
+
+The binary's own synthetic enrichment (ADR-056), so the zero-key path can
+print the top-up receipt on a ledger that persists — which `--simulate`,
+running against a throwaway copy, cannot. Needs `email` or `full_name`;
+provides `demo.score` (0–100, derived from the identity key's hash, so
+deterministic) and `demo.note` (always `synthetic — demo/enrich called no
+vendor`). No key, no network, no payload; runs the same armed and under
+`--simulate`. Priced at config `cost_per_record_usd` (default $0.01) as an
+*estimated* COST under provider `demo`, so the receipt's arithmetic is
+real over a stated pretend price and the adapter id labels every dollar
+it produces; 30-day freshness, `cache:` overrides. Never in the registry
+index, and the `demo/` prefix is refused for installed bindings.
+`examples/cache.yaml` runs it twice for the delta.
 
 ### `harvest/profile`
 

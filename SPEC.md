@@ -1944,14 +1944,15 @@ contract, pure YAML.
    key), emits COST 0. Proves the external adapter path.
 (Item 8, `webhook/source`, was specified here from ADR-009 and never
 built; ADR-055 defers it to ROADMAP.md. The event recipe is in §8.)
-9. **`demo/enrich`** (enrich, person; ADR-056, proposed) — the priced,
+9. **`demo/enrich`** (enrich, person; ADR-056; built in M29) — the priced,
    keyless enrichment. Needs `email` or `full_name`; provides `demo.score`
    (integer 0–100, derived from the identity key's hash) and `demo.note`
    (the fixed string `synthetic — demo/enrich called no vendor`).
    Deterministic; no network, no credential, no payload; runs armed, and
    under `--simulate` runs exactly as armed — never a simulation gap.
-   Config `cost_per_record_usd` (default `0.01`, ADR-046 template, basis
-   `estimated`) and `freshness_days` (default 30). Cost rows land under
+   Config `cost_per_record_usd` (default `0.01`, basis `estimated`);
+   `freshness_days` 30 in the manifest, so `cache:` per step is the
+   override, as for every adapter. Cost rows land under
    `demo/enrich@1`; `gtme plan` prints `est/record: $0.0100`. Never in
    the registry index; the `demo/` prefix is reserved. Exists so the
    zero-key path prints the top-up receipt — `cached`, `avoided` — on a
@@ -2472,6 +2473,22 @@ decided contract, not shipped behavior.
   step after a `human/*` step plans with the cron note; `when:
   <review>.passed` fails plan; `--simulate` counts the step as a
   simulation gap.
+- **M29 — `demo/enrich` (ADR-056; §10 item 9). Built 2026-09-06
+  (changelog v0.46).** A built-in enrich adapter that needs no key,
+  calls no network, retains no payload, derives `demo.score` from the
+  identity key's hash and sets `demo.note` to a fixed synthetic marker,
+  and emits an `estimated` COST of `cost_per_record_usd` (default
+  $0.01) per record under provider `demo`; `freshness_days` 30. Runs
+  identically armed and under `--simulate`. Installed bindings may not
+  take the `demo/` prefix. `examples/cache.yaml` + `examples/contacts.csv`
+  are the zero-key top-up demo. Acceptance, offline: the example planned
+  with no environment prints `est/record: $0.0100` for the step; run
+  armed twice against an empty ledger, the first receipt shows 3 in,
+  3 out, `$0.0300` on the step, three `demo.score` values with
+  `demo/enrich@1` provenance and three `demo` cost rows; the second
+  shows `cached 3`, `avoided $0.0300`, no adapter call, and `0` out on
+  the deliver step; a binding installed under `demo/anything` is refused
+  by name.
 - **M28 — types and traverse (ADR-054; §3, §4, §4a, §5, §6, §7, §8, §9,
   §10a, §13). Built 2026-09-05 (changelog v0.43).** A type is a file: `spec/fields/*.json` gain
   `kind`, `identity` and per-field `reference`, §4 derivation reads the
@@ -2819,12 +2836,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). This project does
 not yet have numbered releases; entries are keyed by the reconciliation
 pass that produced them.
 
-### v0.46 — 2026-09-06 (proposed: ADR-056, `demo/enrich`)
-**Added (proposed):** §10 item 9, `demo/enrich` — a built-in, priced,
-keyless, deterministic enrichment that runs armed, so the zero-key
-onboarding path prints the top-up receipt on a persisting ledger.
-Built with the M29 packet that follows approval; README.md, ADAPTERS.md,
-START.md and `examples/cache.yaml` ride the build.
+### v0.46 — 2026-09-06 (ADR-056, `demo/enrich`; built as M29)
+**Added:** §10 item 9, `demo/enrich` — a built-in, priced, keyless,
+deterministic enrichment that runs armed, so the zero-key onboarding
+path prints the top-up receipt on a persisting ledger; §11 M29. The
+item's `freshness_days` is the manifest's, overridden per step by
+`cache:` like every adapter's (the proposed text had it as config).
+README.md, ADAPTERS.md, START.md and `examples/cache.yaml` ride the
+build.
 
 ### v0.45 — 2026-09-06 (ADR-055: `webhook/source` deferred; accepted by merge, no build)
 **Removed:** §10 item 8, `webhook/source` — specified from ADR-009's

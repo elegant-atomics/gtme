@@ -48,6 +48,20 @@ func Register(rawManifest []byte, newFunc func() Adapter) {
 	builtins[m.ID] = &builtin{manifest: m, newFunc: newFunc}
 }
 
+// SetCostRate gives a registered built-in a per-record estimate resolved from
+// step config (ADR-046), as a binding's templated cost has — so `gtme plan`
+// prints the operator's figure for a Go adapter that prices from config.
+// Called from the adapter package's init(), after Register.
+func SetCostRate(id string, rate func(config map[string]any) (float64, bool)) {
+	builtinsMu.Lock()
+	defer builtinsMu.Unlock()
+	b, ok := builtins[id]
+	if !ok {
+		panic("adapters: SetCostRate on unregistered " + id)
+	}
+	b.manifest.CostRate = rate
+}
+
 // RegisterBinding adds a built-in adapter whose implementation is a binding
 // interpreted by the generic engine (SPEC §10a). The manifest is the binding's
 // §6 bridge; newFunc returns the engine loaded with the binding document.

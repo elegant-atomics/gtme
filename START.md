@@ -42,7 +42,7 @@ Nothing here pipes a download into a shell, and nothing phones home.
 
 | Door | Needs | Spends | Ends with |
 |---|---|---|---|
-| **1. Show me** | nothing | $0 | a receipt from fixtures, twice |
+| **1. Show me** | nothing | $0 | a receipt from fixtures, then the top-up receipt |
 | **2. My CSV** | one model key | cents, on the model | your rows judged and written, then the cache receipt |
 | **3. My stack** | vendor keys | vendor credits, gated | a dry-run receipt a human reads, then one armed run |
 | **4. Add a vendor** | nothing | $0 | a new adapter that verifies and simulates |
@@ -63,23 +63,42 @@ persisted.
 mkdir -p gtme-start && cd gtme-start
 curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/demo.yaml
 gtme run demo.yaml --simulate
-gtme run demo.yaml --simulate
 ```
 
 The first receipt is the door's proof: a step table with `in`, `out`,
 `cached`, `cost` and `avoided` columns, a `SIMULATED` banner, one
-estimated charge on the reveal step, and the two held records with their
-variables rendered. The two records both read "Jane Doe" because the
-reveal fixture answers every lookup with the same sanitized person —
-fixtures are canned responses, and the receipt says so.
+estimated charge on the reveal step, the campaign check skipped and
+saying so, and the held record with its variables rendered. Run it
+again if you like: a simulated run executes against a throwaway copy of
+the ledger and persists nothing, so the receipt is identical and the
+command is safe to repeat forever.
 
-The second receipt is identical to the first, on purpose: a simulated run
-executes against a throwaway copy of the ledger and persists nothing, so
-it can be repeated forever without side effects. The cache — the
-`cached` and `avoided` columns filling in — appears the first time a run
-persists, which is door 2.
+The second receipt is the top-up — what a re-run saves — and it needs a
+ledger that persists, so it comes from a second file that runs **armed**
+with zero keys: three fictional people, the binary's own synthetic
+enrichment at a stated pretend price of $0.01 each (its values say
+`synthetic` in the note field, and every dollar it prints is labelled
+`demo/enrich`), a SQL filter, and a CSV delivery to a file beside it.
 
-Done when: two receipts printed, both marked `SIMULATED`, exit code 0.
+```sh
+curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/cache.yaml
+curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/contacts.csv
+gtme run cache.yaml            # 3 scored at $0.01 each, 1 kept, out.csv written
+gtme run cache.yaml            # again: 3 cached, $0.0300 avoided, 0 delivered
+```
+
+The second run's receipt reads `cached 3` and `avoided $0.0300` on the
+enrichment, `0` out on the delivery, and `avoided via cache` in the
+total line. Then look at what the ledger kept:
+
+```sh
+gtme show jane.doe@acme.com --provenance
+gtme runs last
+```
+
+Done when: a `SIMULATED` receipt from `demo.yaml`, then two receipts
+from `cache.yaml` where the second shows `cached 3` and a dollar amount
+in `avoided`, exit code 0 each time.
 
 ### Door 2 — My CSV (one model key)
 

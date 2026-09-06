@@ -43,6 +43,10 @@ spec/bindings/<vendor>-<operation>/
   fixtures/conformance.json
 ```
 
+The `demo/` prefix is reserved for the binary's own synthetic adapters
+(`demo/enrich`); `gtme adapters verify` refuses a binding named under it.
+Name yours after its vendor.
+
 **3. Use canonical field names.** Extraction targets must be canonical
 fields (`spec/fields/*.json`) or vendor-namespaced
 (`<vendor>.<field>`). When in doubt, namespace — promotion to canonical is
