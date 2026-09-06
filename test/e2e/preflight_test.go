@@ -152,3 +152,22 @@ steps:
 		t.Errorf("preflight events = %d, want 1", n)
 	}
 }
+
+// A simulated run performs zero network calls (SPEC §8, ADR-028), so a
+// preflighting deliver adapter is not asked about its live target: the
+// receipt says so, the records are held as under --dry-run, and the run is
+// done — with no credential and no MOCK_PREFLIGHT answer at all.
+func TestPreflightIsAGapUnderSimulate(t *testing.T) {
+	h := newHarness(t)
+	h.write("people.csv", peopleCSV)
+	h.write("p.yaml", preflightYAML)
+	res := h.run("run", "p.yaml", "--simulate")
+	if res.code != 0 {
+		t.Fatalf("simulate exit = %d\nstderr:\n%s", res.code, res.stderr)
+	}
+	contains(t, res.stderr, "send: preflight skipped — the target is not read under --simulate; --dry-run checks it", "simulated receipt")
+	contains(t, res.stderr, "held (dry run)", "records held")
+	if strings.Contains(res.stderr, "preflight ok") || strings.Contains(res.stderr, "preflight BLOCKED") {
+		t.Errorf("a simulated run must not read the target:\n%s", res.stderr)
+	}
+}

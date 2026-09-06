@@ -125,13 +125,18 @@ steps, a dollar amount in `avoided`, and `0` out on the deliver step.
 
 What happens: the same pipeline as door 1, live — Apollo searches,
 the filter judges, Apollo reveals only past the filter, the compose
-writes, and Attio receives. Every rung of the ladder before the last
-spends nothing on delivery; the last is armed by a human.
+writes, and an Instantly campaign receives. Every rung of the ladder
+before the last spends nothing on delivery; the last is armed by a human.
+
+The Instantly campaign named in `demo.yaml` (`with: { campaign: ... }`)
+must exist; edit the name to one of yours. The dry run reads it and
+reports whether it is fit to send to — active, with a sequence that
+references every variable the step sends — before a single record moves.
 
 ```sh
 gtme secret set APOLLO_API_KEY
 gtme secret set ANTHROPIC_API_KEY
-gtme secret set ATTIO_API_KEY
+gtme secret set INSTANTLY_API_KEY
 gtme plan demo.yaml                 # $0: contracts, credentials, cost estimate
 gtme run  demo.yaml --dry-run       # spends on search, reveal and the model; delivers nothing
 ```
@@ -145,9 +150,9 @@ gtme run demo.yaml                  # armed: delivers; re-runs deliver nothing t
 gtme run demo.yaml                  # again: the cache receipt, zero re-delivery
 ```
 
-`examples/apollo-to-instantly.yaml` is the same shape with Instantly as
-the target and a LinkedIn enrichment in the middle; it needs the campaign
-to exist first, and its header says which four keys it wants.
+`examples/apollo-to-instantly.yaml` is the same shape at campaign size,
+with a LinkedIn enrichment in the middle; its header says which four
+keys it wants.
 
 Done when: a dry-run receipt was read by a human, one armed run
 delivered, and the run after it shows `avoided` on the paid steps and

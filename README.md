@@ -294,7 +294,8 @@ gtme run examples/demo.yaml --simulate
 The Apollo source serves its conformance fixtures, the AI steps answer
 synthetically (and are *marked* synthetic in provenance), the reveal step
 prints its estimated charge, and delivery is held with its variables
-resolved into the receipt. One sourced record has no email — Apollo's
+resolved into the receipt — Instantly's campaign check is skipped and
+says so, because a simulated run reads no target. One sourced record has no email — Apollo's
 locked-email placeholder is treated as absent, never as an identity key —
 so it is keyed by name hash; both held records then read "Jane Doe",
 because the reveal fixture answers every lookup with the same sanitized
@@ -307,6 +308,7 @@ identical, because a simulated run persists nothing.
 ```sh
 gtme secret set APOLLO_API_KEY        # prompts, no echo
 gtme secret set ANTHROPIC_API_KEY
+gtme secret set INSTANTLY_API_KEY     # the campaign named in the file must exist
 gtme plan examples/demo.yaml          # contracts + cost, still $0
 gtme run  examples/demo.yaml --dry-run  # everything but delivery
 gtme run  examples/demo.yaml          # armed
