@@ -3352,6 +3352,67 @@ floor's In set), §11 (M5's unmet clause struck with a note), §13 (the
 no-daemon answer). README.md and ADAPTERS.md drop the adapter. AUDIT.md's
 deferred item closes by reference. ROADMAP.md gains the entry.
 
+### ADR-056: `demo/enrich` — a priced, keyless enrichment so the zero-key path shows the cache
+**Status:** Proposed (2026-09-06 — from the launch onboarding work: the
+zero-key demo cannot print the top-up receipt, because a simulated run
+persists nothing by ADR-028's own design)
+**Context:** The README's strongest line is the second run: overlapping
+records cache-skip and the receipt prints dollars *avoided*. Today that
+receipt needs a key. Every priced step either calls a vendor or a model,
+and `--simulate`, the only keyless rung, executes against a throwaway
+copy of the ledger (§8; ADR-028 chose ephemerality so nothing synthetic
+reaches the durable layer). So START.md's first door shows two identical
+`SIMULATED` receipts and explains why, and the cache story waits for the
+first key. Three ways out were weighed: a flagged simulated layer that
+simulated runs read (ADR-028 left ephemeral-vs-flagged open, but it is a
+migration, view and cache-query changes, a new banner, and synthetic
+facts living beside real ones in every operator's ledger, all for one
+receipt line); accepting that the second receipt is the keyed door
+(true, and the zero-key path stays half a story); or an enrichment that
+is honest about being pretend and priced like a real one.
+**Decision:** (1) **A built-in enrich adapter, `demo/enrich`.** Role
+enrich, entity `person`, needs any identity (`email` or `full_name`),
+provides `demo.score` (integer 0–100) and `demo.note` (string). It is
+deterministic — the score derives from the identity key's hash, the note
+is the fixed string `synthetic — demo/enrich called no vendor` — and it
+performs no network call, needs no credential, retains no payload. It
+runs armed, and under `--simulate` it runs exactly as armed: it is never
+a simulation gap, because there is nothing to serve. (2) **Priced,
+honestly.** Config `cost_per_record_usd` (default `0.01`) through the
+ADR-046 mechanism, basis `estimated`; cost rows land under
+`demo/enrich@1` like any adapter's, `gtme plan` prints `est/record:
+$0.0100`, and the adapter id is the label wherever a dollar appears (the
+receipt, `gtme runs`, `costs`). The arithmetic is real over a stated
+pretend price. (3) **Cacheable.** `freshness_days` 30 by default
+(config overrides; `cache:` per step as always), so a second armed run
+cache-skips and prints `avoided`. (4) **The zero-key door gains a second
+file.** `examples/cache.yaml`: `csv/source` over a shipped
+`examples/contacts.csv` (three fictional rows) → `demo/enrich` →
+`sql/filter` on `demo.score` → `csv/deliver`. Two armed runs, no keys:
+the second reads `cached 3`, `avoided $0.0300`, `0` out on delivery.
+`examples/demo.yaml` keeps its job — the real-vendor shape, simulated.
+(5) **Not a vendor.** It is never listed in the registry index,
+`gtme adapters verify` has nothing to verify, `help --agent` carries it
+with a one-line note, and the `demo/` prefix is reserved so no pipeline
+mistakes its output for data.
+**Consequences:** About 150 lines of Go behind the existing built-in
+interface (registered like `csv/source`), a manifest, unit tests, an
+e2e over the example, ADAPTERS.md, README and START.md door 1. An
+operator's ledger can hold pretend cost rows, labelled by adapter id —
+as a mock run's rows would be. Onboarding's first five minutes gain the
+cache story with zero keys, on a persisting ledger, with `gtme show
+--provenance` and `gtme runs last` working against it.
+**Rejected:** *The flagged simulated layer* — bigger, touches every
+ledger for one line, and may return with simulate-replay (ROADMAP.md)
+when replaying retained payloads gives simulation a reason to remember.
+*Pricing `mock-enrich-py`* — an external example adapter in Python,
+installed by `install.sh` only, absent from the tarball and the tap.
+*Teaching `--simulate` to persist* — contradicts ADR-028's reason for
+existing.
+**Spec impact:** AMEND (this packet's second commit) — §10 gains item 9;
+changelog. README.md, ADAPTERS.md, START.md and the example ride the
+build.
+
 ### ADR-054: `traverse` — a run is a sequence of typed segments, and a type is a file
 **Status:** Accepted (2026-09-05 — design session; answers ADR-008's parked
 question and ROADMAP.md's "Entity types" (until this packet, "Object
