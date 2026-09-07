@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
-	"github.com/elegant-atomics/gtme/internal/registry"
-	"github.com/elegant-atomics/gtme/internal/ulid"
+	"github.com/gtme-run/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/registry"
+	"github.com/gtme-run/gtme/internal/ulid"
 )
 
 // Identity is a row of the identities table.

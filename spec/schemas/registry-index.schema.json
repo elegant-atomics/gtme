@@ -29,7 +29,7 @@
             "required": ["url", "path", "ref", "sha"],
             "additionalProperties": false,
             "properties": {
-              "url": {"type": "string", "description": "Repository, e.g. github.com/elegant-atomics/gtme-bindings."},
+              "url": {"type": "string", "description": "Repository, e.g. github.com/gtme-run/gtme-bindings."},
               "path": {"type": "string", "description": "Directory inside the repository holding binding.yaml and fixtures/."},
               "ref": {"type": "string", "description": "Tag or branch the entry was published at."},
               "sha": {"type": "string", "description": "Commit the ref resolved to when the index was generated."}

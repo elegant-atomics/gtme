@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/runner"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/runner"
 )
 
 // cmdRuns lists runs, or prints one run's receipt (SPEC §8).

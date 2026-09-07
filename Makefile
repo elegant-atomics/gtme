@@ -17,7 +17,7 @@ test:
 	go test $(PKG)
 
 build:
-	go build -ldflags "-X github.com/elegant-atomics/gtme/internal/cli.Version=$(VERSION)" -o $(BINARY) ./cmd/gtme
+	go build -ldflags "-X github.com/gtme-run/gtme/internal/cli.Version=$(VERSION)" -o $(BINARY) ./cmd/gtme
 
 # install puts `gtme` on your PATH (~/.local/bin by default; see install.sh
 # for PREFIX). After this, every `./bin/gtme` in the docs is just `gtme`.

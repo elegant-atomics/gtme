@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
-	"github.com/elegant-atomics/gtme/internal/registry"
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/internal/adapters"
+	_ "github.com/gtme-run/gtme/internal/adapters/all"
+	"github.com/gtme-run/gtme/internal/registry"
+	"github.com/gtme-run/gtme/spec"
 )
 
 func TestRegistryFilesValidateAgainstSchema(t *testing.T) {

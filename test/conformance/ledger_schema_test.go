@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 
 	_ "modernc.org/sqlite"
 )

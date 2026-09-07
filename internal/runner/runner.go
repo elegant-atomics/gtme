@@ -17,14 +17,14 @@ import (
 
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ai"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	participantpkg "github.com/elegant-atomics/gtme/internal/participant"
-	"github.com/elegant-atomics/gtme/internal/planner"
-	"github.com/elegant-atomics/gtme/internal/protocol"
-	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ai"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/ledger"
+	participantpkg "github.com/gtme-run/gtme/internal/participant"
+	"github.com/gtme-run/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/registry"
 )
 
 // DefaultConcurrency is the per-step worker pool size (SPEC §9).

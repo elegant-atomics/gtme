@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // ExitError carries an external adapter's exit status, so the gtme process can

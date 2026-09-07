@@ -7,8 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // PrintReceipt writes the end-of-run receipt: records in and out per step, cache

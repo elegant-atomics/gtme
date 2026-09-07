@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapterinstall"
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/internal/adapterinstall"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/spec"
 )
 
 // cmdHelpBindings emits the second agent surface (SPEC §8, ADR-041): the

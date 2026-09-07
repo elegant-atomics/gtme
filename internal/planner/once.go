@@ -3,7 +3,7 @@ package planner
 import (
 	"context"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // FinishedRecords is the set of identities this pipeline has already

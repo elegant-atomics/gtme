@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/elegant-atomics/gtme/internal/httpx"
+	"github.com/gtme-run/gtme/internal/httpx"
 )
 
 // DefaultBaseURL is Instantly's API host.

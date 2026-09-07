@@ -14,10 +14,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/participant"
-	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/participant"
+	"github.com/gtme-run/gtme/internal/planner"
 )
 
 // runParticipantStep completes a human/agent step's eligible records:

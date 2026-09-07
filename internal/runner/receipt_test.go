@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // ADR-046: the receipt's total carries its basis — bare when every dollar

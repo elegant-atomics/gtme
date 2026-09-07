@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/planner"
 )
 
 // TestInputHashExcludesTheStepsOwnOutputs: a needs-all step must not see

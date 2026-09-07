@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/bundle"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/bundle"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/pipeline"
 )
 
 // cmdFreeze reconstructs the pipeline.yaml that produced a run, from the

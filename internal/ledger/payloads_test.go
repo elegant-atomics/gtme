@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/identity"
 )
 
 // TestPayloadEviction: eviction removes exactly the expired — TTL-less

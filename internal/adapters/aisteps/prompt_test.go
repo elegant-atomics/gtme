@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 func rec(key string, fields map[string]any) record {

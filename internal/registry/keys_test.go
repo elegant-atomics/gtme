@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/identity"
 )
 
 func nh(s string) string {

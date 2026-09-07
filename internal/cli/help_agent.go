@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // cmdHelpAgent emits the full CLI + adapter surface as one compact,

@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters"
 )
 
 // TypesDir is the subdirectory a binding ships its type files in.

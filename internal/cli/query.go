@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // cmdQuery runs read-only SQL against the ledger, and saves or replays named

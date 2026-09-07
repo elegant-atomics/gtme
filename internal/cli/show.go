@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/participant"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/participant"
 )
 
 // cmdShow is the read-only projection inspector (SPEC §8, DECISIONS.md

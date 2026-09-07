@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapterinstall"
+	"github.com/gtme-run/gtme/internal/adapterinstall"
 )
 
 const petsBindingYAML = `id: pets/list

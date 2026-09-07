@@ -12,7 +12,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"gopkg.in/yaml.v3"
 
-	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/pipeline"
 )
 
 // yamlToJSON re-encodes a YAML document as JSON so a JSON Schema validator can

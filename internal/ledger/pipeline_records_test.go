@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/identity"
 )
 
 // TestPipelineRecordsReadTerminality: every run record of a named pipeline

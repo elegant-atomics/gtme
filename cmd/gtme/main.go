@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/elegant-atomics/gtme/internal/cli"
+	"github.com/gtme-run/gtme/internal/cli"
 )
 
 func main() {

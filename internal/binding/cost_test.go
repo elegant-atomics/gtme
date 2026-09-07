@@ -3,8 +3,8 @@ package binding
 import (
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapters/adaptertest"
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/adapters/adaptertest"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // A per-record enrich binding whose rate is the operator's, not the

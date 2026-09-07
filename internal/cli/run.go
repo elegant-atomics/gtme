@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/bundle"
-	"github.com/elegant-atomics/gtme/internal/httpx"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
-	"github.com/elegant-atomics/gtme/internal/planner"
-	"github.com/elegant-atomics/gtme/internal/runner"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/bundle"
+	"github.com/gtme-run/gtme/internal/httpx"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/runner"
 )
 
 // cmdRun executes a pipeline file.

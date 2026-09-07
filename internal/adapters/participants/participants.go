@@ -13,7 +13,7 @@ import (
 	_ "embed"
 	"fmt"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters"
 )
 
 //go:embed human-filter.json

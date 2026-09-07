@@ -24,10 +24,10 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/participant"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
-	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/participant"
+	"github.com/gtme-run/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/planner"
 )
 
 const answerUsage = "usage: gtme answer [RUN_ID|last|PIPELINE] [STEP] [IDENTITY_KEY] [--set field=value ...] [--as NAME] [--cost USD [--measured]] [--note TEXT]"

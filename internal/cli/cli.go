@@ -11,7 +11,7 @@ import (
 	"os"
 
 	// Built-in adapters register themselves; the CLI is what needs them present.
-	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
+	_ "github.com/gtme-run/gtme/internal/adapters/all"
 )
 
 // Exit codes (SPEC §8).
