@@ -1,0 +1,11 @@
+{
+  "name": "gtme-run",
+  "owner": { "name": "gtme", "url": "https://gtme.run" },
+  "plugins": [
+    {
+      "name": "gtme",
+      "source": "./plugin",
+      "description": "Skills for running gtme campaigns: create a pipeline from a goal, walk it up the ladder from plan to armed, add a vendor adapter, and read what the ledger knows."
+    }
+  ]
+}

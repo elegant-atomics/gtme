@@ -271,7 +271,11 @@ whatever the machine has installed. Contracts travel; your ledger,
 credentials, and input data stay yours. The natural unit for a playbook, a
 handoff, or a per-client repo.
 
-Five such playbooks ship in [`bundles/`](bundles/): qualify → group →
+For Claude Code there is a plugin in [`plugin/`](plugin/): `/plugin
+marketplace add gtme-run/gtme`, then `/plugin install gtme@gtme-run`.
+Four skills — create a pipeline from a goal, run one up the ladder, add a
+vendor, analyze the ledger — each a procedure that reads its facts from
+`gtme help --agent` at run time. Five such playbooks ship in [`bundles/`](bundles/): qualify → group →
 send, an email waterfall, the account shape, events via CSV + cron, and
 posts to engagers via a traverse. Every one simulates offline from the
 checkout (`cd bundles/<pattern> && gtme run . --simulate`) and CI proves

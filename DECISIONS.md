@@ -2745,6 +2745,54 @@ that shift is a stated property of the design, not a side effect.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
 
+### 2026-09-07 — The Claude Code plugin: four skills in `plugin/`, tested against the binary
+
+**Question:** Launch 11 wants three or four thin skills that lean on
+`gtme help --agent`, `gtme help --bindings` and the bundles. Where do
+they live, what are they, how thin, and how does CI keep them true?
+**Choice:** (1) In this repo: the repo root is the marketplace
+(`.claude-plugin/marketplace.json`, name `gtme-run`, one plugin at
+`./plugin`), `plugin/` is the plugin (name `gtme`, so skills read
+`/gtme:<skill>`); Claude Code supports a repo that is both. Install:
+`/plugin marketplace add gtme-run/gtme`, `/plugin install gtme@gtme-run`.
+(2) Four skills, verb-noun: `create-pipeline` (a conversation in the
+human's words, a playback, options with a recommendation when the answers
+admit more than one honest shape, then one step per `gtme plan`),
+`run-pipeline` (the ladder — plan, simulate, dry-run, armed, again — with
+the arm gate as a *timing* rule: a yes given after the dry-run receipt
+arms a vendor target, a yes given before it never does, however firm),
+`create-adapter` (binding or process, the contract from `help
+--bindings`, per-record fixtures by query-value match, hand-written
+fixtures marked in a `note` and recorded before any armed run, the type
+half for records that are not people or companies), `analyze` (a
+question-to-command table over `runs`, `show --provenance`, `groups`,
+`freeze`, `query`, with the model read from `help --agent | jq .ledger`).
+A first-run "start" skill was dropped: it fires once per machine, and
+START.md door 1 already is that instruction; each skill carries a
+three-line preflight instead. (3) Each skill is under 600 words and
+copies no facts from the CLI: adapters, fields, flags and receipts come
+from the binary or the bundles at run time. (4) Tests:
+`test/e2e/plugin_test.go` runs every ```sh block in every skill against
+the built binary in a harness seeded with `pipeline.yaml`/`leads.csv`
+and one armed run (blocks with placeholders, key handling, installs,
+pipes or redirects are documentation and skipped), and checks every
+`gtme <verb>` a skill names in code against `help --agent`'s verb list;
+`test/conformance` checks the two manifests and each skill's
+frontmatter. Plugin version tracks the binary's tag. (5) Written by the
+skill-writing discipline: four baseline runs without a skill (an agent
+under "don't make me babysit" promised to arm the live send itself after
+the dry run; an adapter author shipped a hand-written fixture as if
+recorded and one fixture for every record; a pipeline author built one
+shape with no alternatives and all steps before the first plan), then
+the skills, then reruns with the skills present — which also caught the
+first draft of the gate being a magic word (`arm`) that refused a plain
+"yes, go" given after the receipt; the rule is now about when, not what.
+**Why:** The plugin is instruction, the binary is knowledge (the launch
+split); keeping the skills in the repo lets CI prove them against the
+version they describe the way it proves the bundles. Spec-invisible: no
+verb, flag or behaviour changes; `plugin/` and `.claude-plugin/` are
+distribution, like `bundles/` and the tap.
+
 ### 2026-09-06 — The repo moves to `github.com/gtme-run/gtme`; the module path follows
 
 **Question:** The four public repos (the binary, the bindings registry,

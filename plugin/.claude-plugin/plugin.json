@@ -1,0 +1,11 @@
+{
+  "name": "gtme",
+  "displayName": "gtme",
+  "version": "0.5.0",
+  "description": "Skills for running gtme campaigns: create a pipeline from a goal, walk it up the ladder from plan to armed, add a vendor adapter, and read what the ledger knows. Every fact comes from the binary (gtme help --agent, gtme help --bindings) at run time.",
+  "author": { "name": "gtme", "url": "https://gtme.run" },
+  "homepage": "https://gtme.run",
+  "repository": "https://github.com/gtme-run/gtme",
+  "license": "MIT",
+  "keywords": ["gtme", "outbound", "go-to-market", "pipelines", "campaigns"]
+}
