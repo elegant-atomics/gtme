@@ -210,3 +210,68 @@ func TestBundleManifestsValidate(t *testing.T) {
 		})
 	}
 }
+
+// TestPluginManifestsAreWellFormed: the Claude Code plugin ships from this
+// repo (repo root is the marketplace, plugin/ is the plugin). The two
+// manifests must parse, name what the docs say they name, and the plugin's
+// version must match the binary's tag line — both bump in one commit.
+func TestPluginManifestsAreWellFormed(t *testing.T) {
+	root := repoRoot()
+	var market struct {
+		Name    string `json:"name"`
+		Plugins []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"plugins"`
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "marketplace.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &market); err != nil {
+		t.Fatalf("marketplace.json: %v", err)
+	}
+	if market.Name != "gtme-run" || len(market.Plugins) != 1 || market.Plugins[0].Name != "gtme" || market.Plugins[0].Source != "./plugin" {
+		t.Errorf("marketplace.json = %+v; want marketplace gtme-run with one plugin gtme at ./plugin", market)
+	}
+
+	var plugin struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	raw, err = os.ReadFile(filepath.Join(root, "plugin", ".claude-plugin", "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &plugin); err != nil {
+		t.Fatalf("plugin.json: %v", err)
+	}
+	if plugin.Name != "gtme" {
+		t.Errorf("plugin.json name = %q, want gtme", plugin.Name)
+	}
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(plugin.Version) {
+		t.Errorf("plugin.json version = %q, want semver", plugin.Version)
+	}
+
+	// Every skill directory has a SKILL.md whose frontmatter names it.
+	skills, err := os.ReadDir(filepath.Join(root, "plugin", "skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) == 0 {
+		t.Fatal("plugin/skills is empty")
+	}
+	for _, d := range skills {
+		body, err := os.ReadFile(filepath.Join(root, "plugin", "skills", d.Name(), "SKILL.md"))
+		if err != nil {
+			t.Errorf("plugin/skills/%s has no SKILL.md", d.Name())
+			continue
+		}
+		if !strings.HasPrefix(string(body), "---\nname: "+d.Name()+"\n") {
+			t.Errorf("plugin/skills/%s/SKILL.md must open with frontmatter naming %s", d.Name(), d.Name())
+		}
+		if !strings.Contains(string(body), "\ndescription: Use when") {
+			t.Errorf("plugin/skills/%s/SKILL.md description must start with \"Use when\"", d.Name())
+		}
+	}
+}

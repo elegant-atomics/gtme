@@ -8,7 +8,10 @@ spent until a door says so, in plain words, right before the command.
 **For agents:** the paste line is *"Follow gtme.run/start.md"*. This file
 is the whole instruction set; `gtme help --agent` is the machine-readable
 surface when a step needs more. Read the rules at the bottom before the
-first command. (Until the site is up, the same file is
+first command. In Claude Code, the same procedures are four skills:
+`/plugin marketplace add gtme-run/gtme` then `/plugin install
+gtme@gtme-run` gives `/gtme:create-pipeline`, `/gtme:run-pipeline`,
+`/gtme:create-adapter` and `/gtme:analyze`. (Until the site is up, the same file is
 `https://raw.githubusercontent.com/gtme-run/gtme/main/START.md`.)
 
 ## Install
