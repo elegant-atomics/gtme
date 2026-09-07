@@ -18,11 +18,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/adapterinstall"
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/protocol"
-	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/gtme-run/gtme/internal/adapterinstall"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/registry"
 )
 
 func cmdAdapters(ctx context.Context, env Env, args []string) error {

@@ -22,8 +22,8 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/internal/identity"
+	"github.com/gtme-run/gtme/spec"
 )
 
 // Type kinds (SPEC §4a, ADR-054).

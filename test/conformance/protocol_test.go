@@ -11,7 +11,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // transcriptLine is one line of a spec/wire/*.ndjson golden transcript. See

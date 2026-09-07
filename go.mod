@@ -1,4 +1,4 @@
-module github.com/elegant-atomics/gtme
+module github.com/gtme-run/gtme
 
 go 1.25.0
 

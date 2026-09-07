@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/identity"
 )
 
 // Candidates returns every key that can be derived from fields for the given

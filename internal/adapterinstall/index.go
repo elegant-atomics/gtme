@@ -10,12 +10,12 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/spec"
 )
 
 // DefaultRegistry is the index URL baked into the binary (ADR-042);
 // GTME_REGISTRY overrides it.
-const DefaultRegistry = "https://raw.githubusercontent.com/elegant-atomics/gtme-bindings/main/index.json"
+const DefaultRegistry = "https://raw.githubusercontent.com/gtme-run/gtme-bindings/main/index.json"
 
 // RegistryURL is the index the verbs read.
 func RegistryURL() string {

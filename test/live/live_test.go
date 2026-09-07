@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/adapters/harvest"
-	"github.com/elegant-atomics/gtme/internal/adapters/instantly"
-	"github.com/elegant-atomics/gtme/internal/ai"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters/harvest"
+	"github.com/gtme-run/gtme/internal/adapters/instantly"
+	"github.com/gtme-run/gtme/internal/ai"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 func requireEnv(t *testing.T, name string) string {

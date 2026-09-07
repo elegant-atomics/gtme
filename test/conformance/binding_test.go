@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/adapters/adaptertest"
-	_ "github.com/elegant-atomics/gtme/internal/adapters/all"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/protocol"
-	"github.com/elegant-atomics/gtme/internal/registry"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters/adaptertest"
+	_ "github.com/gtme-run/gtme/internal/adapters/all"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/registry"
 )
 
 // loadShipped loads one embedded binding and its fixtures.

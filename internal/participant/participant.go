@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters"
 )
 
 // Field is one declared output a participant answers.

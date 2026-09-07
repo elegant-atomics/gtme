@@ -28,7 +28,7 @@ gtme run . --simulate          # $0: the receipt in receipt.txt, from fixtures
 Without a checkout — the release archive holds the same folders:
 
 ```sh
-curl -fsSL https://github.com/elegant-atomics/gtme/archive/refs/heads/main.tar.gz \
+curl -fsSL https://github.com/gtme-run/gtme/archive/refs/heads/main.tar.gz \
   | tar xz --strip-components=2 gtme-main/bundles/email-waterfall
 cd email-waterfall && gtme run . --simulate
 ```

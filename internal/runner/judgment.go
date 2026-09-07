@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/ai"
-	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/ai"
+	"github.com/gtme-run/gtme/internal/planner"
 )
 
 // signatureLen is the hex prefix length of a signature or input hash — the

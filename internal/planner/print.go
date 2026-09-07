@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/pipeline"
 )
 
 // Print writes the resolved plan: steps, projections, cache windows and known

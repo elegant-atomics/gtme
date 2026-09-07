@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/pipeline"
 )
 
 // Plan visualization (SPEC §7, ADR-051). Viz renders the resolved plan as a

@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // Engine names (SPEC §2). "fixture" is test-only and selected by environment,

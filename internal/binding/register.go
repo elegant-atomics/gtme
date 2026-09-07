@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/spec"
 )
 
 // builtinBindings are the embedded bindings registered as built-in adapters.

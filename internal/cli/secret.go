@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/secrets"
+	"github.com/gtme-run/gtme/internal/secrets"
 	"golang.org/x/term"
 )
 

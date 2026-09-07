@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/adapters"
 )
 
 // ContractProblem is one failed check, worded for the operator.

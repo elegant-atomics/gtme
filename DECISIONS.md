@@ -1417,7 +1417,7 @@ Predates the ADR log above; recorded per SPEC.md §12. Newest last.
 ### 2026-08-12 — Module path
 
 **Q:** What Go module path?
-**Choice:** `github.com/elegant-atomics/gtme`.
+**Choice:** `github.com/gtme-run/gtme`.
 **Why:** Matches the repo owner's GitHub account. Nothing outside `go.mod`,
 imports, and the `make build` ldflags depends on it; rename with a single
 `gofmt -r`-style sweep if the repo lands elsewhere.
@@ -1912,7 +1912,7 @@ provisional.
 decided by the human. Because the repo is pre-public with zero users, the
 rename is total and shim-free: binary `gtme`, home `~/.gtme`, env prefix
 `GTME_`, schema `$id` host `gtme.spec`, module path
-`github.com/elegant-atomics/gtme`, and every command in every document,
+`github.com/gtme-run/gtme`, and every command in every document,
 historical entries included (pre-publication, the tool effectively always
 had this name). One exception preserved: `gtm-campaign-zero-*` strings
 name real external Instantly campaigns and keep their historical
@@ -2744,6 +2744,31 @@ that shift is a stated property of the design, not a side effect.
 §10a (cost declaration + `per: request` guidance); §11 milestone M23.
 `spec/binding-schema.json` (`amount_usd` anyOf) and `spec/ledger.sql`
 ride the build, machine-compared as always.
+
+### 2026-09-06 — The repo moves to `github.com/gtme-run/gtme`; the module path follows
+
+**Question:** The four public repos (the binary, the bindings registry,
+the site, the Homebrew tap) sat under the agency's GitHub org. The
+handle `gtme-run` was claimed the same day the domain was. Move before
+the announce, or keep the org as a commitment?
+**Choice:** Move all four to `gtme-run` now, and rewrite the Go module
+path to `github.com/gtme-run/gtme` in the same change: every import,
+`go.mod`, the registry default (`internal/adapterinstall/index.go`), the
+release and install lines in README.md, START.md and `bundles/`, the
+tap's formula and bump script, the registry index's `url`, and the site.
+Old URLs keep working through GitHub's repository redirects, releases
+included; the old module path is left to the module proxy's cache and is
+not maintained. Attribution moves to where a reader looks: the README,
+the LICENSE, the site footer.
+**Why:** A module path is identity, and a rename after the announce
+breaks every `go install` line and import in the world. Before it, with
+every package `internal/` and no importer, the same rename is a sed and a
+tag — this week is the only cheap moment, and the tool's name, address
+(`gtme.run`) and handle (`gtme-run`) now match on every install line:
+`brew install gtme-run/tap/gtme`, `go install
+github.com/gtme-run/gtme/cmd/gtme@latest`. Spec-invisible: no observable
+behaviour changes; the default registry URL is a constant the environment
+already overrides (`GTME_REGISTRY`).
 
 ### 2026-09-06 — Pattern bundles: five patterns frozen under `bundles/`, and what sits beside a manifest
 

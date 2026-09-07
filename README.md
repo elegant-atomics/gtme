@@ -171,12 +171,12 @@ you already paid for — at zero vendor spend.
 ## Install
 
 ```sh
-brew install elegant-atomics/tap/gtme     # macOS and Linux, arm64 and amd64
+brew install gtme-run/tap/gtme     # macOS and Linux, arm64 and amd64
 ```
 
-The [tap](https://github.com/elegant-atomics/homebrew-tap) installs the
+The [tap](https://github.com/gtme-run/homebrew-tap) installs the
 prebuilt binary from the [releases
-page](https://github.com/elegant-atomics/gtme/releases), verified against
+page](https://github.com/gtme-run/gtme/releases), verified against
 the `checksums.txt` published beside it; without Homebrew, do the same by
 hand — untar, put `gtme` on your PATH, `gtme init`. Building from source
 is `git clone` + `./install.sh` (Go 1.24+), which also installs the
@@ -280,7 +280,7 @@ it; each README says what its receipt shows and which rung comes next.
 ## Get started
 
 ```sh
-git clone https://github.com/elegant-atomics/gtme && cd gtme
+git clone https://github.com/gtme-run/gtme && cd gtme
 ./install.sh        # builds gtme, installs it to ~/.local/bin, runs gtme init
 ```
 

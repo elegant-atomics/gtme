@@ -24,7 +24,7 @@ esac
 echo "building gtme $VERSION"
 mkdir -p "$BIN_DIR"
 ( cd "$REPO_DIR" && go build \
-    -ldflags "-X github.com/elegant-atomics/gtme/internal/cli.Version=$VERSION" \
+    -ldflags "-X github.com/gtme-run/gtme/internal/cli.Version=$VERSION" \
     -o "$BIN_DIR/gtme" ./cmd/gtme )
 
 # Install the external adapters that ship with the repo, so `mock-enrich-py`

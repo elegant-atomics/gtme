@@ -29,7 +29,7 @@ jobs:
           for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
             GOOS="${target%/*}" GOARCH="${target#*/}" \
               go build -trimpath \
-                -ldflags "-X github.com/elegant-atomics/gtme/internal/cli.Version=${VERSION}" \
+                -ldflags "-X github.com/gtme-run/gtme/internal/cli.Version=${VERSION}" \
                 -o "dist/gtme" ./cmd/gtme
             tar -czf "dist/gtme_${VERSION}_${target%/*}_${target#*/}.tar.gz" -C dist gtme
             rm dist/gtme

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/binding"
 )
 
 // bindingsDoc is the shape `gtme help --bindings` prints (SPEC §8, ADR-041):

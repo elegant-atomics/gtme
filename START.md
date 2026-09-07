@@ -9,24 +9,24 @@ spent until a door says so, in plain words, right before the command.
 is the whole instruction set; `gtme help --agent` is the machine-readable
 surface when a step needs more. Read the rules at the bottom before the
 first command. (Until the site is up, the same file is
-`https://raw.githubusercontent.com/elegant-atomics/gtme/main/START.md`.)
+`https://raw.githubusercontent.com/gtme-run/gtme/main/START.md`.)
 
 ## Install
 
 macOS or Linux, arm64 or amd64. Pick one:
 
 ```sh
-brew install elegant-atomics/tap/gtme     # a prebuilt, checksummed binary
+brew install gtme-run/tap/gtme     # a prebuilt, checksummed binary
 ```
 
 ```sh
 # or: the release tarball — verify against checksums.txt, untar, put gtme on your PATH
-# https://github.com/elegant-atomics/gtme/releases/latest
+# https://github.com/gtme-run/gtme/releases/latest
 ```
 
 ```sh
 # or: from source (Go 1.24+); also installs the repo's example adapters
-git clone https://github.com/elegant-atomics/gtme && cd gtme && ./install.sh
+git clone https://github.com/gtme-run/gtme && cd gtme && ./install.sh
 ```
 
 Then:
@@ -61,7 +61,7 @@ persisted.
 
 ```sh
 mkdir -p gtme-start && cd gtme-start
-curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/demo.yaml
+curl -fsSLO https://raw.githubusercontent.com/gtme-run/gtme/main/examples/demo.yaml
 gtme run demo.yaml --simulate
 ```
 
@@ -81,8 +81,8 @@ enrichment at a stated pretend price of $0.01 each (its values say
 `demo/enrich`), a SQL filter, and a CSV delivery to a file beside it.
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/cache.yaml
-curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/contacts.csv
+curl -fsSLO https://raw.githubusercontent.com/gtme-run/gtme/main/examples/cache.yaml
+curl -fsSLO https://raw.githubusercontent.com/gtme-run/gtme/main/examples/contacts.csv
 gtme run cache.yaml            # 3 scored at $0.01 each, 1 kept, out.csv written
 gtme run cache.yaml            # again: 3 cached, $0.0300 avoided, 0 delivered
 ```
@@ -121,7 +121,7 @@ file, never in a shell history line.
 
 ```sh
 gtme secret set ANTHROPIC_API_KEY     # prompts, no echo — the human types it
-curl -fsSLO https://raw.githubusercontent.com/elegant-atomics/gtme/main/examples/my-csv.yaml
+curl -fsSLO https://raw.githubusercontent.com/gtme-run/gtme/main/examples/my-csv.yaml
 ```
 
 Edit `my-csv.yaml`: set `path:` to the CSV, and under `columns:` map
@@ -230,7 +230,7 @@ the receipt shows and which rung comes next.
 | `posts-to-engagers` | people → their posts → who reacted, via two traverses |
 
 ```sh
-curl -fsSL https://github.com/elegant-atomics/gtme/archive/refs/heads/main.tar.gz \
+curl -fsSL https://github.com/gtme-run/gtme/archive/refs/heads/main.tar.gz \
   | tar xz --strip-components=2 gtme-main/bundles/email-waterfall
 cd email-waterfall
 gtme run . --simulate         # $0: hashes verified, served from the fixtures inside

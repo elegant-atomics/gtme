@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // cmdInit creates ~/.gtme and the ledger, applying migrations. It is safe to run

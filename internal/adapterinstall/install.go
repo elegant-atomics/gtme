@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/secrets"
+	"github.com/gtme-run/gtme/internal/secrets"
 )
 
 // Ref is one parsed binding address:

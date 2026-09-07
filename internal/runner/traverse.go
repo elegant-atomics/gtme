@@ -16,10 +16,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/planner"
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // applyTraverseRecord ingests one child RECORD a traverse session emitted

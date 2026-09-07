@@ -3301,7 +3301,7 @@ before first publication: `gtm` collides with existing tools. Renamed
 wholesale (pre-public, zero users, no compatibility shims): the binary
 (§2), the env prefix (`GTME_LEDGER`, `GTME_CONCURRENCY`, `GTME_AI_*`,
 …), the home directory (`~/.gtme`), the schema `$id` host, and the
-module path (`github.com/elegant-atomics/gtme`). Historical document text
+module path (`github.com/gtme-run/gtme`). Historical document text
 was renamed too — this changelog's earlier entries read as if the tool
 was always called gtme, which pre-publication it effectively was. The
 one deliberate exception: `gtm-campaign-zero-*` in VALIDATION.md names

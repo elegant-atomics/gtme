@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 var gtmBin string

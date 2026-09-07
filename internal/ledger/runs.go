@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/ulid"
+	"github.com/gtme-run/gtme/internal/ulid"
 )
 
 // Run statuses. Pending (ADR-038) is a run that ended with a step in

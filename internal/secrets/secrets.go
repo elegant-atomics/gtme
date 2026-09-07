@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/ledger"
 )
 
 // Path returns the secrets file path.

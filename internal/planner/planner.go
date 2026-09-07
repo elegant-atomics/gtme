@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
-	"github.com/elegant-atomics/gtme/internal/registry"
-	"github.com/elegant-atomics/gtme/internal/secrets"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/registry"
+	"github.com/gtme-run/gtme/internal/secrets"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 

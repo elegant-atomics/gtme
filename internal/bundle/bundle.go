@@ -17,11 +17,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/binding"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
-	"github.com/elegant-atomics/gtme/internal/planner"
-	"github.com/elegant-atomics/gtme/spec"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/binding"
+	"github.com/gtme-run/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/planner"
+	"github.com/gtme-run/gtme/spec"
 )
 
 // FormatVersion is the bundle layout version (spec/bundle-manifest.json).

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/identity"
 )
 
 // TestGroupMembershipDerivation: current membership is the newest

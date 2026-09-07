@@ -9,8 +9,8 @@ package runner
 import (
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/planner"
 )
 
 func TestCanAskOnlyWhenThereIsSomeoneToAsk(t *testing.T) {

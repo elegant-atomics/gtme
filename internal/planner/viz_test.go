@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/pipeline"
 )
 
 // vizPlan is a plan exercising every role the vocabulary names (ADR-051).

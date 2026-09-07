@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/adapters"
-	"github.com/elegant-atomics/gtme/internal/identity"
-	"github.com/elegant-atomics/gtme/internal/ledger"
-	"github.com/elegant-atomics/gtme/internal/pipeline"
-	"github.com/elegant-atomics/gtme/internal/planner"
-	"github.com/elegant-atomics/gtme/internal/protocol"
+	"github.com/gtme-run/gtme/internal/adapters"
+	"github.com/gtme-run/gtme/internal/identity"
+	"github.com/gtme-run/gtme/internal/ledger"
+	"github.com/gtme-run/gtme/internal/pipeline"
+	"github.com/gtme-run/gtme/internal/planner"
+	"github.com/gtme-run/gtme/internal/protocol"
 )
 
 // item is one record's trip through one step.

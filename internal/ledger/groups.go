@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/ulid"
+	"github.com/gtme-run/gtme/internal/ulid"
 )
 
 // Group is one named association context.

@@ -9,7 +9,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/elegant-atomics/gtme/internal/ulid"
+	"github.com/gtme-run/gtme/internal/ulid"
 )
 
 // WritePayload retains one raw response. ttlDays 0 means no expiry — kept

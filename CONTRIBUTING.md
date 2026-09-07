@@ -103,7 +103,7 @@ Add expectations for your binding to `test/conformance/binding_test.go`
       templates it into the call
 
 **6. Share it (optional).** Bindings worth sharing live in the registry:
-[github.com/elegant-atomics/gtme-bindings](https://github.com/elegant-atomics/gtme-bindings)
+[github.com/gtme-run/gtme-bindings](https://github.com/gtme-run/gtme-bindings)
 publishes the index `gtme adapters search` reads. A PR there adds your
 binding to the *verified* set (its CI runs your fixtures on every
 change) or lists your own repository as a *community* entry — either
