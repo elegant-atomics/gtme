@@ -178,9 +178,11 @@ The [tap](https://github.com/gtme-run/homebrew-tap) installs the
 prebuilt binary from the [releases
 page](https://github.com/gtme-run/gtme/releases), verified against
 the `checksums.txt` published beside it; without Homebrew, do the same by
-hand — untar, put `gtme` on your PATH, `gtme init`. Building from source
-is `git clone` + `./install.sh` (Go 1.24+), which also installs the
-repo's example external adapters so the README quickstart works offline.
+hand — untar, put `gtme` on your PATH, `gtme init`. With Go 1.24+, `go
+install github.com/gtme-run/gtme/cmd/gtme@latest` builds the tagged
+release straight from the module. Building from a checkout is `git clone`
++ `./install.sh`, which also installs the repo's example external
+adapters so the README quickstart works offline.
 Whichever way, **[START.md](START.md)** is the next page: four doors,
 each one pipeline file, each ending in a receipt.
 
