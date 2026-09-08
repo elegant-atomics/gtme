@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	// Built-in adapters register themselves; the CLI is what needs them present.
 	_ "github.com/gtme-run/gtme/internal/adapters/all"
@@ -130,8 +131,21 @@ func Run(ctx context.Context, env Env) int {
 	return ExitOK
 }
 
-// Version is the binary version, overridable at link time.
-var Version = "0.0.0-dev"
+// Version is the binary version: set at link time by the release build and
+// the Makefile, else read from the module's build info so that
+// `go install github.com/gtme-run/gtme/cmd/gtme@vX.Y.Z` reports vX.Y.Z
+// instead of a placeholder. A build with neither (a bare `go build` in a
+// checkout) stays 0.0.0-dev.
+var Version = versionFromBuildInfo("0.0.0-dev")
+
+func versionFromBuildInfo(fallback string) string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return fallback
+}
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `gtme — a CLI for GTM data pipelines

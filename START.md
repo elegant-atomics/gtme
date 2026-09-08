@@ -28,7 +28,12 @@ brew install gtme-run/tap/gtme     # a prebuilt, checksummed binary
 ```
 
 ```sh
-# or: from source (Go 1.24+); also installs the repo's example adapters
+# or: with Go 1.24+, straight from the module
+go install github.com/gtme-run/gtme/cmd/gtme@latest
+```
+
+```sh
+# or: from a checkout; also installs the repo's example adapters
 git clone https://github.com/gtme-run/gtme && cd gtme && ./install.sh
 ```
 
